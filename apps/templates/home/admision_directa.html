@@ -1,0 +1,87 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
+{% endblock stylesheets %}
+
+
+{% block content %}
+  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    <div class="container-fluid py-4">
+        {% if cargado: %}
+        <div class="card mb-4 alert alert-success" id="notif-carga">
+            <div class="row">
+                <div class="col-md-11">
+                    <h3>Paciente cargado con éxito</h3>
+                </div>
+                <div class="col-md-1 d-flex align-items-center justify-content-end">
+                    <div>
+                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        {% endif %}
+        <div class="row mb-4">
+            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="pills-paciente-tab" data-bs-toggle="pill" data-bs-target="#pills-paciente" type="button" role="tab" aria-controls="pills-paciente" aria-selected="true">Paciente</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="pills-examen-tab" data-bs-toggle="pill" data-bs-target="#pills-examen" type="button" role="tab" aria-controls="pills-examen-" aria-selected="false">Examen</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="pills-prest-tab" data-bs-toggle="pill" data-bs-target="#pills-prest" type="button" role="tab" aria-controls="pills-prest" aria-selected="false">Prestación</button>
+                </li>
+                <li class="nav-item" role="presentation" id="dni-item" style="pointer-events: none; margin-left: auto;">
+                    <span class="nav-link hidden" aria-selected="false" id="dni-value">hola</span>
+                </li>
+            </ul>
+              <div class="tab-content" id="pills-tabContent">
+                <div class="tab-pane fade show active" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
+                    {% include "includes/admision_templates/search_patient.html" %}
+                </div>
+                <div class="tab-pane fade" id="pills-examen" role="tabpanel" aria-labelledby="pills-examen-tab">
+                    {% include "includes/admision_templates/exam.html" %}
+                </div>
+                <div class="tab-pane fade" id="pills-prest" role="tabpanel" aria-labelledby="pills-prest-tab">
+                    {% include "includes/admision_templates/prestacion.html" %}
+                </div>
+                <div class="tab-pane fade" id="pills-Otros" role="tabpanel" aria-labelledby="pills-Otros-tab"></div>
+                <div class="tab-pane fade" id="pills-Anamn" role="tabpanel" aria-labelledby="pills-Anamn-tab">Datos Anamnesicos</div>
+                <div class="tab-pane fade" id="pills-Autoriz" role="tabpanel" aria-labelledby="pills-Autoriz-tab">Autorizaciones</div>
+              </div>
+        </div>
+      
+
+      
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <script src="{{ config.ASSETS_ROOT }}/js/admision.js"></script>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/scriptsCitas.js"></script> -->
+    
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.js'></script>
+    <!-- <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/interaction/main.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/daygrid/main.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/timegrid/main.min.js'></script> -->
+
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

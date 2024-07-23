@@ -1,0 +1,4 @@
+database: planetscale_db
+username: hig948c5thl6s4onwucj
+host: aws.connect.psdb.cloud
+password: pscale_pw_k50FNrDhyaYvGQAAjAdToZwTGULpaJ65GOgjJyjSssB

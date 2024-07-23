@@ -1,0 +1,105 @@
+<!-- modal -->
+<div class="modal fade custom-modal" id="modal_mod" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Modalidad</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_mod" method="POST" action="/agregar_mod">
+                    <input type="hidden" name="id_mod" id="id_mod">
+
+                    <div class="form-group row">
+                        
+                        <div class="col-md-8">
+                            <label for="Description_mod">Descripción</label>
+                            <input type="text" class="form-control" id="Description_mod" name="Description_mod" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="ext_code_mod">Codigo Ex</label>
+                            <input type="text" class="form-control" id="ext_code_mod" name="ext_code_mod">
+                        </div>
+                        
+                    </div>
+
+                    <div class="form-group">
+                        <input type="checkbox" id="IsMandatoryEquipmentChange" name="IsMandatoryEquipmentChange"><label for="IsMandatoryEquipmentChange">Cambio de equipo obligatorio</label><br>
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar codigo</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal" >Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Fin modal -->
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_mod">
+                        Buscar Modalidad
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_mod" name="search_mod">
+                </div>
+                        
+                <div class="col-md-3">
+                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-mod">
+                    
+                    <button type="button" id="b_nuevo_mod" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_mod">Nueva Modalidad</button>
+                </div>
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Modalidades</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" id="b_editar_mod" class="btn btn-secondary botones_mod" disabled patient-id="">Editar Modalidad</button>
+                    <button type="button" id="b_eliminar_mod" class="btn btn-secondary botones_mod delete_b" disabled patient-id="">Eliminar Modalidad</button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-mod">
+                <thead>
+                    <tr>
+                        <th>Descripcion</th>
+                        <th>Codigo</th>
+                        <th>Cambio de equipo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>

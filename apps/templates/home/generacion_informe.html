@@ -1,0 +1,104 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+<!-- Incluye la biblioteca TinyMCE -->
+<script src="ruta/a/tinymce.min.js"></script>
+
+  <main class="main-content position-relative border-radius-lg ">
+
+      <div class="row">
+        <div class="col-12">
+          <div class="mb-4">
+            <div class="card-header pb-0">
+                
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h2><!--Nombre del paciente--> (<!--AdmNumber-->)</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" id="b_predef" class="btn btn-primary botones_informe" onclick="ModalPredef()">Predefinidos</button>
+                        <button type="button" id="b_historia_clinica" class="btn btn-primary botones_informe">Historia Clinica</button>
+                        <button type="button" id="b_ver_imagenes" class="btn btn-primary botones_informe">Ver imágenes</button>
+                        <button type="button" id="b_guardar_reporte" class="btn btn-primary botones_informe">Guardar</button>
+                        <button type="button" id="b_firmar_reporte" class="btn btn-primary botones_informe" >Firmar</button>
+                        <button type="button" id="b_ver_pdf" class="btn btn-primary botones_informe" >Ver PDF</button>
+                        <button type="button" id="b_atras_report" class="btn btn-danger botones_informe" >Volver Atras</button>
+                    </div>
+                </div>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+       <!-- Secciones técnicas de examen, informe y conclusión -->
+        <div class="row">
+            <div class="col-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                <h5 class="card-title">Datos del examen</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <h6>Examen:</h6><br>
+                        <p><!--examen--></p>
+                    </div>
+                    <div class="row">
+                        <h6>Pregunta Clinica:</h6>
+                        <textarea class="form-control" id="text_pc" rows="4"><!--Pregunta clínica--></textarea>
+                    </div>
+                    
+                
+                </div>
+            </div>
+            </div>
+            <div class="col-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                <h5 class="card-title">Tecnicas de examen</h5>
+                </div>
+                <div class="card-body">
+                <textarea class="form-control" id="text_te" rows="8"><!--Tecnicas--></textarea>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                <h5 class="card-title">Informe</h5>
+                </div>
+                <div class="card-body">
+                <textarea class="form-control" id="text_inf" rows="8"><!--Informe--></textarea>
+                </div>
+            </div>
+            </div>
+
+            <div class="col-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                    <h5 class="card-title">Conclusión</h5>
+                    </div>
+                    <div class="card-body">
+                    <textarea class="form-control" id="text_conc" rows="8"><!--Conclusión--></textarea>
+                    </div>
+                </div>
+                </div>
+
+
+        </div>
+
+    </div>
+  </main>
+
+{% endblock content %}
+
+

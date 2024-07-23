@@ -1,0 +1,243 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    {% include "includes/navigation.html" %}
+
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_notas_ex" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Agregar notas</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/agregar_notas" id="Form_notas">
+                    <input type="hidden" name="id_order" id="id_np">
+                    <div class="form-group row">
+                        <div class="col-md-12">
+                            <label for="execution_notes">Notas</label>
+                            <textarea class="form-control" id="execution_notes" name="execution_notes" rows="5" required></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_notas">Guardar notas</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="removeModalBackdrop()">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+    
+<!-- card de notificacion -->
+    <div class="container-fluid py-4">
+        {% if cargado: %}
+        <div class="card mb-4 alert alert-success" id="notif-carga">
+            <div class="row">
+                <div class="col-md-11">
+                    <h3>Paciente cargado con éxito</h3>
+                </div>
+                <div class="col-md-1 d-flex align-items-center justify-content-end">
+                    <div>
+                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
+                    </div>
+                </div>
+            </div>
+        </div>        
+        {% endif %}
+<!-- fin card de notificacion -->
+
+<!-- card de busqueda -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4">
+            <div class="card-header pb-0">
+              <h6>Buscar Ordenes a ejecutar</h6>
+            </div>
+            
+            <div class="card-body px-0 pt-0 pb-2">
+                <form class="my-form" method="GET" action="/buscar_pacientes">
+                <input type="hidden" name="url" id="url" value="buscar_paciente.html">
+              <div class="container-fluid">
+                <div class="row datos-paciente">    
+                    <div class="col-md-5">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        Nombre
+                                    </label>
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="name" name="name">
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="surname" name="surname">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="documento">
+                                        DNI
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="documento" name="documento">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="s_modalidad">
+                                        Modalidad
+                                    </label>
+                                </div>
+                                <select id="s_modalidad" name="s_modalidad">
+
+                                  </select>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="buscar_mail">
+                                        Grupo de procedencia
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="buscar_mail" name="buscar_mail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="buscar_mail">
+                                    Accesion Number
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input class="form-control" id="buscar_acc" name="buscar_acc">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="fecha_nac">
+                                    Fecha
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="date" class='dp' id="fecha_nac" name="fecha_nac">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tarjeta_sanitaria">
+                                    Numero de admisión
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="buscar_adm" name="buscar_adm">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Id Paciente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="idP" name="idP">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        
+                        <input type="submit" value="Buscar" class="btn btn-primary" id="b_search"></form>
+                        
+                                              
+                    </div>             
+                </div>
+              
+            </div>
+           
+
+            </div>
+            
+          </div>
+        </div>
+      </div>
+<!-- FIN card de busqueda -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Resultados</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" id="b_ejecutar_orden" class="btn btn-secondary botones_sp" disabled patient-id="">Ejecutar Orden</button>
+                        <button type="button" id="b_cancelar_orden" class="btn btn-warning botones_sp" disabled patient-id="">Cancelar Orden</button>
+                        <button type="button" class="btn btn-primary botones_sp" data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex" disabled>Agregar notas</button>
+                        
+                        
+                    </div>
+                    
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla_ordenes">
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Nombre</th>
+                            <th>Apellido</th>
+                            <th>Examen</th>
+                            <th>Estado</th>
+                            <th>Maquina</th>
+                            <th>Admision</th>
+                            <th>Accesion N.</th>
+                            
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    <script src="{{ config.ASSETS_ROOT }}/js/ejecucion.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

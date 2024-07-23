@@ -1,0 +1,161 @@
+<!-- modal -->
+
+<div class="modal fade custom-modal" id="modal_mach" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+
+          <div class="modal-header">
+            <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Equipo</h1>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+          </div>
+
+          <div class="modal-body">
+            <form id="Form_mach" method="POST" action="/agregar_machine">
+                <input type="hidden" name="id_mach" id="id_mach">
+        
+                <div class="form-group row">
+                    <div class="col-md-8">
+                        <label for="Description_mach">Descripción</label>
+                        <input type="text" class="form-control" id="Description_mach" name="Description_mach" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="AETitle">AETitle</label>
+                        <input type="text" class="form-control" id="AETitle" name="AETitle">
+                    </div>
+                </div>
+
+                <div class="form-group row"> 
+                    <div class="col-md-5">
+                        <label for="s_sala">Sala</label><br>
+                        <select id="s_sala" name="s_sala" required>
+                        </select>
+                    </div>
+                    <div class="col-md-5">
+                        <label for="s_proc">Procedencia</label><br>
+                        <select id="s_proc" name="s_proc" required>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="s_moda">Mod</label><br>
+                        <select id="s_moda" name="s_moda" required>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group row"> 
+                    <div class="col-md-4">
+                        <label for="equip_brand">Marca</label><br>
+                        <input type="text" class="form-control" id="equip_brand" name="equip_brand">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="equip_model">Modelo</label><br>
+                        <input type="text" class="form-control" id="equip_model" name="equip_model">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="equip_sn">N serie</label><br>
+                        <input type="text" class="form-control" id="equip_sn" name="equip_sn">
+                    </div>
+                </div>
+
+                <div class="form-group row"> 
+                    <div class="col-md-6">
+                        <label for="equip_ip">IP</label><br>
+                        <input type="text" class="form-control" id="equip_ip" name="equip_ip">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="Ext_code_equip">Codigo Externo</label><br>
+                        <input type="text" class="form-control" id="Ext_code_equip" name="Ext_code_equip">
+                    </div>
+                </div>
+                <div class="form-group row"> 
+                    <div class="col-md-6">
+                    <input type="checkbox" id="IsAc_mach" name="IsAc_mach"><label for="IsAc_mach">Activo</label>
+                </div>
+                </div>
+            
+        </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Equipo</button>
+          </form>
+            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+        </div>
+      
+        
+    </div>
+  </div>
+<!-- Fin modal -->
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_mach">
+                        Buscar Equipo
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_mach" name="search_mach">
+                </div>
+                        
+                <div class="col-md-3">
+                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-mach">
+                    
+                    <button type="button" id="b_nuevo_mach" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_mach">Nuevo Equipo</button>
+                </div>
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Eqipos</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" id="b_editar_mach" class="btn btn-secondary botones_mach" disabled patient-id="">Editar Equipo</button>
+                    <button type="button" id="b_eliminar_mach" class="btn btn-secondary botones_mach delete_b" disabled patient-id="">Eliminar Equipo</button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-mach">
+                <thead>
+                    <tr>
+                        <th>Descripción</th>
+                        <th>AETitle</th>
+                        <th>Codigo Externo</th>
+                        <th>Sala</th>
+                        <th>Modalidad</th>
+                        <th>Activo</th>
+                        <th>Procedencia</th>
+                        <th>IP</th>
+                        <th>Marca</th>
+                        <th>Modelo</th>
+                        <th>N.Serie</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>

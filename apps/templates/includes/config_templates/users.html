@@ -1,0 +1,74 @@
+<div class="row">
+    <div id="modal_content" class="mt-4" data-id=""></div>
+  </div>
+  
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_group_origins">
+                        Buscar usuario
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="label_origins" name="group_origins">
+                </div>
+                        
+                <div class="col-md-3">
+                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-origen">
+                    
+                    <button type="button" id="b_nuevo_origen" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_or" onclick="OpenModal('/modal_user.html')">Nuevo usuario</button>
+                </div>
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Lista de usuarios</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" id="b_editar_user" class="btn btn-secondary botones_sp" disabled patient-id="" onclick="OpenModal('modal_users')">Editar Usuario</button>
+                    <button type="button" id="b_eliminar_user" class="btn btn-secondary botones_sp delete_b" disabled patient-id="">Eliminar usuario</button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla_usuarios">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Tipo</th>
+                        <th>Nombre</th>
+                        <th>Apellido</th>
+                        <th>DNI</th>    
+                        <th>Activado</th>                    
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>
+    <script src="{{ config.ASSETS_ROOT }}/js/users.js"></script>

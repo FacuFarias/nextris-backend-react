@@ -1,0 +1,309 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+
+
+  <!-- Modal -->
+  <div class="modal fade custom-modal" id="modal_np" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+
+          <div class="modal-header">
+            <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Paciente</h1>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+          </div>
+
+          <div class="modal-body">
+            <form method="POST" action="/agregar_paciente" id="Form_ag">
+              <input type="hidden" name="id_np" id="id_np">
+              <div class="form-group row">
+                <div class="col-md-6">
+                    <label for="p_name">Nombre</label>
+                    <input type="text" class="form-control" id="p_name" name="p_name" required>
+                </div>
+                <div class="col-md-6">
+                    <label for="p_surname">Apellido</label>
+                    <input type="text" class="form-control" id="p_surname" name="p_surname" required>
+                </div>
+                
+              </div>
+
+              <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="p_dni">DNI</label>
+                    <input type="number" class="form-control" id="p_dni" name="p_dni" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="especialidad">Sexo</label><br>
+                    <select id="sex" name="sex">
+                        <option value="M">Masculino </option>
+                        <option value="F">Femenino</option>
+                        <option value="I">Indefinido</option>
+                        
+                  </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="fecha_nacimiento">Fecha de nacimiento</label><br>
+                <input type="date" id="fecha_nacimiento" name="fecha_nacimiento">
+                </div>
+            </div>
+
+            <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="nvademecum">Telefono</label>
+                    <input type="text" class="form-control" id="telefono" name="telefono">
+                </div>
+                <div class="col-md-8">
+                    <label for="nvademecum">Mail</label>
+                    <input type="email" class="form-control" id="mail" name="mail">
+                </div> 
+            </div>
+
+            <div class="form-group row">
+                <div class="col-md-6">
+                    <label for="p_healthcard">Tarjeta Sanitaria</label>
+                    <input type="text" class="form-control" id="p_healthcard" name="p_healthcard">
+                </div>
+                <div class="col-md-6">
+                    <label for="p_healthcard">Identificador de paciente</label>
+                    <input type="text" class="form-control" id="p_id" name="p_id">
+                </div>
+            
+            </div>
+            <div class="form-group row">
+                <div class="col-md-6">
+                    <input type="checkbox" id="IsAn" name="IsAn"><label for="IsAn">Anónimo</label>  <br>
+                    <input type="checkbox" id="IsMerged" name="IsMerged"><label for="IsMerged">Fusionado</label>  
+                </div>            
+            </div>
+
+
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn bg-gradient-success save-changes">Guardar paciente</button>
+          </form>
+            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+        </div>
+      
+        
+    </div>
+  </div>
+
+  <!-- FIN MODAL -->
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    {% include "includes/navigation.html" %}
+
+    
+<!-- card de notificacion -->
+    <div class="container-fluid py-4">
+        {% if cargado: %}
+        <div class="card mb-4 alert alert-success" id="notif-carga">
+            <div class="row">
+                <div class="col-md-11">
+                    <h3>Paciente cargado con éxito</h3>
+                </div>
+                <div class="col-md-1 d-flex align-items-center justify-content-end">
+                    <div>
+                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
+                    </div>
+                </div>
+            </div>
+        </div>        
+        {% endif %}
+<!-- fin card de notificacion -->
+
+<!-- card de busqueda -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4">
+            <div class="card-header pb-0">
+              <h6>Buscar Paciente</h6>
+            </div>
+            
+            <div class="card-body px-0 pt-0 pb-2">
+                <form class="my-form" method="GET" action="/buscar_pacientes">
+                <input type="hidden" name="url" id="url" value="buscar_paciente.html">
+              <div class="container-fluid">
+                <div class="row datos-paciente">    
+                    <div class="col-md-5">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        Nombre
+                                    </label>
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="name" name="name">
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="surname" name="surname">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="documento">
+                                        DNI
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="documento" name="documento">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="Telefono">
+                                        N Telefono
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="Telefono" name="Telefono">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="buscar_mail">
+                                        Mail
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="buscar_mail" name="buscar_mail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="sex">
+                                    Sexo
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <select id="sex" name="sex">
+                                    <option value="M">Masculino </option>
+                                    <option value="F">Femenino</option>
+                                    <option value="I">Indefinido</option>
+                                    <option value="D">Desconocido</option>
+                                  </select>
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="fecha_nac">
+                                    Fecha
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="date" class='dp' id="fecha_nac" name="fecha_nac">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tarjeta_sanitaria">
+                                    Tarjeta Sanitaria
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="tarjeta_sanitaria" name="tarjeta_sanitaria">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Id Paciente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="idP" name="idP">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        
+                        <input type="submit" value="Buscar" class="btn btn-primary" id="b_search"></form>
+                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" id="asd" data-bs-target="#modal_np">Nuevo</button><br>
+                                              
+                    </div>             
+                </div>
+              
+            </div>
+           
+
+            </div>
+            
+          </div>
+        </div>
+      </div>
+<!-- FIN card de busqueda -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Resultados</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" id="editar-paciente" class="btn btn-secondary botones_sp" disabled patient-id="">Editar</button>
+                        <button type="button" id="eliminar-paciente" class="btn btn-secondary botones_sp delete_b" disabled patient-id="">Eliminar</button>
+                        <button type="button" class="btn btn-secondary botones_sp" disabled>Documentos adjuntos</button>
+                    </div>
+                    
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla-pacientes">
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Apellido</th>
+                            <th>DNI</th>
+                            <th>Sexo</th>
+                            <th>Fecha de nacimiento</th>
+                            <th>Telefono</th>
+                            <th>Email</th>
+                            <th>Tarjeta Sanitaria</th>
+                            
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/pacientes.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

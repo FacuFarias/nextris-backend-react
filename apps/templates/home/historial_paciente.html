@@ -1,0 +1,367 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+
+
+  <!-- Modal -->
+  <div class="modal fade custom-modal" id="modal_np" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+
+          <div class="modal-header">
+            <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Paciente</h1>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+          </div>
+
+          <div class="modal-body">
+            <form method="POST" action="/agregar_paciente">
+              <input type="hidden" name="id" id="id">
+              <div class="form-group">
+                <label for="nombrePaciente">Nombre del Paciente</label>
+                <input type="text" class="form-control" id="nombrePaciente" name="nombrePaciente" required>
+              </div>
+
+              <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="nombreMedico">DNI</label>
+                    <input type="number" class="form-control" id="dni" name="dni" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="especialidad">Sexo</label><br>
+                    <select id="sex" name="sex">
+                        <option value="male">male </option>
+                        <option value="female">female</option>
+                        <option value="unknown">unknown</option>
+                        
+                  </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="boxAsignado">Fecha de nacimiento</label><br>
+                <input type="date" id="fecha_nacimiento" name="fecha_nacimiento">
+                </div>
+            </div>
+              
+
+              <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="nvademecum">Numero Vademecum</label>
+                    <input type="number" class="form-control" id="nvademecum" name="nvademecum">
+                </div>
+
+                <div class="col-md-4">
+                    <label for="nvademecum">Numero Nosologico</label>
+                    <input type="number" class="form-control" id="nosologico" name="nosologico">
+                </div>
+
+                <div class="col-md-4">
+                    <label for="nvademecum">Tarjeta Sanitaria</label>
+                    <input type="number" class="form-control" id="tsan" name="tsan">
+                </div>
+                
+              </div>
+
+
+              <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="nvademecum">Telefono</label>
+                    <input type="text" class="form-control" id="telefono" name="telefono">
+                </div>
+                <div class="col-md-8">
+                    <label for="nvademecum">Mail</label>
+                    <input type="email" class="form-control" id="mail" name="mail">
+                </div> 
+              </div>
+
+              <div class="form-group">
+                <label for="nvademecum">Direccion</label>
+                <input type="email" class="form-control" id="direccion" name="direccion">
+              </div>
+
+
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn bg-gradient-success save-changes">Guardar paciente</button>
+          </form>
+            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+        </div>
+      
+        
+    </div>
+  </div>
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    
+
+    
+
+    <div class="container-fluid py-4">
+        {% if cargado: %}
+        <div class="card mb-4 alert alert-success" id="notif-carga">
+            <div class="row">
+                <div class="col-md-11">
+                    <h3>Paciente cargado con éxito</h3>
+                </div>
+                <div class="col-md-1 d-flex align-items-center justify-content-end">
+                    <div>
+                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+        
+        {% endif %}
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4">
+            <div class="card-header pb-0">
+              <h6>Buscar Paciente</h6>
+            </div>
+            
+            <div class="card-body px-0 pt-0 pb-2">
+              <form class="my-form" method="GET" action="/buscar_pacientes">
+              <div class="container-fluid">
+                <input type="hidden" name="url" id="url" value="historial_paciente.html">
+                <div class="row datos-paciente">
+                    
+                    
+                    <div class="col-md-5">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        Nombre
+                                    </label>
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="name" name="name">
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="surname" name="surname">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        DNI
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="dni" name="dni">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        N Vademecum
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="vademecum" name="vademecum">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        N Nosológico
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="nosologico" name="nosologico">
+                                </div>
+                            </div>
+                                
+                            
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="sex">
+                                    Sexo
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <select id="sex" name="sex">
+                                    <option value="Masc">Masculino </option>
+                                    <option value="Fem">Femenino</option>
+                                    <option value="Indef">Indefinido</option>
+                                    <option value="Desc">Desconocido</option>
+                                  </select>
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="date">
+                                    Fecha
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="date" id="fecha_nacimiento" name="fecha_nacimiento">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Tarjeta Sanitaria
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="tsan" name="tsan">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Id Paciente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="idP" name="idP">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        
+                        <input type="submit" value="Buscar" class="btn btn-primary" id="boton-buscar-paciente">
+                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" id="asd" data-bs-target="#modal_np">Nuevo</button><br>
+                        
+                        
+                    </div>
+                    
+                </div>
+        
+        
+                <div class="row">
+                    <div class="col-md-12">
+                        <table>
+        
+                        </table>
+                    </div>
+                </div>
+              
+            </div>
+           
+
+            </div></form>
+            
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Resultados</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" id="historial-x-id" class="btn btn-secondary botones" disabled patient-id="">Historial del paciente</button>
+                    </div>
+                    
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-historial px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla-paciente">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Nombre</th>
+                            <th>Sexo</th>
+                            <th>Fecha de nacimiento</th>
+                            <th>DNI</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for paciente in pacientes %}
+                            <tr class="patient-row">
+                                <td>{{ paciente['ID'] }}</td>
+                                <td>{{ paciente['Nombre'] }}</td>
+                                <td>{{ paciente['Sexo'] }}</td>
+                                <td>{{ paciente['Fecha de nacimiento'] }}</td>
+                                <td>{{ paciente['DNI'] }}</td>
+                            </tr>
+                        
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Historial del paciente</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" id="editar-paciente" class="btn btn-secondary botones" disabled patient-id="">Editar</button>
+                        <button type="button" id="eliminar-paciente" class="btn btn-secondary botones" disabled patient-id="">Eliminar</button>
+                        <button type="button" class="btn btn-secondary botones" disabled>Documentos adjuntos</button>
+                    </div>
+                    
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-historial px-0 pt-0 pb-2">
+                <table class="table tabla-paciente" id="tabla-reportes">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Datos del Informe</th>
+                            <th>Descripcion</th>
+                            <th>Estado</th>
+                            <th>Procedencia</th>
+                            <th>Unidad Operativa</th>
+                            <th>N. Admision</th>
+                            <th>N. Admision externa</th>
+                            <th>N de archivo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

@@ -1,0 +1,621 @@
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US01', 'ECODOPPLER ARTERIAL DE MIEMBROS INFERIORES', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER ARTERIAL DE MIEMBROS INFERIORES', 'Lado derecho:
+Arteria femoral común y superficial, y arteria poplítea de calibre conservado, con flujos trifásicos
+de velocidades conservadas.
+Arteria tibial posterior y pedia de calibre conservado, con flujos trifásicos de velocidades
+conservadas.
+Lado izquierdo:
+Arteria femoral común y superficial, y arteria poplítea de calibre conservado, con flujos trifásicos
+de velocidades conservadas.
+Arteria tibial posterior y pedia de calibre conservado, con flujos trifásicos de velocidades
+Atte.', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US02', 'ECODOPPLER ARTERIAL DE MIEMBROS SUPERIORES', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER ARTERIAL DE MIEMBROS SUPERIORES', 'Lado derecho: 
+Arteria subclavia, axilar y humeral de calibre y flujos trifásicos de velocidades conservadas. 
+Arterias radiales y cubitales de calibre y flujos trifásicos de velocidades conservadas. 
+Lado izquierdo: 
+Arteria subclavia, axilar y humeral de calibre y flujos trifásicos de velocidades conservadas. 
+Arterias radiales y cubitales de calibre y flujos trifásicos de velocidades conservadas. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US03', 'ECODOPPLER ARTERIO-VENOSO DE MIEMBROS INFERIORES', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER ARTERIO-VENOSO DE MIEMBROS INFERIORES', 'DOPPLER ARTERIAL: 
+Ambos lados: 
+Arteria femoral común y superficial, y arteria poplítea de calibre conservado, con flujos trifásicos 
+de velocidades conservadas. 
+Arteria tibial posterior y pedia de calibre conservado, con flujos trifásicos de velocidades 
+conservadas. 
+DOPPLER VENOSO: 
+Ambos lados: 
+Sistema profundo: 
+Vena femoral común y superficial de calibre y flujos conservados sin signos de trombosis. 
+Vena poplítea y venas gemelares de calibre y flujos conservados sin signos de trombosis. 
+Sistema superficial: 
+Cayado y vena safena magna de calibre y flujos conservados sin signos de trombosis. 
+Vena safena parva de calibre y flujos conservados sin signos de trombosis. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US04', 'DOPPLER MAMARIO ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'DOPPLER MAMARIO ', 'Se evalúan ambas mamas con transductor de 7,5 Mhz con evaluación Doppler color y 
+audioespectral. 
+Presentan piel planos superficiales y profundos libres. 
+Patrón fibroglandular con moderado infiltrado graso. 
+No se observan formaciones nodulares sólidas ni colecciones líquidas netas. 
+Conductos galactóforos de calibre conservado. 
+Axilas sin adenopatías. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US05', 'DOPPLER DE TIROIDEA ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'DOPPLER DE TIROIDEA ', 'Estudio realizado con transductor de alta resolución de región tiroidea, con evaluación Doppler 
+color y audioespectral, observando: 
+Glándula tiroidea de tamaño y forma conservados, parénquima homogéneo sin focos vasculares de 
+jerarquía al examen Doppler color. 
+Lóbulo derecho mide aprox.: 
+Lóbulo izquierdo mide aprox.: 
+Istmo de espesor y ecoestructura conservada. 
+No se observan adenopatías latero-cervicales al momento del examen. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US06', 'ECODOPPLER ARTERIO-VENOSO DE FISTULA ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER ARTERIO-VENOSO DE FISTULA ', 'Se evalúa fístula de miembro superior izquierdo observando: 
+Doppler venoso: 
+Sistema venoso profundo: 
+Venas radiales y cubitales de calibre y flujos conservados sin signos de trombosis. 
+Vena humeral, axilar y subclavia de calibre y flujos conservados sin signos de trombosis. 
+Sistema venoso superficial: 
+Vena basílica de calibre y flujos conservados sin signos de trombosis. 
+Vena cefálica: En su proyección se observa fístula arterio-venosa de paredes lisas y regulares sin 
+signos trombosis, que alcanza un calibre máximo de 10 mm, con flujos turbulentos de velocidades 
+conservadas. 
+Doppler arterial: 
+Arteria radial y cubital de calibre normal, con flujos trifásicos de velocidades conservadas. 
+Arteria humeral, axilar y subclavia de calibre normal, con flujos trifásicos de velocidades 
+conservadas. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US07', 'DOPPLER TRANSVAGINAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'DOPPLER TRANSVAGINAL ', 'Se realiza estudio transvaginal con evaluación Doppler color y audioespectral, observando: 
+Útero en AVF de tamaño y forma conservados. 
+Mide aprox. 
+Endometrio ecogénico de 5 mm de espesor. No se observan focos vasculares de jerarquía. 
+Miometrio homogéneo. 
+Ovarios en situación habitual, de tamaño y forma conservados, sin lesiones significativas en su 
+proyección ni focos vasculares de jerarquía. 
+Fondo de saco de Douglas libre. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US08', 'ECODOPPLER VENOSO DE MIEMBROS INFERIORES', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER VENOSO DE MIEMBROS INFERIORES', 'PARA INSUFICIENCIA VENOSA 
+LADO DERECHO: 
+Sistema profundo: 
+Vena femoral común y superficial de calibre y flujos conservados, sin signos de trombosis, ni de 
+insuficiencia ante maniobras de Valsalva. 
+Vena poplítea y gemelares de calibre y flujos conservados, sin signos de trombosis ni de 
+insuficiencia ante compresión distal en la maniobra de “aguas arriba”. 
+Sistema superficial: 
+Cayado y vena safena magna de calibre y flujos conservados sin signos de trombosis ni de 
+insuficiencia ante maniobras de Valsalva. No se observan venas perforantes dilatadas. 
+Vena safena parva de calibre y flujos conservados sin signos de trombosis. 
+LADO IZQUIERDO: 
+Sistema profundo: 
+Vena femoral común y superficial de calibre y flujos conservados, sin signos de trombosis, ni de 
+insuficiencia ante maniobras de Valsalva. 
+Vena poplítea y gemelares de calibre y flujos conservados, sin signos de trombosis ni de 
+insuficiencia ante compresión distal en la maniobra de “aguas arriba”. 
+Sistema superficial: 
+Cayado y vena safena magna de calibre y flujos conservados sin signos de trombosis ni de 
+insuficiencia ante maniobras de Valsalva. No se observan venas perforantes dilatadas. 
+Vena safena parva de calibre y flujos conservados sin signos de trombosis. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US09', 'ECOGRAFIA ABDOMINAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA ABDOMINAL ', 'HIGADO: Tamaño y forma conservados, parénquima homogéneo sin lesión focal neta. 
+VESICULA: Volumen y paredes de espesor conservado, alitiásica. 
+VIA BILIAR INTRAHEPATICA: de calibre conservado. 
+COLEDOCO : de calibre normal. 
+PANCREAS: De tamaño y forma conservados, conducto de Wirsung de calibre normal. 
+BAZO: No se observa esplenomegalia. 
+RIÑON DERECHO: De tamaño y forma conservados. 
+Vía excretora de calibre conservados, sin imágenes de litiasis en su proyección. 
+RIÑÓN IZQUIERDO: De tamaño y forma conservados. 
+Vía excretora de calibre conservados, sin imágenes de litiasis en su proyección. 
+No se observa líquido libre en cavidad abdominal al momento del examen. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US10', 'ECODOPPLER VENOSO DE MIEMBRO SUPERIOR ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECODOPPLER VENOSO DE MIEMBRO SUPERIOR ', 'Ambos lados: 
+Sistema profundo: 
+Vena subclavia, axilar y humeral de calibre y flujos conservados sin signos de trombosis. 
+Venas radiales y cubitales, de calibre y flujos conservados sin signos de trombosis. 
+Sistema superficial: 
+Vena cefálica de calibre y flujos conservados sin signos de trombosis. 
+Vena basílica de calibre y flujos conservados sin signos de trombosis. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US11', 'ECOGRAFIA GINECOLOGICA ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA GINECOLOGICA ', 'Útero en AVF de tamaño y forma conservados. 
+Mide aprox. 
+Endometrio ecogénico de 5 mm de espesor. 
+Miometrio homogéneo. 
+Ovarios en situación habitual, de tamaño y forma conservados, sin lesiones significativas en su 
+proyección. 
+Fondo de saco de Douglas libre. 
+Atte. 
+
+ ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US12', 'ECOGRAFIA MAMARIA', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA MAMARIA', 'Se evalúan ambas mamas con transductor de 7,5 Mhz. 
+Presentan piel planos superficiales y profundos libres. 
+Patrón fibroglandular con moderado infiltrado graso. 
+No se observan formaciones nodulares sólidas ni colecciones líquida netas. 
+Coductos galactóforos de calibre conservado. 
+Axilas sin adenopatías. 
+BIRADS: 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US13', 'ECOGRAFIA RENAL BILATERAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA RENAL BILATERAL ', 'RIÑON DERECHO: De tamaño y forma conservados. 
+Vía excretora de calibre conservados, sin imágenes de litiasis en su proyección. 
+Mide aprox. ECM: 
+RIÑÓN IZQUIERDO: De tamaño y forma conservados. 
+Vía excretora de calibre conservados, sin imágenes de litiasis en su proyección. 
+Mide aprox. ECM: 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US14', 'ECOGRAFIA PLEURAL', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA PLEURAL', 'Se realiza estudio con transductor de alta resolución, y complementariamente con transductor 
+convexo de regiones pleurales, observando: 
+No se observa derrame pleural al momento del examen. 
+Atte. 
+
+ ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US15', 'ECOGRAFIA PARTES BLANDAS ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA PARTES BLANDAS ', 'Se realiza estudio con transductor de alta resolución, observando: 
+Piel y tejido celular subcutáneo de espesor y ecoestructura conservada. 
+Planos musculares y tendinosos conservados. 
+Reparos óseos sin lesiones por esta metodología diagnóstica. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US16', 'ECOGRAFIA TESTICULAR ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA TESTICULAR ', 'Se realiza estudio con transductor de alta resolución, y complementariamente con 
+transductor convexo, de región escrotal observando: 
+Ambos testículos en bolsa escrotal, de tamaño y forma conservados, parénquima 
+homogéneo. 
+Atte. 
+TD mide aprox.: 41 mm x 25 mm x 25 mm. 
+Epidídimo de tamaño y forma conservados. 
+Sin hidrocele. 
+TI mide aprox.: 41 mm x 25 mm x 25 mm. 
+Epidídimo de tamaño y forma conservados. 
+Sin hidrocele. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US17', 'ECOGRAFIA TIROIDEA ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA TIROIDEA ', 'Estudio realizado con transductor de alta resolución de región tiroidea, observando: 
+Glándula tiroidea de tamaño y forma conservados, parénquima homogéneo. 
+Lóbulo derecho mide aprox.: 
+Lóbulo izquierdo mide aprox.: 
+Istmo de espesor y ecoestructura conservada. 
+No se observan adenopatías latero-cervicales al momento del examen. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US18', 'ECOGRAFIA GINECOLOGICA TRANSVAGINAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA GINECOLOGICA TRANSVAGINAL ', 'Útero en AVF de tamaño y forma conservados. 
+Mide aprox. 
+Endometrio ecogénico de 5 mm de espesor. 
+Miometrio homogéneo. 
+Ovarios en situación habitual, de tamaño y forma conservados, sin lesiones significativas en su 
+proyección. 
+Fondo de saco de Douglas libre. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US19', 'ECOGRAFIA VESICO-PROSTATICA', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA VESICO-PROSTATICA', 'VEJIGA: Volumen y paredes de espesor conservado, contenido anecoico. 
+Vol.: 
+PROSTATA: De tamaño y forma conservados, parénquima heterogéneo. 
+Mide aprox. 
+Vol. Aprox.: 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US20', 'ECOGRAFIA VESICAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                'ECOGRAFIA VESICAL ', 'VEJIGA: Volumen y paredes de espesor conservado, contenido anecoico. 
+Vol.: 85 cc. 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'US21', ' 
+
+ECOGRAFIA VESICO-PROSTATICA 
+
+CON MEDICION DE RESIDUO POST MICCIONAL ', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'ECOGRAFIA'), 
+                                ' 
+
+ECOGRAFIA VESICO-PROSTATICA 
+
+CON MEDICION DE RESIDUO POST MICCIONAL ', 'VEJIGA: Volumen y paredes de espesor conservado, contenido anecoico. 
+Vol. premiccional: 
+Residuo postmiccional: 
+PROSTATA: De tamaño y forma conservados, parénquima heterogéneo. 
+Mide aprox. 
+Vol. Aprox.: 
+Atte. ', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');
+INSERT INTO public.tbreportdefault (guid, code, name, idmodality, executiontext, findingtext, conclusiontext) 
+                        VALUES (uuid_generate_v4(), 'None', 'None', 
+                                (SELECT ARRAY[Guid] FROM public.ismodality WHERE Description = 'None'), 
+                                'None', 'None', 'None');

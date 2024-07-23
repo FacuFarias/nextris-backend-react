@@ -1,0 +1,81 @@
+.fila-seleccionada {
+    background-color: #7371d6;
+    color: white;
+}
+
+
+.card-tabla-paciente {
+    max-height: calc(60vh - 200px) !important;  
+    overflow-y: auto;
+  }
+  
+.card-tabla-quasi-full
+{
+  max-height: calc(80vh - 200px) !important;  
+  overflow-y: auto;
+}
+
+  .tabla-paciente thead, .tabla-estudios thead{
+    position: sticky;
+    top: 0;
+    background-color: #372f7e;
+    color: white;
+    z-index: 1;
+  }
+  
+
+  .custom-modal .modal-dialog {
+    min-width: 40% !important;
+  }
+
+
+
+  .card-tabla-historial {
+    max-height: calc(40vh - 200px) !important;  
+    overflow-y: auto;
+  }
+
+  .card-agenda-general
+  { height: 60vh !important;  
+    overflow-y: auto;
+  }
+
+
+  .calendarioo
+  { height: 55vh !important;  
+    overflow-y: auto;
+  }
+
+  
+  #external-events .fc-event {
+    cursor: move;
+    margin: 3px 0;
+  }
+  
+  #calendar-container {
+    position: relative;
+    z-index: 1;
+    margin-left: 200px;
+  }
+
+.evento-creado{
+  background-color: green !important;
+  color: white;
+}
+
+.hidden{
+  display: none;
+}
+
+#dni-value{
+  background: rgb(76,131,80);
+  background: linear-gradient(90deg, rgba(76,131,80,1) 0%, rgba(47,98,32,1) 100%);
+  color: aliceblue;
+  font-style: italic;
+}
+
+
+.success_back{
+  color: rgb(48, 109, 52) !important;
+  font-weight: 600;
+}

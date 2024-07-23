@@ -1,0 +1,93 @@
+<!-- modal -->
+<div class="modal fade custom-modal" id="modal_ap" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Parte Anatomica</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_ap" method="POST" action="/agregar_ap">
+                    <input type="hidden" name="id_ap" id="id_ap">
+
+                    <div class="form-group row">
+                        <div class="col-md-12">
+                            <label for="Description_ap">Descripción</label>
+                            <input type="text" class="form-control" id="Description_ap" name="Description_ap" required>
+                        </div>                   
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Parte</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal" >Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Fin modal -->
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_ap">
+                        Buscar Parte anatomica
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_ap" name="search_ap">
+                </div>
+                        
+                <div class="col-md-3">
+                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-ap">
+                    
+                    <button type="button" id="b_nueva_ap" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_ap">Nueva Parte</button>
+                </div>
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Partes anatomicas</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" id="b_editar_ap" class="btn btn-secondary botones_ap" disabled patient-id="">Editar Parte</button>
+                    <button type="button" id="b_eliminar_ap" class="btn btn-secondary botones_ap delete_b" disabled patient-id="">Eliminar Parte</button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-ap">
+                <thead>
+                    <tr>
+                        <th>Descripcion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>
