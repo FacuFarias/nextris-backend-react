@@ -3,7 +3,8 @@
 Copyright (c) 2019 - present AppSeed.us
 """
 import mysql.connector
-from flask import jsonify,send_file
+from apps import db
+from flask import jsonify,send_file, send_from_directory
 import requests
 from apps.home import blueprint
 from flask import render_template, request
@@ -27,6 +28,12 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from apps.authentication.forms import CreateAccountForm
+from apps.authentication.models import Users
+from werkzeug.security import generate_password_hash
+import pytz
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 #server_url = "http://hapi.fhir.org/baseR4"
 server_url = "http://localhost:8080/fhir"  # URL del servidor HAPI FHIR local
@@ -135,7 +142,7 @@ class Orden():
 @login_required
 def index():
 
-    return render_template('home/index.html', segment='index')
+    return render_template('home/analisis_facturacion.html', segment='index')
 
 
 @blueprint.route('/buscar_pacientes', methods=['POST'])
@@ -264,7 +271,7 @@ def nueva_cita():
     cursor.execute(query)
     codigos_machine=cursor.fetchall()
 
-    return render_template('/home/nueva_cita.html',tipoestudios=tipos,codigos=codigos_machine)
+    return render_template('/home/nueva_cita.html',tipoestudios=tipos,codigos=codigos_machine,segment='nueva_cita')
 
 
 @blueprint.route('/configuraciones', methods=['GET'])
@@ -274,6 +281,9 @@ def configuraciones():
     return render_template('/home/configuraciones.html')
 
 
+from flask import jsonify, request
+import psycopg2
+
 @blueprint.route('/agregar_pacientes', methods=['POST'])
 def agregar_pacientes():
     
@@ -281,18 +291,34 @@ def agregar_pacientes():
     cursor = connection.cursor()
     r = request.form.to_dict()
 
+    # Convertir 'on' a bit '0' o '1'
     IsAn = r.get('IsAn') == 'on'
-    r['IsAn'] = 1 if IsAn else 0
+    r['IsAn'] = '1' if IsAn else '0'
 
     IsMerged = r.get('IsMerged') == 'on'
-    r['IsMerged'] = 1 if IsMerged else 0
+    r['IsMerged'] = '1' if IsMerged else '0'
 
-    query="""INSERT INTO public.DataPatient(Guid,Surname,Name,NationalCode,BirthDate,PatientId,SexCode,IsAnonymous,IsMerged,Phone,Email,HealthCard) VALUES (UUID(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) """
-    cursor.execute(query,(r['p_surname'],r['p_name'],r['p_dni'],r['fecha_nacimiento'],r['p_id'],r['sex'],r['IsAn'],r['IsMerged'],r['telefono'],r['mail'],r['p_healthcard'])) 
+    print(r)
+
+    query = """
+    INSERT INTO public.DataPatient(
+        Guid, Surname, Name, NationalCode, BirthDate, PatientId, SexCode, 
+        IsAnonymous, IsMerged, Phone, Email, HealthCard) 
+    VALUES (
+        uuid_generate_v4(), %s, %s, %s, %s, %s, %s, 
+        %s::bit, %s::bit, %s, %s, %s) 
+    """
+    
+    cursor.execute(query, (
+        r['p_surname'], r['p_name'], r['p_dni'], r['fecha_nacimiento'],
+        r['p_id'], r['sex'], r['IsAn'], r['IsMerged'], r['telefono'],
+        r['mail'], r['p_healthcard']
+    ))
+    
     connection.commit()
-    # response_data=cursor.fetchall()
 
     return jsonify(r)
+
 
 
 @blueprint.route('/obtener_historial', methods=['GET'])
@@ -368,6 +394,15 @@ def get_patients():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
     query = "SELECT Guid,name,surname,NationalCode,Sexcode,BirthDate,phone,email,healthcard FROM public.datapatient;"
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_patients_min', methods=['GET']) 
+def get_patients_min():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "SELECT Guid,name,surname,Sexcode,BirthDate,NationalCode FROM public.datapatient;"
     cursor.execute(query)
 
     return jsonify(cursor.fetchall())
@@ -665,6 +700,20 @@ def get_examinations():
 
     return jsonify(to_send)
 
+@blueprint.route('/get_exams_modal', methods=['GET']) 
+def get_exams_modal():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "SELECT Guid, code , description FROM public.exam;"
+    cursor.execute(query)
+    datos = cursor.fetchall()
+
+    
+    cursor.close()
+    connection.close()
+
+    return jsonify(datos)
+
 
 
 @blueprint.route('/set_patient', methods=['GET'])
@@ -693,18 +742,64 @@ def obtener_agenda():
 def get_groups():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = "SELECT * FROM public.IsProvenanceGroup;"
+    query = "SELECT guid,description,isexternal,iser,delaydays FROM public.IsProvenanceGroup;"
     cursor.execute(query)
 
     return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_agenda_med', methods=['GET']) 
+def get_agenda_med():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "SELECT guid,username,name,surname,nationalnumber FROM public.tbuser WHERE idrole='88e340f5-6fa5-4df1-aef6-c911625a4427';"
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+
+@blueprint.route('/get_days_agenda', methods=['POST']) 
+def get_days_agenda():
+    data = request.get_json()
+    id_med = data.get('id')
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    query = f"SELECT guid, day, timefrom, timeto, initday, finishday FROM public.isagendameditem WHERE idmed='{id_med}';"
+    
+    cursor.execute(query)
+    datos = cursor.fetchall()
+    
+    # Convertir los datos a un formato serializable a JSON
+    result = []
+    for row in datos:
+        result.append({
+            'guid': row[0],
+            'day': row[1],
+            'timefrom': row[2].strftime('%H:%M:%S'),  # Convertir time a string
+            'timeto': row[3].strftime('%H:%M:%S'),    # Convertir time a string
+            'initday': row[4].strftime('%Y-%m-%d'),   # Convertir date a string
+            'finishday': row[5].strftime('%Y-%m-%d')  # Convertir date a string
+        })
+
+    return jsonify(result)
+
+@blueprint.route('/get_med_sol', methods=['GET']) 
+def get_med_sol():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT guid,description,phone,mail,note FROM public.isrequestingphysician"""
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+
 
 @blueprint.route('/get_users', methods=['GET']) 
 def get_users():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = """SELECT u.guid,u.username,r.description,u.name,u.surname,u.nationalnumber,u.isactive FROM public.tbuser u
-                inner join public.isrole r on r.guid=u.idrole
-                where u.isactive=1"""
+    query = """SELECT u.guid,u.username,r.description,u.name,u.surname,u.nationalnumber,u.mail,u.isactive FROM public.tbuser u
+                inner join public.isrole r on r.guid=u.idrole"""
     cursor.execute(query)
 
     return jsonify(cursor.fetchall())
@@ -734,6 +829,22 @@ def get_orders_to_distribution():
                 inner join public.exam exam on exam.Guid=ex.IdExam
                 inner join public.isequipment equip on equip.Guid=ex.IdEquipment
                 WHERE ex.Isreported=1
+            """
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_orders_to_bill', methods=['GET']) 
+def get_orders_to_bill():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT ex.Guid, ex.createdon,ex.localacc,p.Surname || ' ' || p.Name AS FullName,exam.description,ex.priceid, ex.idrequestingphysician,ex.idreferringphysician,exam.precio,ex.Status
+                FROM public.tbexamination ex 
+                INNER JOIN public.datapatient p ON ex.IdPatient = p.PatientId 
+                inner join public.exam exam on exam.Guid=ex.IdExam
+                left join public.isrequestingphysician rq on rq.guid=ex.idrequestingphysician
+                left join public.tbuser u on u.guid=ex.idreferringphysician
+                WHERE ex.isbill=false
             """
     cursor.execute(query)
 
@@ -796,6 +907,372 @@ def edit_mail():
         return jsonify({'success': False, 'error': str(err)}), 500
     
 
+@blueprint.route('/facturar_orden', methods=['POST']) 
+def facturar_orden():
+    data = request.get_json()
+    print(data)
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = f"""SELECT guid,idexam,idpatient,idreferringphysician,idrequestingphysician,status FROM public.tbexamination WHERE guid='{data['id_examination']}'"""
+    cursor.execute(query)
+    examination=cursor.fetchone()
+    print(examination)
+    cursor.execute("SET TIME ZONE 'America/Argentina/Buenos_Aires';")
+
+    query = f"""INSERT INTO public.tbregistrocuentas(guid,patientid,adminid,autorid,solicid,createdon,totalcost,os_cover,orderid,description,status,typeofentry) VALUES (uuid_generate_v4(),
+                '{examination[2]}','Peter Lopez','{examination[3]}','{examination[4]}',NOW(),'{data['totalcost']}','{data['oscover']}','{data['id_examination']}',(SELECT description FROM public.exam WHERE guid='{examination[1]}'),'{examination[5]}',true)              """
+    cursor.execute(query)
+    connection.commit()
+
+    print(query)
+
+    # Actualizar la columna IsExecuted en la tabla public.tbexaminations
+    query = f"""
+        UPDATE public.tbexamination
+        SET isbill = true
+        WHERE Guid = '{data['id_examination']}'
+    """
+    cursor.execute(query)
+    connection.commit()
+
+
+    return jsonify({'success': True})
+
+@blueprint.route('/retirar_dinero', methods=['POST']) 
+def retirar_dinero():
+    data = request.get_json()
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    print(data)
+    tipo=data['tipo']
+
+    if tipo=='p_med':
+        cursor.execute("SET TIME ZONE 'America/Argentina/Buenos_Aires';")
+
+        query = f"""INSERT INTO public.tbregistrocuentas(guid,adminid,autorid,createdon,totalcost,typeofentry,typeid,description) VALUES (uuid_generate_v4(),'Peter Lopez','{data['refmed']}',NOW(),'{data['mount']}',false,'{data['tipo']}','Pago de dividendos Medico')"""
+        cursor.execute(query)
+        connection.commit()
+
+    return jsonify({'success': True})
+
+@blueprint.route('/filter_by_med', methods=['POST']) 
+def filter_by_med():
+    data = request.get_json()
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    cursor.execute("SELECT fecha::date, monto FROM tbpruebascount ORDER BY fecha")
+    results = cursor.fetchall()
+    query = f"""SELECT fecha::date, monto FROM tbpruebascount WHERE profesional='{data['id']}' ORDER BY fecha ASC"""
+    cursor.execute(query)
+    datos=cursor.fetchall()
+    montos_por_dia = defaultdict(int)
+    fechas = []
+
+    for fecha, monto in datos:
+        montos_por_dia[fecha] += monto
+        fechas.append(fecha)
+
+    fechas_unicas = sorted(set(fechas))
+    montos_ordenados = [montos_por_dia[fecha] for fecha in fechas_unicas]
+
+    return jsonify({
+        "labels": [fecha.strftime('%Y-%m-%d') for fecha in fechas_unicas],
+        "data": montos_ordenados
+    })
+
+@blueprint.route('/filter_by_os', methods=['POST']) 
+def filter_by_os():
+    data = request.get_json()
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    cursor.execute("SELECT fecha::date, monto FROM tbpruebascount ORDER BY fecha")
+    results = cursor.fetchall()
+    query = f"""SELECT fecha::date, monto FROM tbpruebascount WHERE obra_social='{data['id']}' ORDER BY fecha ASC"""
+    cursor.execute(query)
+    datos=cursor.fetchall()
+    montos_por_dia = defaultdict(int)
+    fechas = []
+
+    for fecha, monto in datos:
+        montos_por_dia[fecha] += monto
+        fechas.append(fecha)
+
+    fechas_unicas = sorted(set(fechas))
+    montos_ordenados = [montos_por_dia[fecha] for fecha in fechas_unicas]
+
+    return jsonify({
+        "labels": [fecha.strftime('%Y-%m-%d') for fecha in fechas_unicas],
+        "data": montos_ordenados
+    })
+
+@blueprint.route('/get_historial_facturacion',  methods=['GET']) 
+def get_historial_facturacion():
+    connection = psycopg2.connect(**config)
+    print("hola")
+    cursor = connection.cursor()
+    query = """SELECT rc.guid,rc.createdon,rc.typeofentry,rc.description,u.username,rc.adminid,rc.totalcost
+                FROM public.tbregistrocuentas rc
+                LEFT JOIn public.tbuser as u on u.guid=rc.autorid
+                ORDER BY rc.createdon ASC
+            """
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+   
+@blueprint.route('/get_historial_prueba',  methods=['GET']) 
+def get_historial_prueba():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT guid, to_char(fecha, 'YYYY-MM-DD') AS fecha, tipo, descripcion, profesional, obra_social, monto 
+               FROM public.tbpruebascount 
+               ORDER BY fecha ASC"""
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/ingresos_ultima_semana', methods=['GET'])
+def ingresos_ultima_semana():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Consulta para obtener la suma de los montos en los últimos 7 días
+    query = """
+    SELECT SUM(monto) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query)
+    ingresos_ultima_semana = cursor.fetchone()[0]
+    
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+    
+    return jsonify({"ingresos_ultima_semana": ingresos_ultima_semana})
+
+@blueprint.route('/delta_ingresos', methods=['GET'])
+def delta_ingresos():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    # Consulta para los ingresos de la última semana
+    query_ultima_semana = """
+    SELECT SUM(monto) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query_ultima_semana)
+    ingresos_ultima_semana = cursor.fetchone()[0] or 0
+
+    # Consulta para los ingresos de la semana anterior a la última semana
+    query_semana_anterior = """
+    SELECT SUM(monto) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '14 days' 
+    AND fecha < CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query_semana_anterior)
+    ingresos_semana_anterior = cursor.fetchone()[0] or 0
+
+    # Calcular el delta
+    if ingresos_semana_anterior == 0:
+        delta = 0
+    else:
+        delta = round(((ingresos_ultima_semana - ingresos_semana_anterior) / ingresos_semana_anterior) * 100, 2)
+
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+
+    return jsonify({"delta_ingresos": delta})
+
+@blueprint.route('/estudios_ultima_semana', methods=['GET'])
+def estudios_ultima_semana():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Consulta para obtener el número de estudios en los últimos 7 días
+    query = """
+    SELECT COUNT(*) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query)
+    estudios_ultima_semana = cursor.fetchone()[0]
+    
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+    
+    return jsonify({"estudios_ultima_semana": estudios_ultima_semana})
+
+@blueprint.route('/delta_estudios', methods=['GET'])
+def delta_estudios():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    # Consulta para los estudios de la última semana
+    query_ultima_semana = """
+    SELECT COUNT(*) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query_ultima_semana)
+    estudios_ultima_semana = cursor.fetchone()[0]
+
+    # Consulta para los estudios de la semana anterior a la última semana
+    query_semana_anterior = """
+    SELECT COUNT(*) 
+    FROM public.tbpruebascount 
+    WHERE fecha >= CURRENT_DATE - INTERVAL '14 days' 
+    AND fecha < CURRENT_DATE - INTERVAL '7 days'
+    """
+    cursor.execute(query_semana_anterior)
+    estudios_semana_anterior = cursor.fetchone()[0]
+
+    # Calcular el delta
+    if estudios_semana_anterior == 0:
+        delta = 0
+    else:
+        delta = round(((estudios_ultima_semana - estudios_semana_anterior) / estudios_semana_anterior) * 100, 2)
+
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+
+    return jsonify({"delta_estudios": delta})
+
+
+
+
+@blueprint.route('/get_comp_med',  methods=['GET']) 
+def get_comp_med():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT 
+                    profesional,profesional,
+                    COUNT(*) AS cantidad_estudios, 
+                    SUM(monto) AS total_monto
+                FROM 
+                    public.tbpruebascount
+                GROUP BY 
+                    profesional
+                ORDER BY 
+                    total_monto DESC;"""
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_best_med', methods=['GET'])
+def get_best_med():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Consulta para obtener al médico con mayor producción
+    query = """
+    SELECT 
+        profesional,
+        COUNT(*) AS cantidad_estudios, 
+        SUM(monto) AS total_monto
+    FROM 
+        public.tbpruebascount
+    GROUP BY 
+        profesional
+    ORDER BY 
+        total_monto DESC
+    LIMIT 1;  -- Solo traer el primero
+    """
+    cursor.execute(query)
+    result = cursor.fetchone()
+    
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+
+    return jsonify({
+        "profesional": result[0],
+        "cantidad_estudios": result[1],
+        "total_monto": result[2]
+    })
+
+@blueprint.route('/get_best_os', methods=['GET'])
+def get_best_os():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Consulta para obtener la obra social con mayor monto generado
+    query = """
+    SELECT 
+        obra_social,
+        COUNT(*) AS cantidad_estudios, 
+        SUM(monto) AS total_monto
+    FROM 
+        public.tbpruebascount
+    GROUP BY 
+        obra_social
+    ORDER BY 
+        total_monto DESC
+    LIMIT 1;  -- Solo traer la obra social con mayor monto
+    """
+    cursor.execute(query)
+    result = cursor.fetchone()
+    
+    # Asegúrate de cerrar la conexión y el cursor
+    cursor.close()
+    connection.close()
+
+    return jsonify({
+        "obra_social": result[0],
+        "cantidad_estudios": result[1],
+        "total_monto": result[2]
+    })
+
+
+@blueprint.route('/get_comp_os',  methods=['GET']) 
+def get_comp_os():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT 
+                    obra_social, obra_social,
+                    COUNT(*) AS cantidad_estudios, 
+                    SUM(monto) AS total_monto
+                FROM 
+                    public.tbpruebascount
+                GROUP BY 
+                    obra_social
+                ORDER BY 
+                    total_monto DESC;
+                """
+    cursor.execute(query)
+
+    return jsonify(cursor.fetchall())
+
+def get_montos():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    cursor.execute("SELECT fecha::date, monto FROM tbpruebascount ORDER BY fecha")
+    results = cursor.fetchall()
+    connection.close()
+    return results
+
+@blueprint.route('/api/montos', methods=['GET'])
+def montos():
+    datos = get_montos()
+    montos_por_dia = defaultdict(int)
+    fechas = []
+
+    for fecha, monto in datos:
+        montos_por_dia[fecha] += monto
+        fechas.append(fecha)
+
+    fechas_unicas = sorted(set(fechas))
+    montos_ordenados = [montos_por_dia[fecha] for fecha in fechas_unicas]
+
+    return jsonify({
+        "labels": [fecha.strftime('%Y-%m-%d') for fecha in fechas_unicas],
+        "data": montos_ordenados
+    })
+
 @blueprint.route('/get_origins', methods=['GET']) 
 def get_origins():
     connection = psycopg2.connect(**config)
@@ -811,7 +1288,7 @@ def get_origins():
 def get_body_parts():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = "SELECT * FROM public.IsAnatomicalPart;"
+    query = "SELECT guid,description FROM public.IsAnatomicalPart;"
     cursor.execute(query)
 
     return jsonify(cursor.fetchall())
@@ -820,7 +1297,7 @@ def get_body_parts():
 def get_codes():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = "SELECT * FROM public.IsMinisterialCode"
+    query = "SELECT guid,code,description,grupo FROM public.IsMinisterialCode"
     cursor.execute(query)
 
     return jsonify(cursor.fetchall())
@@ -840,7 +1317,7 @@ def get_exams():
 
     # Modificamos la consulta para incluir un JOIN con la tabla IsMinisterialCode
     query = """
-        SELECT e.Guid, e.Description, m.Description AS MinisterialCode, n.Description AS modality, e.ExecutionTime, e.IsActive 
+        SELECT e.Guid, e.Description, m.Description AS MinisterialCode, n.Description AS modality, e.ExecutionTime, e.IsActive, e.precio 
         FROM public.exam e
         JOIN public.IsMinisterialCode m ON e.IdMinisterialCode = m.Guid
         JOIN public.IsModality n ON e.IdModality = n.Guid
@@ -889,6 +1366,7 @@ def get_equip_for_exam():
 
 
     return jsonify(cursor.fetchall())
+
 
 @blueprint.route('/get_mach', methods=['GET']) 
 def get_mach():
@@ -950,6 +1428,15 @@ def get_business_units():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
     query = """SELECT * FROM public.IsBusinessUnit"""
+    
+    cursor.execute(query)
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_equipo_modal', methods=['GET']) 
+def get_equipo_modal():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT guid,aetitle,externalcode FROM public.isequipment"""
     
     cursor.execute(query)
     return jsonify(cursor.fetchall())
@@ -1105,6 +1592,44 @@ def get_check_equip():
     
     return jsonify(response)
 
+
+@blueprint.route('/get_patient_history', methods=['POST'])
+def get_patient_history():
+    # Obtener el ID del paciente desde la solicitud POST
+    data = request.get_json()
+    patient_id = data.get('id')
+
+    if not patient_id:
+        return jsonify({"error": "ID de paciente no proporcionado"}), 400
+
+    # Conectar a la base de datos
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    # Consulta SQL para obtener el historial del paciente desde la tabla tbexamination
+    query = f"""
+        SELECT ex.guid,localacc, CONCAT(us.name, ' ', us.surname) AS refPhy, rp.description as ReqPhy, reportdate, equip.description, isimage
+        FROM public.tbexamination ex
+        LEFT JOIN public.isrequestingphysician rp on rp.guid=ex.idrequestingphysician
+        LEFT JOIN public.tbuser us on us.guid=ex.idreferringphysician
+        LEFT JOIN public.isequipment equip on equip.guid=ex.idequipment
+        WHERE idpatient = (SELECT patientid FROM public.datapatient WHERE guid='{patient_id}') and isreported=1
+    """
+    print(query)
+    # Ejecutar la consulta con el ID del paciente
+    cursor.execute(query)
+    
+    # Obtener todos los resultados
+    results = cursor.fetchall()
+
+    # Cerrar la conexión
+    cursor.close()
+    connection.close()
+
+    # Devolver los resultados en formato JSON
+    return jsonify(results)
+
+
 @blueprint.route('/get_check_mod', methods=['GET']) 
 def get_check_mod():
     
@@ -1148,7 +1673,6 @@ def get_check_mod():
     return jsonify(response)
 
 
-
 @blueprint.route('/update_procede', methods=['POST']) 
 def update_procede():
     connection = psycopg2.connect(**config)
@@ -1172,7 +1696,7 @@ def update_procede():
         
         if id not in lista_procedencias:
             print("el id= "+id+" no está en la lista de proc")
-            query="""INSERT INTO public.RelBusinessUnitProvenance(Guid,IdBusinessUnit,IdProvenance) VALUES (UUID(),%s,%s)"""
+            query="""INSERT INTO public.RelBusinessUnitProvenance(Guid,IdBusinessUnit,IdProvenance) VALUES (uuid_generate_v4(),%s,%s)"""
             cursor.execute(query,(id_bu,id))
             connection.commit()
 
@@ -1211,7 +1735,7 @@ def update_equip():
     for id in seleccion_multiple_valores:
         
         if id not in lista_equipment:
-            query="""INSERT INTO public.RelBusinessUnitEquipment(Guid,IdBusinessUnit,IdEquipment) VALUES (UUID(),%s,%s)"""
+            query="""INSERT INTO public.RelBusinessUnitEquipment(Guid,IdBusinessUnit,IdEquipment) VALUES (uuid_generate_v4(),%s,%s)"""
             cursor.execute(query,(id_bu,id))
             connection.commit()
 
@@ -1250,7 +1774,7 @@ def update_mod():
         
         if id not in lista_modality:
             #print("el id= "+id+" no está en la lista de proc")
-            query="""INSERT INTO public.RelBusinessUnitModality(Guid,IdBusinessUnit,IdModality) VALUES (UUID(),%s,%s)"""
+            query="""INSERT INTO public.RelBusinessUnitModality(Guid,IdBusinessUnit,IdModality) VALUES (uuid_generate_v4(),%s,%s)"""
             cursor.execute(query,(id_bu,id))
             connection.commit()
 
@@ -1279,6 +1803,35 @@ def eliminar_grupo():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
     query = "DELETE FROM public.IsProvenanceGroup WHERE Guid=(%s);"
+    cursor.execute(query,(id,))
+    connection.commit()
+
+    return jsonify("Fila eliminada")
+
+
+@blueprint.route('/eliminar_item_agenda', methods=['POST']) 
+def eliminar_item_agenda():
+    data = request.json
+    id = data.get('id')
+    
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "DELETE FROM public.isagendameditem WHERE Guid=(%s);"
+    cursor.execute(query,(id,))
+    connection.commit()
+
+    return jsonify("Fila eliminada")
+
+
+@blueprint.route('/eliminar_med_sol', methods=['POST']) 
+def eliminar_med_sol():
+    data = request.json
+    id = data.get('id')
+    print(data)
+    
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "DELETE FROM public.isrequestingphysician WHERE Guid=(%s);"
     cursor.execute(query,(id,))
     connection.commit()
 
@@ -1327,6 +1880,17 @@ def eliminar_ap():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
     query = "DELETE FROM public.IsAnatomicalPart WHERE Guid=(%s);"
+    cursor.execute(query,(id,))
+    connection.commit()
+    return jsonify("Fila eliminada")
+
+@blueprint.route('/eliminar_cita', methods=['POST']) 
+def eliminar_cita():
+    data = request.json
+    id = data.get('id')
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = "DELETE FROM public.tbagendaevents WHERE Guid=(%s);"
     cursor.execute(query,(id,))
     connection.commit()
     return jsonify("Fila eliminada")
@@ -1411,7 +1975,7 @@ def agregar_go():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsProvenanceGroup(Guid, Description, IsExternal, IsER, DelayDays) VALUES (UUID(), %s, %s, %s, %s)"
+    query = "INSERT INTO public.IsProvenanceGroup(Guid, Description, IsExternal, IsER, DelayDays) VALUES (uuid_generate_v4(), %s, %s, %s, %s)"
     
     cursor.execute(query, (respuesta['Description'], respuesta['IsEx'], respuesta['ps'], respuesta['delaydays']))
     connection.commit()
@@ -1420,27 +1984,224 @@ def agregar_go():
     response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
     return jsonify(response_data)
 
-@blueprint.route('/create_user', methods=['POST']) 
-def create_user():
-    respuesta = request.form.to_dict()
-    dni = respuesta.get('dni')
-    name = respuesta.get('name')
-    surname = respuesta.get('surname')
-    username = respuesta.get('username')
-    rol = respuesta.get('rol')
 
+@blueprint.route('/agregar_med_sol', methods=['POST']) 
+def agregar_med_sol():
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    response=[respuesta['description'],respuesta['phone'],respuesta['mail'],respuesta['notes']]
 
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = f"INSERT INTO public.tbuser(guid, name, surname, username, nationalnumber,idrole,isactive) VALUES (uuid_generate_v4(), '{name}', '{surname}', '{username}', '{dni}',{rol},0)'"
-    print("query de user:",query)
+    query = f"INSERT INTO public.isrequestingphysician(guid,description,phone,mail,note) VALUES (uuid_generate_v4(),'{respuesta['description']}','{respuesta['phone']}','{respuesta['mail']}','{respuesta['notes']}')"
+    
     cursor.execute(query)
     connection.commit()
     connection.close()
 
-    response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': respuesta}
+    response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
     return jsonify(response_data)
+
+@blueprint.route('/agregar_item', methods=['POST']) 
+def agregar_item():
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    response=[respuesta['day'],respuesta['timefrom'],respuesta['timeto'],respuesta['initday'],respuesta['finishday']]
+
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    query = f"INSERT INTO public.isagendameditem(guid,day,idmed,timefrom,timeto,initday,finishday) VALUES (uuid_generate_v4(),'{respuesta['day']}','{respuesta['id_agenda_med']}','{respuesta['timefrom']}','{respuesta['timeto']}','{respuesta['initday']}','{respuesta['finishday']}')"
+    
+    cursor.execute(query)
+    connection.commit()
+    connection.close()
+
+    response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
+    return jsonify(response_data)
+
+@blueprint.route('/create_user', methods=['POST'])
+def create_user():
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    dni = respuesta.get('nationalnumber')
+    mail = respuesta.get('text_mail')
+    name = respuesta.get('name')
+    surname = respuesta.get('surname')
+    username = respuesta.get('username')
+    rol = respuesta.get('s_type_of_user')
+    
+    
+    # Conexión a la base de datos secundaria y creación del usuario en tbuser
+    try:
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        insert_query = """
+            INSERT INTO public.tbuser(guid, name, surname, username, nationalnumber, mail, idrole, isactive)
+            VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, 0)
+        """
+        cursor.execute(insert_query, (name, surname, username, dni, mail, rol))
+        
+        select_query = "SELECT description FROM public.isrole WHERE guid=%s"
+        cursor.execute(select_query, (rol,))
+        rol_desc = cursor.fetchone()[0]
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print(f"Error en la base de datos secundaria: {e}")
+        return jsonify({'status': 'error', 'message': 'Error al crear el usuario en tbuser', 'details': str(e)}), 500
+
+    # Creación del usuario en la base de datos principal
+    try:
+        # Verificar si el usuario ya existe en la base de datos principal
+        existing_user = Users.query.filter_by(username=username).first()
+        if existing_user:
+            return jsonify({'status': 'error', 'message': 'El nombre de usuario ya existe en la base de datos principal'}), 400
+
+        # # Hashear la contraseña
+        hashed_password = generate_password_hash('1234')
+
+        print("estoy aca")
+
+        user = Users(
+            username=username,
+            email=mail,
+            password=hashed_password,  # Almacenar la contraseña hasheada
+            user_type=rol_desc
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    except Exception as e:
+        print(f"Error en la base de datos principal: {e}")
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Error al crear el usuario en la base de datos principal', 'details': str(e)}), 500
+
+    # Preparar los datos para la respuesta
+    response=[username,rol_desc,name,surname,dni,mail,'0']
+    response_data = {
+        'status': 'OK',
+        'message': 'Inserción exitosa',
+        'data': response}
+    return jsonify(response_data)
+
+
+@blueprint.route('/delete_user', methods=['POST'])
+def delete_user():
+    respuesta = request.get_json()  # Cambiar a get_json para recibir datos en formato JSON
+    print(respuesta)
+    user_id = respuesta.get('id')
+    
+    users_main_db  = []
+    users_main_db   = Users.query.all()
+    print("Usuarios en tbuser:")
+    for user in users_main_db:
+        print(user)
+
+    # Conexión a la base de datos secundaria y eliminación del usuario en tbuser
+    try:
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        query=f"SELECT username FROM public.tbuser WHERE guid='{user_id}'"
+        cursor.execute(query)
+        username=cursor.fetchone()[0]
+        print("username: ",username)
+        
+        delete_query = "DELETE FROM public.tbuser WHERE guid=%s"
+        cursor.execute(delete_query, (user_id,))
+        connection.commit()
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print(f"Error en la base de datos secundaria: {e}")
+        return jsonify({'status': 'error', 'message': 'Error al eliminar el usuario en tbuser'}), 500
+
+    # Eliminación del usuario en la base de datos principal
+    try:
+        user = Users.query.filter_by(username=username).first()
+        if user:
+            db.session.delete(user)
+            db.session.commit()
+        else:
+            return jsonify({'status': 'error', 'message': 'El usuario no existe en la base de datos principal'}), 404
+    except Exception as e:
+        print(f"Error en la base de datos principal: {e}")
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Error al eliminar el usuario en la base de datos principal'}), 500
+    
+    return jsonify({"success": True})
+
+@blueprint.route('/edit_user', methods=['POST'])
+def edit_user():
+    respuesta = request.form.to_dict()  # Cambiar a get_json para recibir datos en formato JSON
+    print(respuesta)
+    user_id = respuesta.get('id_user')
+    username = respuesta.get('username')
+    name = respuesta.get('name')
+    surname = respuesta.get('surname')
+    dni = respuesta.get('nationalnumber')
+    type_of_user = respuesta.get('s_type_of_user')
+    mail = respuesta.get('text_mail')
+
+    # Imprimir usuarios en pantalla (consola del servidor)
+    users_main_db = []
+    users_main_db = Users.query.all()
+    print("Usuarios en la base de datos principal:")
+    for user in users_main_db:
+        print(user)
+
+    # Conexión a la base de datos secundaria y actualización del usuario en tbuser
+    try:
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query=f"SELECT username FROM public.tbuser WHERE guid='{user_id}'"
+        cursor.execute(query)
+        old_username=cursor.fetchone()[0]
+        print("old:",old_username)
+
+        update_query = """
+            UPDATE public.tbuser 
+            SET username = %s, name = %s, surname = %s, nationalnumber = %s, idrole = %s, mail=%s
+            WHERE guid = %s
+        """
+        cursor.execute(update_query, (username, name, surname, dni, type_of_user,mail, user_id))
+        connection.commit()
+
+    except Exception as e:
+        print(f"Error en la base de datos secundaria: {e}")
+        return jsonify({'status': 'error', 'message': 'Error al actualizar el usuario en tbuser'}), 500
+
+    
+    query = f"""SELECT description FROM public.isrole WHERE guid='{type_of_user}'"""
+    cursor.execute(query)
+    type_of_user=cursor.fetchone()[0]
+    cursor.close()
+    connection.close()
+    print("tipo de usuario:",type_of_user)
+    # Actualización del usuario en la base de datos principal
+    try:
+        user = Users.query.filter_by(username=old_username).first()  # Utilizando id para la consulta
+        if user:
+            user.username = username
+            user.user_type = type_of_user
+            user.email=mail
+            db.session.commit()
+        else:
+            return jsonify({'status': 'error', 'message': 'El usuario no existe en la base de datos principal'}), 404
+    except Exception as e:
+        print(f"Error en la base de datos principal: {e}")
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Error al actualizar el usuario en la base de datos principal'}), 500
+
+    
+
+    return jsonify({"success": True})
 
 
 @blueprint.route('/agregar_codigo', methods=['POST']) 
@@ -1450,7 +2211,7 @@ def agregar_codigo():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsMinisterialCode(Guid, Code, Description, `Group`) VALUES (UUID(), %s, %s, %s)"
+    query = "INSERT INTO public.IsMinisterialCode(Guid, Code, Description, `Group`) VALUES (uuid_generate_v4(), %s, %s, %s)"
     
     cursor.execute(query, (respuesta['ministerial_code'], respuesta['Description_code'], respuesta['group_code']))
     connection.commit()
@@ -1468,7 +2229,7 @@ def agregar_mod():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsModality(Guid, Description, ExternalCode, IsMandatoryEquipmentChange) VALUES (UUID(), %s, %s, %s)"
+    query = "INSERT INTO public.IsModality(Guid, Description, ExternalCode, IsMandatoryEquipmentChange) VALUES (uuid_generate_v4(), %s, %s, %s)"
     
     cursor.execute(query, (respuesta['Description_mod'], respuesta['ext_code_mod'], respuesta['IsMandatoryEquipmentChange']))
     connection.commit()
@@ -1486,9 +2247,9 @@ def agregar_examen():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.exam(Guid, Description, IdMinisterialCode, IdModality,ExecutionTime,IsActive) VALUES (UUID(), %s, %s, %s, %s, %s)"
+    query = "INSERT INTO public.exam(Guid, Description, IdMinisterialCode, IdModality,ExecutionTime,IsActive,precio) VALUES (uuid_generate_v4(), %s, %s, %s, %s,%s, %s)"
     
-    cursor.execute(query, (respuesta['Description_ex'], respuesta['s_cod_min'], respuesta['s_modality'], respuesta['IsAc_ex'], respuesta['time_execution']))
+    cursor.execute(query, (respuesta['Description_ex'], respuesta['s_cod_min'], respuesta['s_modality'], respuesta['time_execution'], respuesta['IsAc_ex'], respuesta['precio']))
     connection.commit()
     
     query= "SELECT Description from public.IsMinisterialCode WHERE Guid=%s"
@@ -1501,7 +2262,7 @@ def agregar_examen():
     cursor.execute(query,(respuesta['s_modality'],))
     modality=cursor.fetchone()[0]
 
-    response=[respuesta['Description_ex'],cod_min, modality,respuesta['time_execution'],respuesta['IsAc_ex']]
+    response=[respuesta['Description_ex'],cod_min, modality,respuesta['time_execution'],respuesta['IsAc_ex'],respuesta['precio']]
     response_data = {'status': 'OK', 'message': 'Inserción exitosa','data': response}
     connection.close()
     return jsonify(response_data)
@@ -1512,7 +2273,7 @@ def agregar_ap():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsAnatomicalPart(Guid, Description) VALUES (UUID(), %s)"
+    query = "INSERT INTO public.IsAnatomicalPart(Guid, Description) VALUES (uuid_generate_v4(), %s)"
     print(respuesta)
     cursor.execute(query, (respuesta['Description_ap'],))
     connection.commit()
@@ -1558,7 +2319,7 @@ def agregar_origen():
     cursor.execute(query,(respuesta['s_go'],))
 
     Description=cursor.fetchone()[0]
-    query = "INSERT INTO public.IsProvenance(Guid, Description, IdProvenanceGroup, IsActive, ExternalCode,PatientCD,PublicationWeb,IsPriceListMandatory,IsChargeMandatory,IsOrderToNotify) VALUES (UUID(), %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    query = "INSERT INTO public.IsProvenance(Guid, Description, IdProvenanceGroup, IsActive, ExternalCode,PatientCD,PublicationWeb,IsPriceListMandatory,IsChargeMandatory,IsOrderToNotify) VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     
     cursor.execute(query,(respuesta['Description_o'],respuesta['s_go'],respuesta['IsAc'],respuesta['AltCode_or'],respuesta['PatientCD'],respuesta['PublicationWeb'],respuesta['IsPriceListMandatory'],respuesta['IsChargeMandatory'],respuesta['IsOrderToNotify']))
     connection.commit()
@@ -1576,7 +2337,7 @@ def agregar_mach():
     print("query mod: ",respuesta)
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = "INSERT INTO public.IsEquipment(Guid, Description, AETitle,ExternalCode, IdRoom,IdProvenance,IdModality,BrandEquipment,ModelEquipment,SNEquipment,IsActive,IP) VALUES (UUID(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    query = "INSERT INTO public.IsEquipment(Guid, Description, AETitle,ExternalCode, IdRoom,IdProvenance,IdModality,BrandEquipment,ModelEquipment,SNEquipment,IsActive,IP) VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     
     cursor.execute(query,(respuesta['Description_mach'],respuesta['AETitle'],respuesta['Ext_code_equip'],respuesta['s_sala'],respuesta['s_proc'],respuesta['s_moda'],respuesta['equip_brand'],respuesta['equip_model'],respuesta['equip_sn'],respuesta['IsAc_mach'],respuesta['equip_ip']))
     connection.commit()
@@ -1609,7 +2370,7 @@ def agregar_dia():
     cursor.execute(query,(respuesta["id_agenda_"],))
     IdAgenda=cursor.fetchall()[0][0]
     
-    query = "INSERT INTO public.IsAgendaDays(Guid, IdAgenda, Day,StartTime, EndTime,SlotNumber,PlacePerSlot) VALUES (UUID(), %s, %s, %s, %s, %s, %s)"
+    query = "INSERT INTO public.IsAgendaDays(Guid, IdAgenda, Day,StartTime, EndTime,SlotNumber,PlacePerSlot) VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s)"
     
     cursor.execute(query,(IdAgenda,respuesta['dia_ag'],respuesta['hora_inicio_dia'],respuesta['hora_final_dia'],respuesta['n_slots'],respuesta['lugares_x_slots'],))
     connection.commit()
@@ -1636,7 +2397,7 @@ def agregar_business_units():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsBusinessUnit(Guid, Description, Code, ExternalCode,HttpPacs,IsActive,IsQuestionListMandatory,IsTechnicianMandatory) VALUES (UUID(), %s, %s, %s, %s, %s, %s, %s)"
+    query = "INSERT INTO public.IsBusinessUnit(Guid, Description, Code, ExternalCode,HttpPacs,IsActive,IsQuestionListMandatory,IsTechnicianMandatory) VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s)"
     
     cursor.execute(query, (respuesta['Description_bu'], respuesta['code_bu'], respuesta['ex_code_bu'], respuesta['http_pacs'], respuesta['IsAc_bu'],respuesta['questions_manda'],respuesta['tecnico_obl'],))
     connection.commit()
@@ -1707,7 +2468,7 @@ def agregar_room():
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
 
-    query = "INSERT INTO public.IsRoom(Guid, Description, ExternalCode, IsActive) VALUES (UUID(), %s, %s, %s)"
+    query = "INSERT INTO public.IsRoom(Guid, Description, ExternalCode, IsActive) VALUES (uuid_generate_v4(), %s, %s, %s)"
     
     cursor.execute(query, (respuesta['Description_room'], respuesta['ExtCode_room'], respuesta['IsAc_room'],))
     connection.commit()
@@ -1733,7 +2494,7 @@ def agregar_agenda():
         respuesta['fecha_fin_agenda_input']=None
 
     print(respuesta)
-    query = "INSERT INTO public.IsAgenda(Guid, Description, IdEquipment, StartDate,EndDate,ExternalCode,IsActive) VALUES (UUID(), %s, %s, %s,%s,%s,%s)"
+    query = "INSERT INTO public.IsAgenda(Guid, Description, IdEquipment, StartDate,EndDate,ExternalCode,IsActive) VALUES (uuid_generate_v4(), %s, %s, %s,%s,%s,%s)"
     
     cursor.execute(query, (respuesta['Description_agenda'], respuesta['s_equip'], respuesta['fecha_inicio_agenda_input'],respuesta['fecha_fin_agenda_input'],respuesta['Ex_agenda'],respuesta['IsAc_ag']))
     connection.commit()
@@ -1763,6 +2524,207 @@ def actualizar_codigo():
     
     # Crear un objeto de respuesta JSON
     response=[respuesta['ministerial_code'],respuesta['Description_code'],respuesta['group_code']]
+    response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
+
+    # Enviar el objeto JSON como respuesta
+    return jsonify(response_data)
+
+@blueprint.route('/actualizar_med_sol', methods=['POST']) 
+def actualizar_med_sol():
+    # Hacer una copia mutable de request.form
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Modificar la consulta SQL para no incluir la columna Guid
+    query = f"UPDATE public.isrequestingphysician SET description = '{respuesta['description']}', phone = '{respuesta['phone']}', mail = '{respuesta['mail']}',note = '{respuesta['notes']}' WHERE Guid = '{respuesta['id_ms']}';"
+    
+    cursor.execute(query)
+    connection.commit()
+    
+    # Crear un objeto de respuesta JSON
+    response=[respuesta['description'],respuesta['phone'],respuesta['mail'],respuesta['notes']]
+    response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
+
+    # Enviar el objeto JSON como respuesta
+    return jsonify(response_data)
+
+@blueprint.route('/actualizar_cita', methods=['POST']) 
+def actualizar_cita():
+    # Hacer una copia mutable de request.form
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    if not respuesta['id_est']:
+        query = f"UPDATE public.tbagendaevents SET idmed = '{respuesta['s_mref']}', idmed_sol = '{respuesta['s_msol']}' WHERE Guid = '{respuesta['id_ec']}';"
+    else:
+        query = f"UPDATE public.tbagendaevents SET idmed = '{respuesta['s_mref']}', idmed_sol = '{respuesta['s_msol']}', idexam = '{respuesta['id_est']}' WHERE Guid = '{respuesta['id_ec']}';"
+      
+    cursor.execute(query)
+    connection.commit()
+
+    query=f"SELECT username FROM public.tbuser WHERE guid='{respuesta['s_mref']}'"
+    cursor.execute(query)
+    mref=cursor.fetchone()[0]
+
+    # Crear un objeto de respuesta JSON
+    response=[respuesta['nombre_modal'],respuesta['fecha'],mref,respuesta['ex_old'],respuesta['s_msol']]
+    response_data = {"success": True, 'message': 'Inserción exitosa', 'data': response}
+
+    # Enviar el objeto JSON como respuesta
+    return jsonify(response_data)
+
+def get_admision_accesion_number():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT LocalAcc, AdmisionNumber FROM tbExamination ORDER BY CreatedOn DESC LIMIT 1 """
+    cursor.execute(query)
+    dato = cursor.fetchone()
+    
+    if dato:
+        lastAcc = dato[0]
+        lastAdm = dato[1]
+
+        # Extraer parte numérica del LocalAcc
+        parte_numerica_acc = ''.join(filter(str.isdigit, lastAcc))
+
+        # Extraer parte numérica del AdmisionNumber
+        parte_numerica_adm = ''.join(filter(str.isdigit, lastAdm))
+        # Convertir la parte numérica a entero y aumentar en 1
+        NewAdm = f"ADM{int(parte_numerica_adm) + 1:03d}"
+    else:
+        parte_numerica_acc = "000"
+        NewAdm = "ADM001"
+    newAcc = f"ACC{int(parte_numerica_acc) + 1 }"
+
+    connection.close()
+    return(newAcc,NewAdm)
+
+
+@blueprint.route('/admisionar_cita', methods=['POST']) 
+def admisionar_cita():
+    # Obtener los datos del formulario
+    dataId = request.form.get('dataId')
+
+    # Obtener los datos del formulario
+    
+    idevent = request.form.get('idevent')
+    idequip = request.form.get('idequip')
+    
+    # Imprimir para depuración
+    print('idevent:', idevent)
+    print('idequip:', idequip)
+
+    newAcc,NewAdm=get_admision_accesion_number()
+
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    query=f"SELECT idmed,idpatient,idexam,idmed_sol FROM public.tbagendaevents WHERE guid='{idevent}'"
+    cursor.execute(query)
+    event=cursor.fetchone()
+
+    idmed=event[0]
+    idpatient=event[1]
+    idexam=event[2]
+    idmed_sol=event[3]
+
+    query = f"""SELECT PatientId, Surname, Name, NationalCode, SexCode FROM public.datapatient WHERE Guid='{idpatient}'"""
+    cursor.execute(query)
+    patient = cursor.fetchone()
+
+    study_instance_uid = pydicom.uid.generate_uid()
+
+    query = f"""
+            INSERT INTO public.tbExamination(
+                Guid, LocalAcc, IdExam, IdPatient, IdEquipment, AdmisionNumber, IsAdmitted, IsExecuted,IsSentWorkList, CreatedOn,StudyInstanceUID
+            ) VALUES (
+                uuid_generate_v4(), '{newAcc}', '{idexam}', '{patient[0]}', '{idequip}', '{NewAdm}', 1, 0,1, NOW(),'{study_instance_uid}'
+            )
+        """
+    print(query)
+    cursor.execute(query)
+    connection.commit()
+
+    #Vamos con el HL7
+
+    query = f"""SELECT ie.guid, ie.Description, ie.Aetitle, im.description FROM public.isequipment ie
+                INNER JOIN public.ismodality im on ie.IdModality=im.guid
+                WHERE ie.guid='{idequip}'"""
+    cursor.execute(query)
+    equipo_data = cursor.fetchone()
+
+    query = f"""SELECT description FROM public.exam WHERE guid='{idexam}'"""
+    cursor.execute(query)
+    examen_descr = cursor.fetchone()[0]
+
+    message = (
+            "MSH|^~\&|HIS|RIS|PACS|Radiology|202306241200|QUE|ORM^O01|123456|P|2.3\r"
+            f"PID|2002||{patient[0]}^^^public||{patient[1]} {patient[2]}|{patient[3]}|19700101|{patient[4]}||||||||M\r"
+            f"PV1|1001|I|^^^Department|||||||^Referring^Doctor|||||||||{NewAdm}\r"
+            f"ORC|NW||||SC||1^once^^^^S||T||||||||ClinicaGaleno|\r"
+            f"OBR|1|\r"
+            f"IPC|{newAcc}||{study_instance_uid}||{equipo_data[3]}|{examen_descr}|||{equipo_data[2]}|||"
+        )
+
+    try:
+        print("mensaje hl7: ", message)
+
+        # Enviar el mensaje HL7 al servidor de worklist
+        response = send_hl7_message(message, '192.168.31.56', 2575)
+
+        if response:  # Assuming send_hl7_message returns True if successful
+            print(f"Mensaje HL7 enviado correctamente para {newAcc}")
+        else:
+            print(f"Fallo al enviar el mensaje HL7 para {newAcc}")
+
+        # Pausa de 10 milisegundos para evitar conflictos
+        time.sleep(1)
+    except Exception as e:
+        print(f"Error al enviar mensaje HL7 para {newAcc}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+    # Tengo que crear tambien el reporte, por lo que busco el id del examination recien creado, y hago una entrada en tbreport.
+
+    query = f"""SELECT Guid FROM public.tbExamination WHERE AdmisionNumber='{NewAdm}'"""
+    cursor.execute(query)
+    guid=cursor.fetchone()[0]
+    query = f"""
+        INSERT INTO public.tbReport(
+            Guid, AdmNumber, IdExamination, IdPatient, Date
+        ) VALUES (
+            uuid_generate_v4(), '{NewAdm}', '{guid}', '{patient[0]}',NOW()
+        )
+    """
+    cursor.execute(query)
+    connection.commit()
+
+    # Por ultimo me queda eliminar el evento de la tabla tbagendaevents
+    query = f"""DELETE FROM public.tbagendaevents WHERE guid='{idevent}'"""
+    cursor.execute(query)
+    connection.commit()
+    return jsonify({"success": True})
+
+
+
+@blueprint.route('/actualizar_item_agenda', methods=['POST']) 
+def actualizar_item_agenda():
+    # Hacer una copia mutable de request.form
+    respuesta = request.form.to_dict()
+    print(respuesta)
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    
+    # Modificar la consulta SQL para no incluir la columna Guid
+    query = f"UPDATE public.isagendameditem SET day = '{respuesta['day']}', timefrom = '{respuesta['timefrom']}', timeto = '{respuesta['timeto']}',initday = '{respuesta['initday']}',finishday = '{respuesta['finishday']}' WHERE Guid = '{respuesta['id_item_agenda']}';"
+    
+    cursor.execute(query)
+    connection.commit()
+    
+    # Crear un objeto de respuesta JSON
+    response=[respuesta['day'],respuesta['timefrom'],respuesta['timeto'],respuesta['initday'],respuesta['finishday']]
     response_data = {'status': 'OK', 'message': 'Inserción exitosa', 'data': response}
 
     # Enviar el objeto JSON como respuesta
@@ -1810,12 +2772,12 @@ def actualizar_examen():
     cursor.execute(query,(respuesta['s_modality'],))
     modality=cursor.fetchone()[0]
 
-    query= """UPDATE public.Exam SET Description=%s, IdMinisterialCode=%s, IdModality=%s, ExecutionTime=%s, IsActive=%s WHERE Guid=%s"""
+    query= """UPDATE public.Exam SET Description=%s, IdMinisterialCode=%s, IdModality=%s, ExecutionTime=%s, IsActive=%s, precio=%s WHERE Guid=%s"""
     
-    cursor.execute(query, (respuesta['Description_ex'], respuesta['s_cod_min'], respuesta['s_modality'], respuesta['time_execution'],respuesta['IsAc_ex'],respuesta['id_examen']))
+    cursor.execute(query, (respuesta['Description_ex'], respuesta['s_cod_min'], respuesta['s_modality'], respuesta['time_execution'],respuesta['IsAc_ex'],respuesta['precio'],respuesta['id_examen']))
     connection.commit()
 
-    response=[respuesta['Description_ex'],cod_min, modality,respuesta['time_execution'],respuesta['IsAc_ex']]
+    response=[respuesta['Description_ex'],cod_min, modality,respuesta['time_execution'],respuesta['IsAc_ex'],respuesta['precio']]
     response_data = {'status': 'OK', 'message': 'Inserción exitosa','data': response}
     connection.close()
     return jsonify(response_data)
@@ -2032,7 +2994,7 @@ def rellenar_select_cond_id():
 
     connection = psycopg2.connect(**config)
     cursor = connection.cursor()
-    query = f"SELECT Guid,{dNeeded} FROM {TableId} WHERE {colCond}@> ARRAY['{IdCond}']::uuid[];"
+    query = f"SELECT Guid,{dNeeded} FROM {TableId} WHERE {colCond}='{IdCond}';"
     print(query)
     cursor.execute(query)
 
@@ -2061,8 +3023,265 @@ def get_inf_predef():
         }})
     else:
         return jsonify({'status': 'Error', 'message': 'No data found'})
+    
+@blueprint.route('/get_citas', methods=['GET']) 
+def get_citas():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT tba.guid,pat.name || ' ' || pat.surname as fullname,tba.comienzo ,us.username,ex.description, tba.idmed_sol
+                FROM public.tbagendaevents tba
+                INNER JOIN public.datapatient pat on tba.idpatient=pat.guid
+                LEFT JOIN public.isrequestingphysician rp on tba.idmed_sol=rp.guid
+                INNER JOIN public.tbuser us on tba.idmed=us.guid
+                INNER JOIN public.exam ex on tba.idexam=ex.guid"""
+    
+    cursor.execute(query)
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_citas_for_today', methods=['GET']) 
+def get_citas_for_today():
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    query = """SELECT tba.guid,pat.name || ' ' || pat.surname as fullname,tba.comienzo ,us.username,ex.description, tba.idmed_sol
+                FROM public.tbagendaevents tba
+                INNER JOIN public.datapatient pat on tba.idpatient=pat.guid
+                LEFT JOIN public.isrequestingphysician rp on tba.idmed_sol=rp.guid
+                INNER JOIN public.tbuser us on tba.idmed=us.guid
+                INNER JOIN public.exam ex on tba.idexam=ex.guid
+                WHERE DATE(tba.comienzo) = current_date"""
+    
+    cursor.execute(query)
+    return jsonify(cursor.fetchall())
+
+@blueprint.route('/get_events', methods=['POST'])
+def get_events():
+    data = request.get_json()
+    prof_ag = data.get('prof_ag')
+    print(f"Received prof_ag: {prof_ag}")
+
+    # Conectar a la base de datos
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    if data.get('prof_ag_text'):
+        query_events = f"""SELECT ae.guid, CONCAT(dp.name, ' ', dp.surname) AS pat, ae.idmodality, ae.idexam, ae.comienzo, fin 
+                        FROM public.tbagendaevents ae
+                        INNER JOIN public.datapatient dp on dp.guid=ae.idpatient
+                        WHERE idmed=(SELECT guid FROM public.tbuser WHERE username='{data.get('prof_ag_text')}')"""
+    else:
+    # Consulta a la base de datos para obtener los eventos existentes
+        query_events = f"""SELECT ae.guid, CONCAT(dp.name, ' ', dp.surname) AS pat, ae.idmodality, ae.idexam, ae.comienzo, fin 
+                        FROM public.tbagendaevents ae
+                        INNER JOIN public.datapatient dp on dp.guid=ae.idpatient
+                        WHERE idmed='{prof_ag}'"""
+    cursor.execute(query_events)
+    result_events = cursor.fetchall()
+
+    # Consulta a la base de datos para obtener los horarios de trabajo del médico
+    if data.get('prof_ag_text'):
+        query_schedule = f"SELECT day, timefrom, timeto FROM public.isagendameditem WHERE idmed=(SELECT guid FROM public.tbuser WHERE username='{data.get('prof_ag_text')}')"
+        
+    else:
+        query_schedule = f"SELECT day, timefrom, timeto FROM public.isagendameditem WHERE idmed='{prof_ag}'"
+    # Consulta a la base de datos para obtener los eventos existentes
+        
+    print(query_schedule)
+    
+    cursor.execute(query_schedule)
+    result_schedule = cursor.fetchall()
+
+    # Procesar los resultados y construir los eventos existentes
+    events = []
+    for row in result_events:
+        event = {
+            'title': f'Paciente: {row[1]}, Modality: {row[2]}',  # Puedes personalizar el título como desees
+            'start': row[4].strftime('%Y-%m-%dT%H:%M:%S'),  # Fecha y hora de inicio en formato ISO 8601
+            'end': row[5].strftime('%Y-%m-%dT%H:%M:%S'),    # Fecha y hora de fin en formato ISO 8601
+            'editable': False,  # Marcar los eventos del backend como no editables
+            'color': 'gray',  # Color gris para los eventos del backend
+            'guid':row[0]
+        }
+        events.append(event)
+
+    # Construir los horarios de trabajo
+    work_hours = []
+    days_mapping = {
+        'lunes': 1,
+        'martes': 2,
+        'miércoles': 3,
+        'jueves': 4,
+        'viernes': 5,
+        'sábado': 6,
+        'domingo': 0
+    }
+    for row in result_schedule:
+        work_hours.append({
+            'day': days_mapping[row[0].lower()],
+            'start': row[1].strftime('%H:%M:%S'),
+            'end': row[2].strftime('%H:%M:%S')
+        })
+
+    # Cerrar la conexión a la base de datos
+    cursor.close()
+    connection.close()
+
+    print(f"Returning events: {events} and work hours: {work_hours}")
+    return jsonify({'events': events, 'work_hours': work_hours})
+
+@blueprint.route('/get_block_prestacion')
+def get_block_prestacion():
+    return render_template('includes/blocks/block_prestacion.html')
+
+# @blueprint.route('/insertar_citas', methods=['POST'])
+# def insertar_citas():
+#     data = request.get_json()
+#     # Conectar a la base de datos
+#     connection = psycopg2.connect(**config)
+#     cursor = connection.cursor()
+
+#     # Zona horaria local, ajusta esto según tu zona horaria
+#     local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
+
+#     for exam in data['exams']:
+#         codigoexam = exam['examenId'][:3]
+#         descrip = exam['examenId'][6:]
+#         print("descrip:", descrip)
+#         patient = data['patientId']
+#         # Consulta a la base de datos para obtener los eventos existentes
+#         query = f"""SELECT guid FROM public.exam WHERE description='{descrip}' """
+#         cursor.execute(query)
+#         idexam = cursor.fetchone()[0]
+
+#         # Convertir las horas a la zona horaria local y luego restar 3 horas
+#         init_local = local_tz.localize(datetime.strptime(exam['init'], '%Y-%m-%dT%H:%M:%S'))
+#         finish_local = local_tz.localize(datetime.strptime(exam['finish'], '%Y-%m-%dT%H:%M:%S'))
+
+#         init_adjusted = init_local - timedelta(hours=3)
+#         finish_adjusted = finish_local - timedelta(hours=3)
+
+#         # Convertir a formato ISO 8601
+#         init_str = init_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+#         finish_str = finish_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+
+#         query_events = f"""INSERT INTO public.tbagendaevents(guid,idmed,idpatient,idexam,comienzo,fin)
+#                             VALUES (uuid_generate_v4(),'{exam['profesional']}','{patient}','{idexam}','{init_str}','{finish_str}') """
+#         print(query_events)
+#         cursor.execute(query_events)
+#         connection.commit()
+        
+#     print(data)
+#     return jsonify({"success": True})
+
+@blueprint.route('/static/templates/includes/toast/<path:filename>')
+def custom_static(filename):
+    return send_from_directory('templates/includes/toast', filename)
+
+@blueprint.route('/insertar_citas', methods=['POST'])
+def insertar_citas():
+    data = request.get_json()
+    print(data)
+    # Conectar a la base de datos
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+
+    # Zona horaria local, ajusta esto según tu zona horaria
+    local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
+
+    for exam in data['exams']:
+        # codigoexam = exam['examenId'][:3]
+        descrip = exam['title'][6:]
+        print("descrip:", descrip)
+        patient = data['patientId']
+        # Consulta a la base de datos para obtener los eventos existentes
+        print(exam['examId'])
+        idexam = exam['examId']
+        
+
+        # Quitar el sufijo .000Z antes de convertir
+        init_str = exam['init'].replace('.000Z', '')
+        finish_str = exam['finish'].replace('.000Z', '')
+
+        # Convertir las horas a la zona horaria local y luego restar 3 horas
+        init_local = local_tz.localize(datetime.strptime(init_str, '%Y-%m-%dT%H:%M:%S'))
+        finish_local = local_tz.localize(datetime.strptime(finish_str, '%Y-%m-%dT%H:%M:%S'))
+
+        init_adjusted = init_local - timedelta(hours=3)
+        finish_adjusted = finish_local - timedelta(hours=3)
+
+        # Convertir a formato ISO 8601
+        init_str_adjusted = init_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+        finish_str_adjusted = finish_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+
+        query_events = f"""INSERT INTO public.tbagendaevents(guid,idmed,idpatient,idexam,comienzo,fin)
+                            VALUES (uuid_generate_v4(),'{exam['profesional']}','{patient}','{idexam}','{init_str_adjusted}','{finish_str_adjusted}') """
+        print(query_events)
+        cursor.execute(query_events)
+        connection.commit()
+        
+    print(data)
+    return jsonify({"success": True})
 
 
+@blueprint.route('/actualizar_evento_cita', methods=['POST'])
+def actualizar_evento_cita():
+    data = request.get_json()
+    # Conectar a la base de datos
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    print(data)
+
+    # Zona horaria local, ajusta esto según tu zona horaria
+    local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
+
+    # Convertir las horas a UTC
+    init_utc = datetime.fromisoformat(data['start'].replace('Z', '+00:00')).astimezone(pytz.utc)
+    finish_utc = datetime.fromisoformat(data['end'].replace('Z', '+00:00')).astimezone(pytz.utc)
+
+    # Convertir de UTC a la zona horaria local
+    init_local = init_utc.astimezone(local_tz)
+    finish_local = finish_utc.astimezone(local_tz)
+
+    # Convertir a formato ISO 8601 sin la 'Z'
+    init_str_adjusted = init_local.strftime('%Y-%m-%dT%H:%M:%S')
+    finish_str_adjusted = finish_local.strftime('%Y-%m-%dT%H:%M:%S')
+
+    query_events = f"""UPDATE public.tbagendaevents SET comienzo='{init_str_adjusted}', fin='{finish_str_adjusted}' WHERE guid='{data['guid']}'"""
+    print(query_events)
+    cursor.execute(query_events)
+    connection.commit()
+        
+    return jsonify({"success": True})
+
+    data = request.get_json()
+    # Conectar a la base de datos
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    print(data)
+
+    # Zona horaria local, ajusta esto según tu zona horaria
+    local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
+
+    # Quitar el sufijo .000Z antes de convertir
+    init_str = data['start'].replace('.000Z', '')
+    finish_str = data['end'].replace('.000Z', '')
+
+    # Convertir las horas a la zona horaria local y luego restar 3 horas
+    init_local = local_tz.localize(datetime.strptime(init_str, '%Y-%m-%dT%H:%M:%S'))
+    finish_local = local_tz.localize(datetime.strptime(finish_str, '%Y-%m-%dT%H:%M:%S'))
+
+    init_adjusted = init_local - timedelta(hours=0)
+    finish_adjusted = finish_local - timedelta(hours=0)
+
+    # Convertir a formato ISO 8601
+    init_str_adjusted = init_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+    finish_str_adjusted = finish_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+
+    query_events = f"""UPDATE public.tbagendaevents SET comienzo='{init_str_adjusted}', fin='{finish_str_adjusted}' WHERE guid='{data['guid']}'"""
+    print(query_events)
+    cursor.execute(query_events)
+    connection.commit()
+        
+    
+    return jsonify({"success": True})
 
 @blueprint.route('/crear_worklist', methods=['POST']) 
 def crear_worklist():
@@ -2072,11 +3291,7 @@ def crear_worklist():
 
     print("data:", data)
 
-    query = """
-        SELECT LocalAcc, AdmisionNumber FROM tbExamination
-        ORDER BY CreatedOn DESC
-        LIMIT 1
-    """
+    query = """SELECT LocalAcc, AdmisionNumber FROM tbExamination ORDER BY CreatedOn DESC LIMIT 1 """
     cursor.execute(query)
     dato = cursor.fetchone()
     
@@ -2098,6 +3313,7 @@ def crear_worklist():
     query = f"""SELECT PatientId, Surname, Name, NationalCode, SexCode FROM public.datapatient WHERE Guid='{data['patientId']}'"""
     cursor.execute(query)
     patient = cursor.fetchone()
+
     contador = 0
 
     for exam in data['exams']:
@@ -2106,22 +3322,25 @@ def crear_worklist():
         contador += 1
         print("acc: ", newAcc)
 
-        examen_descr = exam['examenId']
-        equipo = exam['equipo']
+        examId = exam['examId']
+        equipo = exam['equip']
 
-        query = f"""SELECT Guid, Description, Aetitle, IdModality FROM public.isequipment WHERE description='{equipo}'"""
+        query = f"""SELECT Guid, Description, Aetitle, IdModality FROM public.isequipment WHERE guid='{equipo}'"""
+
         cursor.execute(query)
         equipo_data = cursor.fetchone()
+
         cursor.fetchall()  # Consumir todos los resultados
 
         query = f"""SELECT Guid, ExternalCode FROM public.ismodality WHERE Guid='{equipo_data[3]}'"""
+
         cursor.execute(query)
         modalidad = cursor.fetchone()
         cursor.fetchall()  # Consumir todos los resultados
 
-        query = f"""SELECT Guid FROM public.exam WHERE Description='{examen_descr}'"""
+        query = f"""SELECT description FROM public.exam WHERE guid='{examId}'"""
         cursor.execute(query)
-        ex_id = cursor.fetchone()
+        ex_descrip = cursor.fetchone()[0]
         cursor.fetchall()  # Consumir todos los resultados
 
         # Construir el mensaje HL7
@@ -2132,17 +3351,17 @@ def crear_worklist():
             f"PV1|1001|I|^^^Department|||||||^Referring^Doctor|||||||||{NewAdm}\r"
             f"ORC|NW||||SC||1^once^^^^S||T||||||||ClinicaGaleno|\r"
             f"OBR|1|\r"
-            f"IPC|{newAcc}||{study_instance_uid}||{modalidad[1]}|{examen_descr}|||{equipo_data[2]}|||"
+            f"IPC|{newAcc}||{study_instance_uid}||{modalidad[1]}|{ex_descrip}|||{equipo_data[2]}|||"
         )
-
+        print("datos para la query: ",newAcc,ex_descrip,patient,equipo_data,study_instance_uid)
         query = f"""
             INSERT INTO public.tbExamination(
                 Guid, LocalAcc, IdExam, IdPatient, IdEquipment, AdmisionNumber, IsAdmitted, IsExecuted,IsSentWorkList, CreatedOn,StudyInstanceUID
             ) VALUES (
-                uuid_generate_v4(), '{newAcc}', '{ex_id[0]}', '{patient[0]}', '{equipo_data[0]}', '{NewAdm}', 1, 0,1, NOW(),'{study_instance_uid}'
+                uuid_generate_v4(), '{newAcc}', '{examId}', '{patient[0]}', '{equipo_data[0]}', '{NewAdm}', 1, 0,1, NOW(),'{study_instance_uid}'
             )
         """
-        print(query)
+        
         cursor.execute(query)
         connection.commit()
 
@@ -2227,6 +3446,7 @@ def route_template(template):
 
         # Detect the current page
         segment = get_segment(request)
+        print("el segmento es:",segment)
 
         # Serve the file (if exists) from app/templates/home/FILE.html
         return render_template("home/" + template, segment=segment)

@@ -1,7 +1,91 @@
 <div class="row">
     <div id="modal_content" class="mt-4" data-id=""></div>
   </div>
-  
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_users" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo usuario</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/create_user" id="Form_user">
+                    
+                    <input type="hidden" name="id_user" id="id_user">
+                    
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Nombre de usuario</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="username" name="username" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Tipo de usuario</label>
+                        </div>
+                        <div class="col-md-9">
+                            <select id="s_type_of_user" name="s_type_of_user">
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Nombre</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="name" name="name" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Apellido</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="surname" name="surname" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">DNI</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="nationalnumber" name="nationalnumber" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="mail">Mail</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="text_mail" name="text_mail">
+                            
+                        </div>
+                    </div>
+                    
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_user">Crear usuario</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+
 <div class="row">
     <div class="col-12">
         <div class="card mb-4">
@@ -13,19 +97,18 @@
             <div class="container-fluid">
             <div class="row">
                 <div class="col-md-3">
-                    <label for="search_group_origins">
+                    <label for="search_group_users">
                         Buscar usuario
                     </label>
                 </div>
                 <div class="col-md-6">
-                    <input class="form-control" id="label_origins" name="group_origins">
+                    <input class="form-control" id="search_group_users" name="search_group_users">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-origen">
-                    
-                    <button type="button" id="b_nuevo_origen" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_or" onclick="OpenModal('/modal_user.html')">Nuevo usuario</button>
-                </div>
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_user" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_users" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>           
                 
             </div>
         </div>
@@ -43,8 +126,13 @@
                     <h6>Lista de usuarios</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_user" class="btn btn-secondary botones_sp" disabled patient-id="" onclick="OpenModal('modal_users')">Editar Usuario</button>
-                    <button type="button" id="b_eliminar_user" class="btn btn-secondary botones_sp delete_b" disabled patient-id="">Eliminar usuario</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_user" id="b_editar_user"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_user delete_b" id="b_eliminar_user"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
                 </div>
                 
             </div>
@@ -59,7 +147,8 @@
                         <th>Tipo</th>
                         <th>Nombre</th>
                         <th>Apellido</th>
-                        <th>DNI</th>    
+                        <th>DNI</th>   
+                        <th>Email</th>  
                         <th>Activado</th>                    
                     </tr>
                 </thead>
@@ -71,4 +160,4 @@
     </div>
     </div>
     </div>
-    <script src="{{ config.ASSETS_ROOT }}/js/users.js"></script>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/users.js"></script> -->

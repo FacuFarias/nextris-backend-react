@@ -2,19 +2,36 @@
     <div class="col-12">
       <div class="card mb-4">
         <div class="card-header pb-0">
-          <h6>Selecciona examen</h6>
+            <div class="row">
+                <div class="col-4">
+                    <h6>Selecciona examen</h6>
+                </div>
+                <div class="col-6">
+                    <input class="form-control" id="l_exam" name="l_exam">
+                </div>
+                <div class="col-2 d-flex justify-content-end">
+                    <button type="button" id="buscar_estudio" class="btn btn-nr-primary rounded-circle shadow-primary">
+                        <i class="fa fa-search" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
+                    <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+                        <i class="fa fa-filter" aria-hidden="true"></i> 
+                      </button>
+                </div>
+            </div>
         </div>
+        <div id="collapseCardBody" class="collapse">
         <div class="card-body px-0 pt-0 pb-2">
           <div class="row">
             <div class="col-md-5">
                 <div class="row">
                     <div class="col-md-4">
-                        <label for="tipoexamen">
+                        <label for="tipoexamen" class="form-control-label">
                             Tipo de examen:
                         </label>
                     </div>
                     <div class="col-md-8">
-                        <select id="tipo_examen" name="tipo_examen" onchange="filtrar_estudios()">
+                        <select id="tipo_examen" name="tipo_examen" class="form-control">
+                            <option value="default">default </option>
                         </select>
                     </div>
                 </div>      
@@ -22,36 +39,22 @@
             <div class="col-md-5">
                 <div class="row">
                     <div class="col-md-4">
-                        <label for="tipoexamen">
+                        <label for="tipoexamen" class="form-control-label">
                             Partes del cuerpo:
                         </label>
                     </div>
                     <div class="col-md-8">
-                        <select id="parte_cuerpo" name="parte_cuerpo" onchange="filtrar_estudios()">
-                            <option value="Todas">Todas </option>
-                            <option value="Abdomen">Abdomen </option>
-                            <option value="Abdomen y pelvis">Abdomen y Pelvis</option>
-                            <option value="CABEZA Y CUELLO">Cabeza y cuello</option>
-                            <option value="Columna Vertebral">Columna Vertebral</option>
-                            <option value="CUERPO ENTERO">Cuerpo Entero</option>
-                            <option value="EXTREMIDADES INFERIORES">Extremidades inferiores</option>
-                            <option value="EXTREMIDADES SUPERIORES">Extremidades superiores</option>
-                            <option value="PELVIS">Pelvis</option>
-                            <option value="TORAX">Torax</option>
-                            <option value="TORAX Y ABDOMEN">Torax y abdome</option>
-
+                        <select id="parte_cuerpo" name="parte_cuerpo" class="form-control">
+                            <option value="default">default </option>
                         </select>
                     </div>
                 </div>      
             </div>
-            <div class="col-md-2">
-                
-                    <button type="button" id="generar-ordenes" class="btn btn-success boton_est">Generar Ordenes</button>
-                    
-            </div>
           </div>
         
       </div>
+    </div>
+
     </div>
   </div>
 
@@ -64,7 +67,9 @@
                     <h6>Estudios</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="seleccionar-estudio" class="btn btn-secondary boton_est" disabled patient-id="">Seleccionar</button>
+                    <button type="button" id="seleccionar-estudio" class="btn btn-nr-primary rounded-circle shadow-primary mx-2  boton_est" disabled>
+                        <i class="fa fa-plus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
                 </div>
             </div>
             
@@ -98,7 +103,9 @@
                     <h6>Estudios Seleccionados</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="quitar-estudio" class="btn btn-secondary botones" disabled patient-id="">Quitar estudio</button>
+                    <button type="button" id="quitar-estudio"  class="btn btn-nr-primary rounded-circle shadow-primary mx-2  botones btn-danger" disabled>
+                        <i class="fa fa-minus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
                 </div>
             </div>
             
@@ -129,8 +136,10 @@
                       <h6>Equipos disponibles</h6>
                   </div>
                   <div class="col-md-8 d-flex justify-content-end">
-                      <button type="button" id="sel-equip" class="sel_equip btn btn-secondary botones" disabled patient-id="">Sel Equipo</button>
-                  </div>
+                    <button type="button" id="sel-equip"  class="sel_equip btn btn-nr-primary rounded-circle botones" disabled>
+                        <i class="fa fa-check" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
+                </div>
               </div>
               
               

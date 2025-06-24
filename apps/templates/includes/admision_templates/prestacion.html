@@ -1,45 +1,50 @@
 <div class="row">
     <div class="col-12">
-      <div class="card mb-4">
-        <div class="card-header pb-0">
-          <h6>Datos de la prestación</h6>
-        </div>
-        <div class="card-body">
-            <div class="class row">
-                <div class="col-2">
-                    <p>Medico solicitante</p>
+        <div class="card mb-4">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-9">
+                        <h6>Datos de las prestaciones en Admision</h6>
+                    </div>
+                    <div class="col-md-3 d-flex justify-content-end align-items-center">
+                        <label for="cb_same_info" class="me-2">Coincidir Datos</label>
+                        <input type="checkbox" id="cb_same_info" name="cb_same_info" class="d-none">
+                        <i class="fa fa-toggle-off" id="cb_icon" aria-hidden="true" style="cursor: pointer;"></i>
+                    </div>
                 </div>
-
-                <div class="col-2">
-                    <select name="medico_solicitante" id="medico_solicitante"></select>
-                </div>
-
-                <div class="col-2">
-                    <p>Obra social</p>
-                </div>
-                <div class="col-2">
-                    <select name="obra_social" id="obra_social"></select>
-                </div>
-
-                <div class="col-2">
-                    <p>Urgencia</p>
-                </div>
-                <div class="col-2">
-                    <select name="urgencia" id="urgencia">
-                        <option value="baja">Baja</option>
-                        <option value="normal">Normal</option>
-                        <option value="alta">Alta</option>
-                    </select>
-                </div>
-
             </div>
-            <div class="row">
-                <button type="button" id="finalizar_orden" class="btn btn-success">Finalizar</button>
-            </div>
+            <div class="card-body collapse" id="allin1">
+                <div class="row">
+                    <div class="col-md-2">
+                        <p>Medico solicitante</p>
+                    </div>
+                    <div class="col-md-2">
+                        <select id="general_ms" class="medico_solicitante form-control"></select>
+                    </div>
+        
+                    <div class="col-md-2">
+                        <p>Obra social</p>
+                    </div>
+                    <div class="col-md-2">
+                        <select id="general_os" class="obra_social form-control"></select>
+                    </div>
 
+                    <div class="col-md-2">
+                        <p>urgencia</p>
+                    </div>
+                    <div class="col-md-2">
+                        <select id="urgencia" class="form-control"></select>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                            
+            </div>
         </div>
-    
-      </div>
     </div>
 </div>
 
+<div id="conteiner_blocks_prest">
+
+</div>
+ 

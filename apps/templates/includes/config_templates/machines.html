@@ -103,12 +103,11 @@
                 <div class="col-md-6">
                     <input class="form-control" id="search_mach" name="search_mach">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-mach">
-                    
-                    <button type="button" id="b_nuevo_mach" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_mach">Nuevo Equipo</button>
-                </div>
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_mach" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_mach" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>         
                 
             </div>
         </div>
@@ -126,8 +125,13 @@
                     <h6>Eqipos</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_mach" class="btn btn-secondary botones_mach" disabled patient-id="">Editar Equipo</button>
-                    <button type="button" id="b_eliminar_mach" class="btn btn-secondary botones_mach delete_b" disabled patient-id="">Eliminar Equipo</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_mach" id="b_editar_mach"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_mach delete_b" id="b_eliminar_mach"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
                 </div>
                 
             </div>

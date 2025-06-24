@@ -3,102 +3,279 @@
 {% block title %} Tables {% endblock title %}
 
 <!-- Specific CSS goes HERE -->
-{% block stylesheets %}{% endblock stylesheets %}
+{% block stylesheets %}
+<style>
+    /* Estilo para expandir la sección del informe cuando "Datos del examen" está colapsado */
+    .expand-report {
+        width: 100%; /* Expandir para ocupar todo el ancho disponible */
+    }
+
+    .report-container {
+        transition: width 0.3s ease; /* Transición suave para la expansión */
+    }
+</style>
+{% endblock stylesheets %}
 
 {% block content %}
-<!-- Incluye la biblioteca TinyMCE -->
-<script src="ruta/a/tinymce.min.js"></script>
 
-  <main class="main-content position-relative border-radius-lg ">
-
-      <div class="row">
-        <div class="col-12">
-          <div class="mb-4">
-            <div class="card-header pb-0">
-                
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <h2><!--Nombre del paciente--> (<!--AdmNumber-->)</h6>
-                    </div>
-                    <div class="col-md-8 d-flex justify-content-end">
-                        <button type="button" id="b_predef" class="btn btn-primary botones_informe" onclick="ModalPredef()">Predefinidos</button>
-                        <button type="button" id="b_historia_clinica" class="btn btn-primary botones_informe">Historia Clinica</button>
-                        <button type="button" id="b_ver_imagenes" class="btn btn-primary botones_informe">Ver imágenes</button>
-                        <button type="button" id="b_guardar_reporte" class="btn btn-primary botones_informe">Guardar</button>
-                        <button type="button" id="b_firmar_reporte" class="btn btn-primary botones_informe" >Firmar</button>
-                        <button type="button" id="b_ver_pdf" class="btn btn-primary botones_informe" >Ver PDF</button>
-                        <button type="button" id="b_atras_report" class="btn btn-danger botones_informe" >Volver Atras</button>
-                    </div>
-                </div>
-            </div> 
+<div class="modal fade" id="predefinedReportsModal" tabindex="-1" aria-labelledby="predefinedReportsLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+  
+        <div class="modal-header">
+          <h5 class="modal-title" id="predefinedReportsLabel">Seleccionar informe predefinido</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
+  
+        <div class="modal-body">
+  
+          <!-- Filtros -->
+          <div class="mb-3 d-flex justify-content-between align-items-center">
+            <div class="flex-grow-1 me-3">
+              <input type="text" id="filtroMedico" class="form-control" placeholder="Buscar por médico...">
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="checkSoloMias">
+              <label class="form-check-label" for="checkSoloMias">Solo mis plantillas</label>
+            </div>
+          </div>
+  
+          <!-- Tabla de informes -->
+          <table class="tabla-primary table" id="tabla_inf_predef">
+            <thead>
+              <tr>
+                <th>Descripción</th>
+                <th>Médico</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Cargado dinámicamente desde JS -->
+            </tbody>
+          </table>
+  
+        </div>
+  
+        <!-- Footer con botones -->
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" class="btn btn-primary boton_modal" id="btnAceptarInforme" disabled>Aceptar</button>
+        </div>
+  
       </div>
-      </div>
-
-       <!-- Secciones técnicas de examen, informe y conclusión -->
-        <div class="row">
-            <div class="col-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                <h5 class="card-title">Datos del examen</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <h6>Examen:</h6><br>
-                        <p><!--examen--></p>
-                    </div>
-                    <div class="row">
-                        <h6>Pregunta Clinica:</h6>
-                        <textarea class="form-control" id="text_pc" rows="4"><!--Pregunta clínica--></textarea>
-                    </div>
-                    
-                
-                </div>
-            </div>
-            </div>
-            <div class="col-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                <h5 class="card-title">Tecnicas de examen</h5>
-                </div>
-                <div class="card-body">
-                <textarea class="form-control" id="text_te" rows="8"><!--Tecnicas--></textarea>
-                </div>
-            </div>
-            </div>
-        </div>
-
-        <div class="row">
-            <div class="col-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                <h5 class="card-title">Informe</h5>
-                </div>
-                <div class="card-body">
-                <textarea class="form-control" id="text_inf" rows="8"><!--Informe--></textarea>
-                </div>
-            </div>
-            </div>
-
-            <div class="col-6">
-                <div class="card mb-4">
-                    <div class="card-header">
-                    <h5 class="card-title">Conclusión</h5>
-                    </div>
-                    <div class="card-body">
-                    <textarea class="form-control" id="text_conc" rows="8"><!--Conclusión--></textarea>
-                    </div>
-                </div>
-                </div>
-
-
-        </div>
-
     </div>
-  </main>
+  </div>
+  
+
+<main class="main-content position-relative">
+
+    <div class="row" id="top-informe">
+        <div class="col-12">
+            <div class="mb-2"> 
+                
+                <div class="card-body pt-3 pl-30">
+                    <div class="d-flex justify-content-between flex-wrap">
+                        <div class="col-md-4">
+                            <h4><!--Nombre del paciente--> (<!--AdmNumber-->)</h4>
+                        </div>
+                        <div class="col-md-8 d-flex justify-content-end">
+
+                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_historia_clinica">
+                                HC
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_guardar_reporte">
+                                <i class="fa fa-save" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_firmar_reporte">
+                                F
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_ver_pdf">
+                                PDF
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary rounded-circle btn-danger shadow-primary botones_sp" id="b_atras_report">
+                                <i class="fa fa-undo" aria-hidden="true" style="font-size: 25px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div> 
+            </div>
+        </div>
+    </div>
+
+    <!-- Secciones técnicas de examen, informe y conclusión -->
+    <div class="row">
+        <div class="col-6">
+            <div class="card  mx-1 mt-2 mb-2  row" id="card-datos">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6>Datos del examen</h6>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end align-items-center">
+                            <button type="button" id="b_toggle_collapse" class="btn btn-nr-primary btn-info">
+                                <i class="fa fa-angle-down" aria-hidden="true" style="font-size: 25px;"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div id="collapseDatosExamen" class="collapse">
+                    <div class="card-body-tiny">
+                        <div class="row">
+                            <h6>Examen:</h6><br>
+                            <p><!--examen--></p>
+                        </div>
+                        <div class="row">
+                            <h6>Pregunta Clinica:</h6>
+                            <textarea class="form-control" id="text_pc"><!--Pregunta clínica--></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-9">
+                            <h5>Informes Predefinidos</h5>
+                        </div>
+                        <div class="col-md-3 d-flex justify-content-end align-items-center">
+                            <button class="btn btn-primary" id="b_ver_predef" data-bs-toggle="modal" data-bs-target="#predefinedReportsModal">
+                                <i class="fas fa-eye"></i>
+                            </button>                           
+                        </div>
+                    </div>   
+                </div>
+            </div>
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>ECG</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end align-items-center">
+                            <button type="button" id="b_ver_ecg" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button type="button" id="b_cargar_ecg" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-upload"></i>
+                            </button>
+                            <input type="file" id="input_ecg" style="display: none;" />
+                            <input type="file" id="input_holter" style="display: none;" />
+                            <button type="button" id="b_asociar_ecg" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-link"></i>
+                            </button>
+                            
+                        </div>
+                    </div>   
+                </div>
+            </div>
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Holter</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end align-items-center">
+                            <button type="button" id="b_ver_holter" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button type="button" id="b_cargar_holter" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-upload"></i>
+                            </button>
+                            <button type="button" id="b_asociar_holter" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-link"></i>
+                            </button>
+                        </div>                            
+                        
+                    </div>   
+                </div>
+            </div>
+
+            
+
+
+            <div class="row report-container" id="report-container">
+                <div class="card  mx-1 mt-2 mb-2  expand-report" id="card-informe">
+                    <div class="card-header minimum-padding-v">
+                        <h5 class="card-title">Diagnostico Principal</h5>
+                    </div>
+                    <div class="card-body minimum-padding-f">
+                        <textarea class="form-control" id="text_dp"><!--Diagnostico Principal--></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-6" id="col2">
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-subjetivas">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Valoraciones Subjetivas</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end align-items-center">
+                            <button type="button" id="b_subjetivas_expand" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div class="card-body collapse minimum-padding-f">
+                    <textarea class="form-control" id="text_vs"><!--Val Sub--></textarea>
+                </div>
+            </div>
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-objetivas">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Valoraciones Objetivas</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end align-items-center">
+                            <button type="button" id="b_objetivas_expand" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div class="card-body collapse minimum-padding-f">
+                    <textarea class="form-control" id="text_vo"><!--Val Obj--></textarea>
+                </div>
+            </div>
+
+            
+
+            <div class="card  mx-1 mt-2 mb-2  row"  id="card-indicaciones">
+                <div class="card-header minimun-padding-v">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Indicaciones</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end">
+                            <button type="button" id="b_indic_expand" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div class="card-body collapse minimum-padding-f">
+                    <textarea class="form-control" id="text_ind"><!--Indicaciones--></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+    // Manejo del colapso con JavaScript
+    
+</script>
+
 
 {% endblock content %}
-
-

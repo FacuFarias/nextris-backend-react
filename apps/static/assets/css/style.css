@@ -1,8 +1,13 @@
 .fila-seleccionada {
-    background-color: #7371d6;
+    background-color: #AFA3BF !important;
     color: white;
 }
 
+.fila-blocked {
+  background-color: #226330;
+  color: white;
+}
+ 
 
 .card-tabla-paciente {
     max-height: calc(60vh - 200px) !important;  
@@ -18,11 +23,28 @@
   .tabla-paciente thead, .tabla-estudios thead{
     position: sticky;
     top: 0;
-    background-color: #372f7e;
+    background-color: #19134b;
     color: white;
     z-index: 1;
   }
-  
+
+  .tabla-primary thead, .tabla-estudios thead{
+    position: sticky;
+    top: 0;
+    background-color: #7021BF;
+    color: white;
+    z-index: 1;
+  }
+
+  /* Cambiar el color de fondo de las filas impares */
+.table tbody tr:nth-child(odd) {
+  background-color: #e9ecef;
+}
+
+/* Cambiar el color de fondo de las filas pares */
+.table tbody tr:nth-child(even) {
+  background-color: #fff;
+}  
 
   .custom-modal .modal-dialog {
     min-width: 40% !important;
@@ -79,3 +101,262 @@
   color: rgb(48, 109, 52) !important;
   font-weight: 600;
 }
+
+/* Ocultar los puntos de las listas en el menú lateral */
+.sidenav ul {
+  list-style-type: none; /* Eliminar puntos de las listas */
+  padding-left: 0; /* Eliminar padding izquierdo */
+}
+
+.sidenav ul li {
+  padding-left: 0; /* Eliminar padding adicional */
+}
+
+.sidenav ul li a {
+  padding-left: 20px; /* Ajustar padding de los enlaces */
+  display: block; /* Asegurar que los enlaces se comporten como bloques */
+  white-space: nowrap; /* Evitar que el texto se quiebre en varias líneas */
+}
+
+.sidenav .navbar-nav .nav-item .icon i {
+  color: rgb(65, 21, 77) !important; /* Cambia el color según tus necesidades */
+   
+}
+.option-interna {
+  background-color: #ffb9e2; /* Cambia este color al que prefieras */
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 5px;
+}
+
+.btn-nr-primary {
+  width: 50px; /* Ajusta el tamaño según sea necesario */
+  height: 50px; /* Ajusta el tamaño según sea necesario */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color:#522073;
+  color:#fff;
+  --bs-btn-border-color: #5e72e4;
+  --bs-btn-hover-color: #eee;
+  --bs-btn-hover-bg: #6e1e7c !important;
+  --bs-btn-hover-border-color: #6e1e7c !important;;
+  --bs-btn-focus-shadow-rgb: 80, 97, 194;
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: #6e1e7c !important;;
+  --bs-btn-active-border-color: #6e1e7c !important;;
+  --bs-btn-active-shadow: none;
+  --bs-btn-disabled-color: #000;
+  --bs-btn-disabled-bg: #696273;
+  --bs-btn-disabled-border-color: #5e72e4;
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+.btn-nr-primary-big {
+  width: 80px; /* Ajusta el tamaño según sea necesario */
+  height: 80px; /* Ajusta el tamaño según sea necesario */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color:#522073;
+  color:#fff;
+  --bs-btn-border-color: #5e72e4;
+  --bs-btn-hover-color: #eee;
+  --bs-btn-hover-bg: #6e1e7c !important;
+  --bs-btn-hover-border-color: #6e1e7c !important;;
+  --bs-btn-focus-shadow-rgb: 80, 97, 194;
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: #6e1e7c !important;;
+  --bs-btn-active-border-color: #6e1e7c !important;;
+  --bs-btn-active-shadow: none;
+  --bs-btn-disabled-color: #000;
+  --bs-btn-disabled-bg: #5e72e4;
+  --bs-btn-disabled-border-color: #5e72e4;
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+.btn-nr-primary-big i {
+  margin: 0;
+  font-size: 30px; /* Aumenta el tamaño del icono */
+}
+
+
+/* Personalizar los eventos del calendario */
+/* Estilos para la sección de la agenda */
+#agenda-section {
+  /* Cambiar el color de fondo de los días de la semana */
+  .fc-day {
+      background-color: #fcf8ff;
+  }
+  
+  /* Cambiar el color de fondo de los encabezados de la tabla */
+  .fc-col-header-cell {
+      background-color: #4a2157;
+      color: #fff;
+  }
+  
+  /* Cambiar el color de las horas en el calendario */
+  .fc-timegrid-axis-cushion {
+      background-color: #696273;
+      color: #fff;
+  }
+
+  /* Estilo para los botones dentro de la sección de la agenda */
+  .btn-primary, .btn-secondary {
+      background-color: #6f42c1; /* Morado */
+      border-color: #6f42c1; /* Morado */
+      color: white;
+  }
+
+  .btn-primary:hover, .btn-secondary:hover {
+      background-color: #5a32a3; /* Morado oscuro */
+      border-color: #5a32a3; /* Morado oscuro */
+  }
+
+  /* Estilo para los días de la semana y meses */
+  .fc-toolbar-title {
+      color: #6f42c1; /* Morado */
+  }
+
+  .fc-button {
+      background-color: #6f42c1; /* Morado */
+      border: none;
+      color: white;
+  }
+
+  .fc-button:hover {
+      background-color: #5a32a3; /* Morado oscuro */
+  }
+
+  /* Texto interno */
+  .fc-event, .fc-event-dot {
+      background-color: #6f42c1; /* Morado */
+      border-color: #6f42c1; /* Morado */
+      color: white;
+  }
+
+  .fc-daygrid-day-top, .fc-timegrid-slot-label {
+      color: #6f42c1; /* Morado */
+  }
+  .fc-col-header-cell-cushion {
+    color: white;
+  }
+
+}
+
+
+#cb_icon {
+  font-size: 25px;
+  color: #6f42c1; /* Morado */
+}
+
+#cb_icon.checked {
+  color: #5a32a3; /* Morado oscuro */
+}
+
+
+/* Estilos para las animaciones */
+.bl_prest {
+  transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out;
+}
+
+.bl_prest.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.bl_prest.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.nav-pills .nav-link {
+  position: relative;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.nav-pills .nav-link.active {
+  color: #fff !important;
+  background-color: #c2aceb;
+}
+
+.nav-link-success {
+  background-color: #28a745 !important;
+  color: white !important;
+}
+
+
+
+.nr-card-1{
+  background-color: rgba(255, 255, 255, 0.6); /* Blanco con 60% de opacidad */
+    border-radius: 10px; /* Bordes redondeados */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Sombra para destacar */
+    backdrop-filter: blur(3px); /* Efecto blur en el fondo detrás de la card */
+    -webkit-backdrop-filter: blur(10px); /* Soporte para navegadores WebKit */
+}
+
+
+.main-content {
+  overflow: auto; /* Permitir el desplazamiento del contenido principal */
+  height: calc(100vh); /* Ajusta la altura del contenedor principal para el tamaño de la pantalla */
+}
+
+
+textarea {
+  height: 100%; /* Hacer que el textarea ocupe toda la altura disponible sin mostrar barra */
+  resize: none; /* Evitar que el usuario cambie el tamaño del textarea */
+}
+
+
+.card .card-header-tiny {
+  padding: 1rem;
+}
+
+
+.card .card-body-tiny {
+  padding: 0.5rem;
+}
+
+.expand-report {
+  height: calc(83vh - 150px); 
+  transition: height 0.3s ease; 
+}
+
+.report-container {
+  height: calc(67vh - 150px);
+  transition: height 0.3s ease; 
+}
+
+
+.expand-card {
+  height: calc(83vh - 150px); /* Ajusta el valor 150px al tamaño de los elementos que restan espacio */
+  transition: height 0.3s ease; /* Transición suave */
+}
+
+.position-absolute {
+  width: 100%;
+  transition: height 0.3s ease; /* Para suavizar la transición */
+}
+
+tbody tr:hover {
+  background-color: #673277 !important; /* Cambia el color de fondo de la fila al pasar el cursor */
+  transition: background-color 0.6s ease; /* Suaviza la transición del color */
+}
+
+tbody tr:hover td {
+  color: #ffffff; /* Cambia el color del texto dentro de la fila */
+}
+
+tbody tr td {
+  transition: color 0.6s ease; /* Suaviza la transición del color */
+}
+
+

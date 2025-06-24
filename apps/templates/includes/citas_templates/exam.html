@@ -1,12 +1,13 @@
-<div class="row">
-    <div class="col-12">
+<div class="row" id="fill_exam">
+
+    <div class="row">
       <div class="card mb-4">
         <div class="card-header pb-0">
           <h6>Selecciona examen</h6>
         </div>
         <div class="card-body px-0 pt-0 pb-2">
           <div class="row">
-            <div class="col-md-5">
+            <div class="col-md-6">
                 <div class="row">
                     <div class="col-md-4">
                         <label for="tipoexamen">
@@ -14,12 +15,13 @@
                         </label>
                     </div>
                     <div class="col-md-8">
-                        <select id="tipo_examen" name="tipo_examen" onchange="filtrar_estudios()">
+                        <select id="tipo_examen" name="tipo_examen" class="form-control" >
+                            <option value="default">default</option>
                         </select>
                     </div>
                 </div>      
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
                 <div class="row">
                     <div class="col-md-4">
                         <label for="tipoexamen">
@@ -27,28 +29,13 @@
                         </label>
                     </div>
                     <div class="col-md-8">
-                        <select id="parte_cuerpo" name="parte_cuerpo" onchange="filtrar_estudios()">
-                            <option value="Todas">Todas </option>
-                            <option value="Abdomen">Abdomen </option>
-                            <option value="Abdomen y pelvis">Abdomen y Pelvis</option>
-                            <option value="CABEZA Y CUELLO">Cabeza y cuello</option>
-                            <option value="Columna Vertebral">Columna Vertebral</option>
-                            <option value="CUERPO ENTERO">Cuerpo Entero</option>
-                            <option value="EXTREMIDADES INFERIORES">Extremidades inferiores</option>
-                            <option value="EXTREMIDADES SUPERIORES">Extremidades superiores</option>
-                            <option value="PELVIS">Pelvis</option>
-                            <option value="TORAX">Torax</option>
-                            <option value="TORAX Y ABDOMEN">Torax y abdome</option>
-
+                        <select id="parte_cuerpo" name="parte_cuerpo" class="form-control">
+                            <option value="default">default</option>
                         </select>
                     </div>
                 </div>      
             </div>
-            <div class="col-md-2">
-                
-                    <button type="button" id="generar-citas" class="btn btn-success boton_est">Generar Citas</button>
-                    
-            </div>
+            
           </div>
         
       </div>
@@ -64,8 +51,11 @@
                     <h6>Estudios</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="seleccionar-estudio" class="btn btn-secondary boton_est" disabled patient-id="">Seleccionar</button>
+                    <button type="button" id="seleccionar-estudio" class="btn btn-nr-primary rounded-circle shadow-primary mx-2  boton_est" disabled>
+                        <i class="fa fa-plus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
                 </div>
+                
             </div>
             
             
@@ -81,16 +71,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for tipo in tipoestudios: %}
-                        <tr class="patient-row">
-                            <td>{{ tipo[0] }}</td>
-                            <td>{{ tipo[1] }}</td>
-                            <td class="modalidad">{{ tipo[2] }}</td>
-                            <td>{{ tipo[3] }}</td>
-                           
-                        </tr>
                     
-                    {% endfor %}
                 </tbody>
             </table>
         </div> 
@@ -99,28 +80,30 @@
   </div>
 
   <div class="row">
-    <div class="col-12">
+    
       <div class="card mb-4 shadow">
         <div class="card-header pb-0">
             <div class="row">
                 <div class="col-md-4">
                     <h6>Estudios Seleccionados</h6>
                 </div>
+
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="quitar-estudio" class="btn btn-secondary botones" disabled patient-id="">Quitar estudio</button>
+                    <button type="button" id="quitar-estudio"  class="btn btn-nr-primary rounded-circle shadow-primary mx-2  botones btn-danger" disabled>
+                        <i class="fa fa-minus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    </button>
                 </div>
             </div>
             
             
         </div>
+        
         <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
             <table class="tabla-estudios table" id="tabla-estudios-selec">
                 <thead>
                     <tr>
                         <th>Codigo</th>
                         <th>Descripcion</th>
-                        <th>Modalidad</th>
-                        <th>Parte del cuerpo</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -129,7 +112,7 @@
             </table>
         </div> 
     </div>
-  </div>
+
   </div>
   <div id="cita_conteiner">
     

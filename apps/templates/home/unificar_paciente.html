@@ -1,0 +1,212 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Pacientes {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/hospital.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+  <!-- Modal -->
+  <div class="modal fade custom-modal" id="modal_ptd" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+
+          <div class="modal-header">
+            <h1 class="modal-title fs-5" id="exampleModalLabel">Unificación de pacientes.</h1><br>
+            <!-- <h3 class="modal-title fs-5" id="exampleModalLabel">Una vez que se aplique el cambio, no hay forma de retroceder. Asegúrese que la acción es la correcta.</h3> -->
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+
+          <div class="modal-body">
+            <form method="POST" action="/unificar_paciente" id="Form_ag">
+              <div class="row"><h2>Paciente que se mantendrá</h2></div>
+              <div class="form-group row">
+                <div class="col-md-4">
+                    <label for="p_name">Nombre</label>
+                    <input type="text" class="form-control" id="p_name" name="p_name" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="p_surname">Apellido</label>
+                    <input type="text" class="form-control" id="p_surname" name="p_surname" required>
+                </div>
+                <div class="col-md-4">
+                  <label for="p_dni">DNI</label>
+                  <input type="text" class="form-control" id="p_dni" name="p_dni" required>
+                </div>
+  
+              </div>
+            <div class="row"><h2>Paciente que se unificará</h2></div>
+            <div class="form-group row">
+              <div class="col-md-4">
+                  <label for="p_name_td">Nombre</label>
+                  <input type="text" class="form-control" id="p_name_td" name="p_name_td" required>
+              </div>
+              <div class="col-md-4">
+                  <label for="p_surname_td">Apellido</label>
+                  <input type="text" class="form-control" id="p_surname_td" name="p_surname_td" required>
+              </div>
+              <div class="col-md-4">
+                <label for="p_dni_td">DNI</label>
+                <input type="text" class="form-control" id="p_dni_td" name="p_dni_td" required>
+              </div>
+          </div>
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn bg-gradient-success save-changes">Confirmar</button>
+          </form>
+            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+        </div>
+      
+        
+    </div>
+  </div>
+
+  <!-- FIN MODAL -->
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content flex-grow-1 position-relative">
+
+<!-- card switch-->
+<div class="card shadow-lg mx-4 mt-5">
+    <div class="card-body p-3">
+      <div class="row gx-4">
+        
+        <div class="col-auto my-auto">
+          <div class="h-100">
+            <h3 class="mb-1"><i class="fa fa-users"></i>
+              Unificar Pacientes
+            </h3>
+          </div>
+
+        </div>
+        <div class="col-lg-4 col-md-6 my-sm-auto ms-sm-auto me-sm-0 mx-auto mt-3">
+          <div class="nav-wrapper position-relative end-0">
+            <ul class="nav nav-pills nav-fill p-1" role="tablist">
+              
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="pills-paciente-tab" data-bs-toggle="pill" data-bs-target="#pills-paciente" type="button" role="tab" aria-controls="pills-paciente-" aria-selected="false"><i class="ni ni-app"></i> Paciente Correcto</button>
+              </li>
+              <li class="nav-item" role="presentation"></li>
+                <button class="nav-link" id="pills-examen-tab" data-bs-toggle="pill" data-bs-target="#pills-examen" type="button" role="tab" aria-controls="pills-examen-" aria-selected="false"><i class="ni ni-app"></i> Paciente a Eliminar</button>
+              </li>
+            </ul>
+            
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fin card Switch -->
+  
+        <div class="tab-content" id="pills-tabContent">
+            <div class="tab-pane fade active show" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
+                <div class="row min-vh-65 pt-3 mx-4">
+                    <div class="col-12">
+                      <div class="card shadow">
+                        <div class="card-header pb-0">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <h6>Seleccione paciente Correcto</h6>
+                                </div>
+                                
+                                <div class="col-md-8 d-flex justify-content-end">
+                                    <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp" disabled patient-id="" id="seleccionar-paciente" >
+                                        <i class="fas fa-check-circle" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                
+                            </div>
+                            <hr class="horizontal dark mt-0">
+                            
+                        </div>
+                        <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                            <table class="tabla-primary table" id="tabla-pacientes">
+                                <thead>
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Apellido</th>
+                                        <th>DNI</th>
+                                        <th>Sexo</th>
+                                        <th>Fecha de nacimiento</th>
+                                        <th>Telefono</th>
+                                        <th>Email</th>
+                                        <th>Tarjeta Sanitaria</th>
+                                        
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                </tbody>
+                            </table>
+                        </div> 
+                    </div>
+                  </div>
+                  </div>
+            </div>
+            <div class="tab-pane fade" id="pills-examen" role="tabpanel" aria-labelledby="pills-examen-tab">
+                <div class="row min-vh-65 pt-3 mx-4">
+                    <div class="col-12">
+                      <div class="card shadow">
+                        <div class="card-header pb-0">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <h6>Seleccione paciente a eliminar </h6>
+                                </div>
+                                
+                                <div class="col-md-8 d-flex justify-content-end">
+                                    <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 btn-danger botones_ptd" disabled patient-id="" id="btn-ptd" >
+                                        <i class="fas fa-ban" aria-hidden="true"></i>
+                                    </button>
+
+                                </div>
+                            </div>
+                            <hr class="horizontal dark mt-0">
+                            
+                        </div>
+                        <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                          <table class="tabla-primary table" id="tabla-pacientestodelete">
+                              <thead>
+                                  <tr>
+                                      <th>Nombre</th>
+                                      <th>Apellido</th>
+                                      <th>DNI</th>
+                                      <th>Sexo</th>
+                                      <th>Fecha de nacimiento</th>
+                                      <th>Telefono</th>
+                                      <th>Email</th>
+                                      <th>Tarjeta Sanitaria</th>
+                                  </tr>
+                              </thead>
+                              <tbody>
+                              </tbody>
+                          </table>
+                      </div> 
+                    </div>
+                  </div>
+                  </div>
+            </div>
+            </div>            
+        </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/unificarPaciente.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

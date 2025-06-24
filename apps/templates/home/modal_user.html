@@ -9,7 +9,7 @@
             </div>
             <div class="modal-body">
                 <form method="POST" action="/create_user" id="Form_user">
-                    <input type="hidden" name="id_order" id="id_np">
+                    <input type="hidden" name="old_username" id="old_username">
                     
                     <div class="form-group row">
                         <div class="col-md-3">
@@ -60,11 +60,21 @@
                             
                         </div>
                     </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="mail">Mail</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="text_mail" name="text_mail">
+                            
+                        </div>
+                    </div>
                     
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_user">Crear usuario</button>
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_user"><!-- B ACEPTAR --></button>
                 <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
             </div>
         </div>

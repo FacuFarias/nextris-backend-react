@@ -1,0 +1,259 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/calculator.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+
+  <div class="row">
+    <div id="modal_content" class="mt-4" data-id=""></div>
+  </div>
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+    <div id="toastContainer"></div>
+
+    <!-- Modal -->
+<div class="modal fade custom-modal" id="modal_retirar_dinero" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+  <div class="modal-dialog">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h1 class="modal-title fs-5" id="exampleModalLabel">Retiro de dinero</h1>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+              <form method="POST" action="/retirar_dinero" id="Form_retirar">
+                  <input type="hidden" name="id_order" id="id_order">
+
+                  <div class="form-group row">
+                    <div class="col-md-6">
+                        <label for="type_of_retiro">Motivo de retiro de dinero</label>
+                        <select class="form-control" id="type_of_retiro" name="type_of_retiro">
+                          <option value="sinasignar">---</option>
+                          <option value="p_med">Pago de Medicos</option>
+                          <option value="p_personal">Pago de Personal</option>
+                          <option value="p_insumo">Pago de insumos</option>
+                          <option value="p_otros">Otros gastos</option>
+                        </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group row" id="pago_medico" hidden>
+                    <div class="col-md-6">
+                      <label for="type_os">Indique el médico:</label>
+                      <select id="ref_med" name="ref_med" class="form-control">
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="mount_med">Indique cantidad a pagar:</label>
+                      <input type="number" class="form-control" id="mount_med" name="mount_med">
+                    </div>
+                  </div>
+
+                  <div class="form-group row" id="pago_personal" hidden>
+                    <div class="col-md-6">
+                      <label for="s_personal">Indique el Personal:</label>
+                      <select id="s_personal" name="s_personal" class="form-control">
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="mount_med">Indique cantidad a pagar:</label>
+                      <input type="number" class="form-control" id="mount_personal" name="mount_personal">
+                    </div>
+                  </div>
+
+                  <div class="form-group row" id="pago_insumo" hidden>
+                    <div class="col-md-6">
+                      <label for="insumo">Indique el insumo:</label>
+                      <input type="text" id="insumo" class="form-control">
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="mount_insumo">Indique cantidad a pagar:</label>
+                      <input type="number" class="form-control" id="mount_insumo" name="mount_insumo">
+                    </div>
+                  </div>
+
+                  <div class="form-group row" id="pago_otros" hidden>
+                    <div class="col-md-6">
+                      <label for="otro">Indique el motivo del retiro:</label>
+                      <input type="text" id="otro" class="form-control">
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="mount_otro">Indique cantidad retirada:</label>
+                      <input type="number" class="form-control" id="mount_otro" name="mount_otro">
+                    </div>
+                  </div>
+
+
+              </form>
+          </div>
+          <div class="modal-footer">
+              <button type="submit" class="btn bg-gradient-success save-changes" form="Form_retirar">Retirar</button>
+              <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+          </div>
+      </div>
+  </div>
+</div>
+<!-- FIN MODAL -->
+
+<!-- card de busqueda -->
+<div class="row mx-10 pt-2">
+    <div class="col-12">
+      <div class="card mb-2 nr-card-1" id="card_buscar">
+        <div class="card-header pb-0 d-flex justify-content-between align-items-center">
+          <h3><i class="fa fa-money-bill"></i></i> Historial de Facturación</h3>
+          <div class="d-flex ms-auto">
+            <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+              <i class="fa fa-filter" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        
+        <div id="collapseCardBody" class="collapse">
+        <div class="card-body px-0 pt-0 pb-2">
+            <input type="hidden" name="url" id="url">
+          <div class="container-fluid">
+            <div class="row datos-paciente">    
+              <div class="col-md-5">
+                <div class="row">
+                  <div class="col-md-4">
+                    <label for="l_descripcion">Descripcion</label>
+                </div>
+                <div class="col-md-8">
+                  <input type="text" class="form-control" id="l_descripcion" name="l_descripcion">
+              </div>
+               
+              </div>
+                <div class="row">
+                    <div class="col-md-4">
+                        <label for="fecha">
+                            Fecha
+                        </label>
+                    </div>
+                    <div class="col-md-8">
+                        <input type="date" class='dp form-control' id="fecha" name="fecha">
+                    </div>
+                </div>
+                
+                
+
+            </div>
+                <div class="col-md-5">
+                    <div class="row">
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="l_profesional">
+                                    Profesional
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                              <label for="l_profesional">
+                                <select id="l_profesional" class="form-control"></select>
+                              </label>
+                          </div>
+                        </div>
+                        <div class="row">
+                          <div class="col-md-4">
+                              <label for="l_admin">
+                                  Administrativo
+                              </label>
+                          </div>
+                          <div class="col-md-8">
+                            <label for="l_admin">
+                              <select id="l_admin" class="form-control"></select>
+                            </label>
+                        </div>
+                      </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-2 d-flex justify-content-end">
+                  <button type="button" id="limpiar_filtros" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp btn-danger">
+                      <i class="fa fa-eraser" aria-hidden="true" style="font-size: 25px;"></i>
+                  </button>
+              </div>            
+            </div>
+          
+        </div>
+       
+
+        </div>
+      </div>
+      
+        
+      </div>
+    </div>
+  </div>
+<!-- FIN card de busqueda -->
+
+
+      <div class="row" id="card_ordenes">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <i class="fa fa-money-bill"></i></i> <h6>Ordenes</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <!-- <button type="button" class="btn btn-primary botones_sp" disabled data-bs-toggle="modal" id="b_facturar" data-bs-target="#modal_fact_orden"> -->
+                          <button type="button" class="btn btn-danger" id="b_retirar_efectivo">
+                            <i class="fa fa-money-bill" aria-hidden="true"></i>  Retirar dinero
+                        </button>
+
+                        <!-- <button type="button" id="b_facturar" class="btn btn-nr-primary botones_sp btn-info" disabled data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex">
+                          <i class="fa fa-file" aria-hidden="true"></i>
+                      </button> -->
+                    </div>
+                </div>
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-primary table" id="tabla-ordenes">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th>Descripcion</th>
+                            <th>Profesional</th>
+                            <th>AdminId</th>
+                            <th>Monto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      <div class="row">
+        <div id="informe-content" class="mt-4" data-id=""></div>
+      </div>
+      
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/facturacion_h.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

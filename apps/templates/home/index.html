@@ -1,21 +1,22 @@
 {% extends 'layouts/base.html' %}
 
-{% block title %} Dashboard {% endblock title %}
+{% block title %} Pagina Principal {% endblock title %}
 
 <!-- Specific CSS goes HERE -->
 {% block stylesheets %}{% endblock stylesheets %}
 
 {% block content %}
 
-  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/mediCAD.jpg'); background-position-y: 70%;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
     
   {% include "includes/sidenav.html" %}
+ 
+  <main class="main-content position-relative border-radius-lg  pt-4">
 
-  <main class="main-content position-relative border-radius-lg ">
-
-    {% include "includes/navigation.html" %}
-
-    <div class="container-fluid py-4">
+    <div class="container-fluid py-4 ">
 
       <div class="row">
         <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4">
@@ -26,10 +27,12 @@
                   <div class="numbers">
                     <p class="text-sm mb-0 text-uppercase font-weight-bold">Ingresos generados hoy</p>
                     <h5 class="font-weight-bolder">
-                      $53,000
+                      $<!-- ingresos -->
                     </h5>
                     <p class="mb-0">
-                      <span class="text-success text-sm font-weight-bolder">+10%</span>
+                      <span class="text-success text-sm font-weight-bolder">
+                        <!-- deltaingresos -->
+                        %</span>
                       desde ayer.
                     </p>
                   </div>
@@ -49,13 +52,16 @@
               <div class="row">
                 <div class="col-8">
                   <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Imágenes realizadas</p>
+                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Estudios realizadas</p>
                     <h5 class="font-weight-bolder">
-                      2,300
+                      <!-- estudiosrealizados -->
+                        estudios
                     </h5>
                     <p class="mb-0">
-                      <span class="text-success text-sm font-weight-bolder">+3%</span>
-                      since ayer
+                      <span class="text-success text-sm font-weight-bolder">
+                        <!-- deltaestudios -->
+                        %</span>
+                      desde ayer
                     </p>
                   </div>
                 </div>
@@ -74,9 +80,9 @@
               <div class="row">
                 <div class="col-8">
                   <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Nuevos pacientes</p>
+                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Medico de mayor produccion</p>
                     <h5 class="font-weight-bolder">
-                      +462
+                      <!-- cantestudiosmed --> Estudios este mes
                     </h5>
                     <p class="mb-0">
                       <span class="text-success text-sm font-weight-bolder">+2%</span>
@@ -99,9 +105,10 @@
               <div class="row">
                 <div class="col-8">
                   <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Gastos</p>
+                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Mejores obras sociales</p>
                     <h5 class="font-weight-bolder">
-                      $13,430
+                      $ <!-- montoOs --> Generado por: <!-- bestOs -->
+
                     </h5>
                     <p class="mb-0">
                       <span class="text-danger text-sm font-weight-bolder">+5%</span> desde ayer
@@ -123,240 +130,90 @@
         <div class="col-lg-7 mb-lg-0 mb-4">
           <div class="card z-index-2 h-100">
             <div class="card-header pb-0 pt-3 bg-transparent">
-              <h6 class="text-capitalize">Estudios realizados por dia</h6>
+              <h6 class="text-capitalize">Historial de ingresos</h6>
               <p class="text-sm mb-0">
-                <i class="fa fa-arrow-up text-success"></i>
-                <span class="font-weight-bold">3% mas</span> en comparación al mes anterior
               </p>
             </div>
-            <div class="card-body p-3">
-              <div class="chart">
+            <div class="card-body" id="card_chart_ingreso">
+              <div class="chart-conteiner">
                 <canvas id="chart-line" class="chart-canvas" height="300"></canvas>
               </div>
             </div>
           </div>
         </div>
         <div class="col-lg-5">
-          <div class="card card-carousel overflow-hidden h-100 p-0">
-            <div id="carouselExampleCaptions" class="carousel slide h-100" data-bs-ride="carousel">
-              <div class="carousel-inner border-radius-lg h-100">
-                <div class="carousel-item h-100 active" style="background-image: url('{{ config.ASSETS_ROOT }}/img/rm.jpg');
-      background-size: cover;">
-                  <div class="carousel-caption d-none d-md-block bottom-0 text-start start-0 ms-5">
-                    <div class="icon icon-shape icon-sm bg-white text-center border-radius-md mb-3">
-                      <i class="ni ni-camera-compact text-dark opacity-10"></i>
-                    </div>
-                    <h5 class="text-white mb-1">Comienza a utilizar NextRIS</h5>
-                    <p>Evalúa los flujos de trabajo que tiene NextRis para vos y tu equipo</p>
-                  </div>
-                </div>
-                <div class="carousel-item h-100" style="background-image: url('{{ config.ASSETS_ROOT }}/img/conf.jpg');
-      background-size: cover;">
-                  <div class="carousel-caption d-none d-md-block bottom-0 text-start start-0 ms-5">
-                    <div class="icon icon-shape icon-sm bg-white text-center border-radius-md mb-3">
-                      <i class="ni ni-bulb-61 text-dark opacity-10"></i>
-                    </div>
-                    <h5 class="text-white mb-1">Configura tu Institución</h5>
-                    <p>Aprende a utlizar nuestro panel de parametrizaciones y configura los flujos a tu medida.</p>
-                  </div>
-                </div>
-                <div class="carousel-item h-100" style="background-image: url('{{ config.ASSETS_ROOT }}/img/stad.jpg');
-      background-size: cover;">
-                  <div class="carousel-caption d-none d-md-block bottom-0 text-start start-0 ms-5">
-                    <div class="icon icon-shape icon-sm bg-white text-center border-radius-md mb-3">
-                      <i class="ni ni-trophy text-dark opacity-10"></i>
-                    </div>
-                    <h5 class="text-white mb-1">Estadísticas</h5>
-                    <p>Realiza una continua evaluación de tu Institución.</p>
-                  </div>
-                </div>
-              </div>
-              <button class="carousel-control-prev w-5 me-3" type="button" data-bs-target="#carouselExampleCaptions" data-bs-slide="prev">
-                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Previous</span>
-              </button>
-              <button class="carousel-control-next w-5 me-3" type="button" data-bs-target="#carouselExampleCaptions" data-bs-slide="next">
-                <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Next</span>
-              </button>
-            </div>
-          </div>
+          <div class="card mb-4 shadow">
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2 border-top-10">
+                <table class="tabla-primary table border-top" id="tabla-ordenes">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th>Descripcion</th>
+                            <th>Profesional</th>
+                            <th>OS</th>
+                            <th>Monto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
         </div>
       </div>
 
       <div class="row mt-4">
         <div class="col-lg-7 mb-lg-0 mb-4">
           <div class="card ">
-            <div class="card-header pb-0 p-3">
-              <div class="d-flex justify-content-between">
-                <h6 class="mb-2">Estudios realizados por doctor</h6>
+            <div class="card-header pb-0 d-flex align-items-center justify-content-center">
+          
+              <h6>Estudios realizados por doctor</h6>
+              <div class="d-flex ms-auto">
+                <button class="btn btn-nr-primary botones_med" type="button" disabled>
+                  <i class="fa fa-filter" aria-hidden="true"></i>
+                </button>
               </div>
             </div>
-            <div class="table-responsive">
-              <table class="table align-items-center ">
-                <tbody>
-                  <tr>
-                    <td class="w-30">
-                      <div class="d-flex px-2 py-1 align-items-center">
-                        <div>
-                        </div>
-                        <div class="ms-4">
-                          <p class="text-xs font-weight-bold mb-0">Doctor:</p>
-                          <h6 class="text-sm mb-0">Facundo Farias</h6>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Imagenes:</p>
-                        <h6 class="text-sm mb-0">25</h6>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Valor:</p>
-                        <h6 class="text-sm mb-0">$23000,00</h6>
-                      </div>
-                    </td>
-                    <td class="align-middle text-sm">
-                      <div class="col text-center">
-                        <p class="text-xs font-weight-bold mb-0">Balance:</p>
-                        <h6 class="text-sm mb-0">29.9%</h6>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="w-30">
-                      <div class="d-flex px-2 py-1 align-items-center">
-                        <div>
-                          
-                        </div>
-                        <div class="ms-4">
-                          <p class="text-xs font-weight-bold mb-0">Doctor:</p>
-                          <h6 class="text-sm mb-0">German Garmendia</h6>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Imagenes:</p>
-                        <h6 class="text-sm mb-0">39</h6>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Valor:</p>
-                        <h6 class="text-sm mb-0">$44000.00</h6>
-                      </div>
-                    </td>
-                    <td class="align-middle text-sm">
-                      <div class="col text-center">
-                        <p class="text-xs font-weight-bold mb-0">Balance:</p>
-                        <h6 class="text-sm mb-0">40.22%</h6>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="w-30">
-                      <div class="d-flex px-2 py-1 align-items-center">
-                        <div>
-                        </div>
-                        <div class="ms-4">
-                          <p class="text-xs font-weight-bold mb-0">Doctor:</p>
-                          <h6 class="text-sm mb-0">Maximiliano Dominguez</h6>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Informes:</p>
-                        <h6 class="text-sm mb-0">14</h6>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="text-center">
-                        <p class="text-xs font-weight-bold mb-0">Valor:</p>
-                        <h6 class="text-sm mb-0">$19000,00</h6>
-                      </div>
-                    </td>
-                    <td class="align-middle text-sm">
-                      <div class="col text-center">
-                        <p class="text-xs font-weight-bold mb-0">Balance:</p>
-                        <h6 class="text-sm mb-0">23.44%</h6>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                </tbody>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+              <table class="tabla-primary table" id="tabla-medicos">
+                  <thead>
+                      <tr>
+                          <th>Doctor</th>
+                          <th>Estudios</th>
+                          <th>Monto</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                  </tbody>
               </table>
-            </div>
+          </div> 
           </div>
         </div>
         <div class="col-lg-5">
-          <div class="card">
-            <div class="card-header pb-0 p-3">
-              <h6 class="mb-0">Cantidad de estudios por modalidad</h6>
+          <div class="card ">
+            <div class="card-header pb-0 d-flex align-items-center justify-content-center">
+          
+              <h6>Estudios realizados por Obra Social</h6>
+              <div class="d-flex ms-auto">
+                <button class="btn btn-nr-primary botones_os" type="button" disabled>
+                  <i class="fa fa-filter" aria-hidden="true"></i>
+                </button>
+              </div>
             </div>
-            <div class="card-body p-3">
-              <ul class="list-group">
-                <li class="list-group-item border-0 d-flex justify-content-between ps-0 mb-2 border-radius-lg">
-                  <div class="d-flex align-items-center">
-                    <div class="icon icon-shape icon-sm me-3 bg-gradient-dark shadow text-center">
-                      <i class="ni ni-mobile-button text-white opacity-10"></i>
-                    </div>
-                    <div class="d-flex flex-column">
-                      <h6 class="mb-1 text-dark text-sm">Radiologia</h6>
-                      <span class="text-xs">250  <span class="font-weight-bold"></span></span>
-                    </div>
-                  </div>
-                  <div class="d-flex">
-                    <button class="btn btn-link btn-icon-only btn-rounded btn-sm text-dark icon-move-right my-auto"><i class="ni ni-bold-right" aria-hidden="true"></i></button>
-                  </div>
-                </li>
-                <li class="list-group-item border-0 d-flex justify-content-between ps-0 mb-2 border-radius-lg">
-                  <div class="d-flex align-items-center">
-                    <div class="icon icon-shape icon-sm me-3 bg-gradient-dark shadow text-center">
-                      <i class="ni ni-tag text-white opacity-10"></i>
-                    </div>
-                    <div class="d-flex flex-column">
-                      <h6 class="mb-1 text-dark text-sm">Resonancia Magnetica</h6>
-                      <span class="text-xs">12, <span class="font-weight-bold">3 en espera</span></span>
-                    </div>
-                  </div>
-                  <div class="d-flex">
-                    <button class="btn btn-link btn-icon-only btn-rounded btn-sm text-dark icon-move-right my-auto"><i class="ni ni-bold-right" aria-hidden="true"></i></button>
-                  </div>
-                </li>
-                <li class="list-group-item border-0 d-flex justify-content-between ps-0 mb-2 border-radius-lg">
-                  <div class="d-flex align-items-center">
-                    <div class="icon icon-shape icon-sm me-3 bg-gradient-dark shadow text-center">
-                      <i class="ni ni-box-2 text-white opacity-10"></i>
-                    </div>
-                    <div class="d-flex flex-column">
-                      <h6 class="mb-1 text-dark text-sm">Mamografia</h6>
-                      <span class="text-xs">11, <span class="font-weight-bold">4 en espera</span></span>
-                    </div>
-                  </div>
-                  <div class="d-flex">
-                    <button class="btn btn-link btn-icon-only btn-rounded btn-sm text-dark icon-move-right my-auto"><i class="ni ni-bold-right" aria-hidden="true"></i></button>
-                  </div>
-                </li>
-                <li class="list-group-item border-0 d-flex justify-content-between ps-0 border-radius-lg">
-                  <div class="d-flex align-items-center">
-                    <div class="icon icon-shape icon-sm me-3 bg-gradient-dark shadow text-center">
-                      <i class="ni ni-satisfied text-white opacity-10"></i>
-                    </div>
-                    <div class="d-flex flex-column">
-                      <h6 class="mb-1 text-dark text-sm">Ecografia</h6>
-                      <span class="text-xs">43, <span class="font-weight-bold">7 en espera</span></span>
-                    </div>
-                  </div>
-                  <div class="d-flex">
-                    <button class="btn btn-link btn-icon-only btn-rounded btn-sm text-dark icon-move-right my-auto"><i class="ni ni-bold-right" aria-hidden="true"></i></button>
-                  </div>
-                </li>
-              </ul>
-            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+              <table class="tabla-primary table" id="tabla-os">
+                  <thead>
+                      <tr>
+                          <th>Obra social</th>
+                          <th>Estudios</th>
+                          <th>Monto</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                  </tbody>
+              </table>
+          </div> 
           </div>
         </div>
       </div>
@@ -364,7 +221,8 @@
       {% include "includes/footer.html" %}
 
     </div>
-  
+    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/facturacion_analisis.js"></script>
   </main>  
 
 {% endblock content %}
@@ -373,88 +231,5 @@
 {% block javascripts %}
   
   <script src="{{ config.ASSETS_ROOT }}/js/plugins/chartjs.min.js"></script>
-  <script>
-    var ctx1 = document.getElementById("chart-line").getContext("2d");
-
-    var gradientStroke1 = ctx1.createLinearGradient(0, 230, 0, 50);
-
-    gradientStroke1.addColorStop(1, 'rgba(94, 114, 228, 0.2)');
-    gradientStroke1.addColorStop(0.2, 'rgba(94, 114, 228, 0.0)');
-    gradientStroke1.addColorStop(0, 'rgba(94, 114, 228, 0)');
-    new Chart(ctx1, {
-      type: "line",
-      data: {
-        labels: ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-        datasets: [{
-          label: "Mobile apps",
-          tension: 0.4,
-          borderWidth: 0,
-          pointRadius: 0,
-          borderColor: "#5e72e4",
-          backgroundColor: gradientStroke1,
-          borderWidth: 3,
-          fill: true,
-          data: [50, 40, 300, 220, 500, 250, 400, 230, 500],
-          maxBarThickness: 6
-
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false,
-          }
-        },
-        interaction: {
-          intersect: false,
-          mode: 'index',
-        },
-        scales: {
-          y: {
-            grid: {
-              drawBorder: false,
-              display: true,
-              drawOnChartArea: true,
-              drawTicks: false,
-              borderDash: [5, 5]
-            },
-            ticks: {
-              display: true,
-              padding: 10,
-              color: '#fbfbfb',
-              font: {
-                size: 11,
-                family: "Open Sans",
-                style: 'normal',
-                lineHeight: 2
-              },
-            }
-          },
-          x: {
-            grid: {
-              drawBorder: false,
-              display: false,
-              drawOnChartArea: false,
-              drawTicks: false,
-              borderDash: [5, 5]
-            },
-            ticks: {
-              display: true,
-              color: '#ccc',
-              padding: 20,
-              font: {
-                size: 11,
-                family: "Open Sans",
-                style: 'normal',
-                lineHeight: 2
-              },
-            }
-          },
-        },
-      },
-    });
-  </script>
 
 {% endblock javascripts %}

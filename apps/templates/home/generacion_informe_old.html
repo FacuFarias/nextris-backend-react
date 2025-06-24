@@ -1,0 +1,153 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<style>
+    /* Estilo para expandir la sección del informe cuando "Datos del examen" está colapsado */
+    .expand-report {
+        width: 100%; /* Expandir para ocupar todo el ancho disponible */
+    }
+
+    .report-container {
+        transition: width 0.3s ease; /* Transición suave para la expansión */
+    }
+</style>
+{% endblock stylesheets %}
+
+{% block content %}
+<main class="main-content position-relative">
+
+    <div class="row mx-2">
+        <div class="col-12">
+            <div class="mb-2">
+                <div class="card-header"></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h2><!--Nombre del paciente--> (<!--AdmNumber-->)</h2>
+                        </div>
+                        <div class="col-md-8 d-flex justify-content-end">
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary botones_sp" id="b_predef">
+                                <i class="fa fa-sticky-note" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary btn-info botones_sp" id="b_historia_clinica">
+                                <i class="fa fa-book-medical" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary btn-info botones_sp" id="b_ver_imagenes">
+                                <i class="fa fa-file-image" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary btn-info botones_sp" id="b_guardar_reporte">
+                                <i class="fa fa-save" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary btn-info botones_sp" id="b_firmar_reporte">
+                                <i class="fa fa-signature" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle shadow-primary btn-info botones_sp" id="b_ver_pdf">
+                                <i class="fa fa-file-pdf" aria-hidden="true"></i>
+                            </button>
+
+                            <button type="button" class="btn btn-nr-primary-big rounded-circle btn-danger shadow-primary botones_sp" id="b_atras_report">
+                                <i class="fa fa-undo" aria-hidden="true" style="font-size: 25px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div> 
+            </div>
+        </div>
+    </div>
+
+    <!-- Secciones técnicas de examen, informe y conclusión -->
+    <div class="row">
+        <div class="col-6">
+            <div class="card mb-2 row" id="card-datos">
+                <div class="card-header-tiny">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6>Datos del examen</h6>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end">
+                            <button type="button" id="b_toggle_collapse" class="btn btn-nr-primary btn-info">
+                                <i class="fa fa-angle-down" aria-hidden="true" style="font-size: 25px;"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div id="collapseDatosExamen" class="collapse">
+                    <div class="card-body-tiny">
+                        <div class="row">
+                            <h6>Examen:</h6><br>
+                            <p><!--examen--></p>
+                        </div>
+                        <div class="row">
+                            <h6>Pregunta Clinica:</h6>
+                            <textarea class="form-control" id="text_pc"><!--Pregunta clínica--></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row report-container" id="report-container">
+                <div class="card mb-4 expand-report" id="card-informe">
+                    <div class="card-header">
+                        <h5 class="card-title">Informe</h5>
+                    </div>
+                    <div class="card-body ">
+                        <textarea class="form-control" id="text_inf"><!--Informe--></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-6">
+            <div class="card mb-2 row"  id="card-tecnicas">
+                <div class="card-header-tiny">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Tecnicas de examen</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end">
+                            <button type="button" id="b_tecnicas_expand" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div class="card-body collapse show" id="collapse_tecnicas">
+                    <textarea class="form-control" id="text_te"><!--Tecnicas--></textarea>
+                </div>
+            </div>
+
+            <div class="card mb-2 row"  id="card-conclusion">
+                <div class="card-header-tiny">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5>Conclusión</h5>
+                        </div>
+                        <div class="col-md-4 d-flex justify-content-end">
+                            <button type="button" id="b_conclusion_expand" class="btn btn-nr-primary btn-info">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </button>
+                        </div>
+                    </div>   
+                </div>
+                <div class="card-body collapse show" id="collapse_conclusion">
+                    <textarea class="form-control" id="text_conc"><!--Conclusión--></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+    // Manejo del colapso con JavaScript
+    
+</script>
+
+
+{% endblock content %}

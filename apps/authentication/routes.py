@@ -10,7 +10,7 @@ from apps import db, login_manager
 from apps.authentication import blueprint
 from apps.authentication.forms import LoginForm, CreateAccountForm
 from apps.authentication.models import Users
-
+from werkzeug.security import generate_password_hash, check_password_hash
 from apps.authentication.util import verify_pass
 
 
@@ -20,6 +20,7 @@ def route_default():
     return redirect(url_for('authentication_blueprint.login'))
 
 # Login & Registration
+
 
 @blueprint.route('/login', methods=['GET', 'POST'])
 def login():

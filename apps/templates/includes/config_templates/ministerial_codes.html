@@ -55,13 +55,12 @@
                 <div class="col-md-6">
                     <input class="form-control" id="search_ministerial_code" name="search_ministerial_code">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-codigo">
-                    
-                    <button type="button" id="b_nuevo_codigo" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_code">Nuevo Codigo</button>
-                </div>
                 
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_codigo" class="btn btn-nr-primary btn-success"data-bs-toggle="modal" data-bs-target="#modal_code" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>                   
             </div>
         </div>
         </div>
@@ -78,8 +77,16 @@
                     <h6>Codigos Ministeriales</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_codigo" class="btn btn-secondary botones_code" disabled patient-id="">Editar Codigo</button>
-                    <button type="button" id="b_eliminar_codigo" class="btn btn-secondary botones_code delete_b" disabled patient-id="">Eliminar Codigo</button>
+
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_code" id="b_editar_codigo"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_code delete_b" id="b_eliminar_codigo"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+                    <!-- <button type="button" id="b_editar_codigo" class="btn btn-secondary botones_code" disabled patient-id="">Editar Codigo</button>
+                    <button type="button" id="b_eliminar_codigo" class="btn btn-secondary botones_code delete_b" disabled patient-id="">Eliminar Codigo</button> -->
                 </div>
                 
             </div>

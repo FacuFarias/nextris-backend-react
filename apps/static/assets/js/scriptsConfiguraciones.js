@@ -21,6 +21,32 @@ var configAgenda = [
     
 ];
 
+var configItemAgenda = [
+    { modalFieldId: 'day', type: 'select' },
+    { modalFieldId: 'timefrom', type: 'time' },
+    { modalFieldId: 'timeto', type: 'time' },
+    { modalFieldId: 'initday', type: 'date' },
+    { modalFieldId: 'finishday', type: 'date' }
+];
+
+
+var configUser = [
+    { modalFieldId: 'username', type: 'text' },
+    { modalFieldId: 's_type_of_user', type: 'select-one' },
+    { modalFieldId: 'name', type: 'text' },
+    { modalFieldId: 'surname', type: 'text' },
+    { modalFieldId: 'nationalnumber', type: 'text' },
+    { modalFieldId: 'text_mail', type: 'text' }
+    
+];
+
+var configMedSol = [
+    { modalFieldId: 'description', type: 'text' },
+    { modalFieldId: 'phone', type: 'text' },
+    { modalFieldId: 'mail', type: 'text' },
+    { modalFieldId: 'notes', type: 'text' },
+];
+
 var configDias = [
     { modalFieldId: 'dia_ag', type: 'number' },
     { modalFieldId: 'hora_inicio_dia', type: 'text' },
@@ -64,7 +90,8 @@ var configExamen = [
     { modalFieldId: 's_cod_min', type: 'select-one' },
     { modalFieldId: 's_modality', type: 'select-one' },
     { modalFieldId: 'time_execution', type: 'text' },
-    { modalFieldId: 'IsAc_ex', type: 'checkbox' }
+    { modalFieldId: 'IsAc_ex', type: 'checkbox' },
+    { modalFieldId: 'precio', type: 'text' }
 ];
 
 var configAp = [
@@ -259,6 +286,7 @@ function createCheckboxes(form, data) {
 function ConfigModalForm(FormId, TablaId, FormAction,modalId) {
     var Form = document.getElementById(FormId);
     Form.action = FormAction
+
     Form.addEventListener('submit', function (event) {
         event.preventDefault(); // Evitar la recarga de la página
 
@@ -276,11 +304,12 @@ function ConfigModalForm(FormId, TablaId, FormAction,modalId) {
             .then(data => {
                 $(modalId).modal('hide');
                 // Crear una nueva fila
+                console.log(data)
                 var row = document.createElement('tr');
 
                 // Iterar sobre las propiedades en data.data
                 for (var prop in data.data) {
-                    console.log(prop)
+                    // console.log(prop)
                     if (data.data.hasOwnProperty(prop)) {
 
                         // Crear un nuevo td para cada propiedad
@@ -472,15 +501,16 @@ function setNewButton(botonId, modalId, FormId, FormAction) {
     var b_nuevo = document.getElementById(botonId);
 
     b_nuevo.addEventListener('click', function (event) {
+        
         // Evitar la propagación del evento para que no afecte al cierre de la modal
         event.stopPropagation();
 
         // Obtener el formulario y la modal
         var Form = document.getElementById(FormId);
-
+        
         // Asignar la acción del formulario directamente
         Form.action = FormAction;
-
+        console.log(Form)
         // Limpiar los campos del formulario
         var formElements = Form.elements;
         for (var i = 0; i < formElements.length; i++) {
@@ -608,6 +638,68 @@ function VerDominio(PrimaryTable,cardBusqueda,CardTabla,TablaAhoraVis,TituloId){
 }
 
 
+function DesplegarAgendaMed(TablaId){
+    // Obtener la fila seleccionada
+    var tabla = document.getElementById(TablaId);
+    var tbody_= tabla.querySelector('tbody');
+    var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+    if (filaSeleccionada) {
+        var id = filaSeleccionada.dataset.id;
+    }
+    // Aca le coloco el id del medico en el modal
+    document.getElementById('id_agenda_med').value=id
+    fetch('/get_days_agenda', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: id }),
+    })
+        .then(response => response.json())
+        .then(data => {
+            console.log(data)
+            var tabla_agenda = document.getElementById('tabla_seg_ag');
+            var tbody_= tabla_agenda.querySelector('tbody');
+            tbody_.innerHTML = '';
+
+            data.forEach(function (item) {
+                var row = document.createElement('tr');
+                row.dataset.id = item.guid;
+    
+                var diaCell = document.createElement('td');
+                diaCell.textContent = item.day;
+                row.appendChild(diaCell);
+    
+                var inicioCell = document.createElement('td');
+                inicioCell.textContent = item.timefrom;
+                row.appendChild(inicioCell);
+    
+                var finalCell = document.createElement('td');
+                finalCell.textContent = item.timeto;
+                row.appendChild(finalCell);
+    
+                var inicioDiaCell = document.createElement('td');
+                inicioDiaCell.textContent = item.initday;
+                row.appendChild(inicioDiaCell);
+    
+                var finalDiaCell = document.createElement('td');
+                finalDiaCell.textContent = item.finishday;
+                row.appendChild(finalDiaCell);
+    
+                tbody_.appendChild(row);
+            });
+    
+
+            // Coloca aquí el código que depende de la respuesta de fetch
+            // var Card = document.getElementById(CardId);
+            // Card.classList.remove('hidden');
+        })
+        .catch(error => {
+            console.error('Error:', error);
+        });
+
+}
+
 function ConfigurarTablaCheckBox(bAdd,FormId,TableId,route_getcheck,route_get_domain,route_update,ModalId,IdId){
     var b_ = document.getElementById(bAdd);
     var isConfigured_ = false;  // Variable de control
@@ -627,22 +719,12 @@ document.addEventListener("DOMContentLoaded", function() {
     
     ConfigurarPestana('pills-group-origins-tab','tabla-grupos','grupoForm','modal_go',`/get_origins_group`,"/agregar_go","/actualizar_go",'/eliminar_grupo','b_nuevo_grupo',"b_editar_grupo",'boton-buscar-grupo','b_eliminar_grupo','label_group_origins','botones',configGo,'id_go')
     
-    // Cada grupo de configuraciones tiene 4 rutas> las rutas `/get_origins_group`,"/agregar_go","/eliminar_", "/actualizar_go"
-    // var bp_grupo = document.getElementById('pills-group-origins-tab');
-    // bp_grupo.addEventListener('click', RellenarTabla('tabla-grupos',`/get_origins_group`))
-
-    // ConfigurarFiltro('boton-buscar-grupo', 'label_group_origins', 'tabla-grupos');
-    // ConfigurarTabla('tabla-grupos','botones')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
-    // ConfigModalForm('grupoForm','tabla-grupos',"/agregar_go","#modal_go")
-    // SetDeleteButton('b_eliminar_grupo','tabla-grupos','/eliminar_grupo')
-    // SetEditButton("b_editar_grupo",'grupoForm','modal_go','tabla-grupos',"/actualizar_go",configGo,'id_go')
-    // setNewButton('b_nuevo_grupo', 'modal_go', 'grupoForm', "/agregar_go")
-
 
     // Configuraciones para la pestana de Procedencias
     var bp_grupo = document.getElementById('pills-origins-tab');
     bp_grupo.addEventListener('click', RellenarTabla('tabla-origenes',`/get_origins`))
-    ConfigurarFiltro("boton-buscar-origen", 'label_origins', 'tabla-origenes');
+    // ConfigurarFiltro("boton-buscar-origen", 'label_origins', 'tabla-origenes');
+    ConfigFiltrarText('label_origins', 'tabla-origenes',0)
     ConfigurarTabla('tabla-origenes','botones_or')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_origen','tabla-origenes',"/agregar_origen","#modal_or")
     SetDeleteButton('b_eliminar_origen','tabla-origenes','/eliminar_procedencia')
@@ -654,7 +736,8 @@ document.addEventListener("DOMContentLoaded", function() {
     function ConfigurarPestana(PillTab,TablaId,FormId,ModalId,get_route,add_route,update_route,delete_route,bNew,bEdit,bSearch,bDelete,lSearch,ClassFB,config,id){
         var bp_grupo = document.getElementById(PillTab);
         bp_grupo.addEventListener('click', RellenarTabla(TablaId,get_route))
-        ConfigurarFiltro(bSearch, lSearch, TablaId);
+        // ConfigurarFiltro(bSearch, lSearch, TablaId);
+        ConfigFiltrarText(lSearch, TablaId,0)
         ConfigurarTabla(TablaId,ClassFB)//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
         modal_hashtag='#'+ModalId
         ConfigModalForm(FormId,TablaId,add_route,modal_hashtag)// Aca modal tiene que ir con #adelante. Tengo que hacer la adaptación en la función esta
@@ -667,7 +750,8 @@ document.addEventListener("DOMContentLoaded", function() {
     // Configuraciones para la pestana de Codigos Ministeriales
     var bp_grupo = document.getElementById("pills-ministerial-codes-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-codigos',`/get_ministerial_codes`)) 
-    ConfigurarFiltro("boton-buscar-codigo", 'search_ministerial_code', 'tabla-codigos');
+    // ConfigurarFiltro("boton-buscar-codigo", 'search_ministerial_code', 'tabla-codigos');
+    ConfigFiltrarText('search_ministerial_code', 'tabla-codigos',0)
     ConfigurarTabla('tabla-codigos','botones_code')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
 
     ConfigModalForm('Form_code','tabla-codigos',"/agregar_codigo","#modal_code")
@@ -680,7 +764,8 @@ document.addEventListener("DOMContentLoaded", function() {
     // Configuraciones para la pestana de Modalidades/metodos
     var bp_grupo = document.getElementById("pills-methods-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-mod',`/get_modalities`))
-    ConfigurarFiltro("boton-buscar-mod", 'search_mod', 'tabla-mod');
+    // ConfigurarFiltro("boton-buscar-mod", 'search_mod', 'tabla-mod');
+    ConfigFiltrarText('search_mod', 'tabla-mod',0)
     ConfigurarTabla('tabla-mod','botones_mod')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_mod','tabla-mod',"/agregar_mod","#modal_mod")
     SetDeleteButton('b_eliminar_mod','tabla-mod','/eliminar_mod')
@@ -690,7 +775,8 @@ document.addEventListener("DOMContentLoaded", function() {
     // Configuraciones para la pestana de Anatomical Parts
     var bp_grupo = document.getElementById("pills-body-parts-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-ap',`/get_body_parts`))
-    ConfigurarFiltro("boton-buscar-ap", 'search_ap', 'tabla-ap');
+    // ConfigurarFiltro("boton-buscar-ap", 'search_ap', 'tabla-ap');
+    ConfigFiltrarText('search_ap', 'tabla-ap',0)
     ConfigurarTabla('tabla-ap','botones_ap')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_ap','tabla-ap',"/agregar_ap","#modal_ap")
     SetDeleteButton('b_eliminar_ap','tabla-ap','/eliminar_ap')
@@ -701,7 +787,8 @@ document.addEventListener("DOMContentLoaded", function() {
      // Configuraciones para la pestana de Examenes
      var bp_grupo = document.getElementById("pills-body-parts-tab");
      bp_grupo.addEventListener('click', RellenarTabla('tabla-examen',`/get_exams`))
-    ConfigurarFiltro("boton-buscar-examen", 'search_exam', 'tabla-examen');
+    // ConfigurarFiltro("boton-buscar-examen", 'search_exam', 'tabla-examen');
+    ConfigFiltrarText('search_exam', 'tabla-examen',0)
     ConfigurarTabla('tabla-examen','botones_ex')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_exams','tabla-examen',"/agregar_examen","#modal_exam")
     SetDeleteButton('b_eliminar_examen','tabla-examen','/eliminar_examen')
@@ -714,7 +801,8 @@ document.addEventListener("DOMContentLoaded", function() {
 
     var bp_grupo = document.getElementById("pills-rooms-tab");
      bp_grupo.addEventListener('click', RellenarTabla('tabla-salas',`/get_rooms`))
-    ConfigurarFiltro("boton-buscar-room", 'search_room', 'tabla-salas');
+    // ConfigurarFiltro("boton-buscar-room", 'search_room', 'tabla-salas');
+    ConfigFiltrarText('search_room', 'tabla-salas',0)
     ConfigurarTabla('tabla-salas','botones_room')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_rooms','tabla-salas',"/agregar_room","#modal_rooms")
     SetDeleteButton('b_eliminar_room','tabla-salas','/eliminar_room')
@@ -724,7 +812,8 @@ document.addEventListener("DOMContentLoaded", function() {
 // Configuraciones para la pestana de Equipos
     var bp_grupo = document.getElementById("pills-machines-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-mach',`/get_mach`))
-    ConfigurarFiltro("boton-buscar-mach", 'search_mach', 'tabla-mach');
+    // ConfigurarFiltro("boton-buscar-mach", 'search_mach', 'tabla-mach');
+    ConfigFiltrarText('search_mach', 'tabla-mach',0)
     ConfigurarTabla('tabla-mach','botones_mach')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_mach','tabla-mach',"/agregar_mach","#modal_mach")
     SetDeleteButton('b_eliminar_mach','tabla-mach','/eliminar_mach')
@@ -738,7 +827,8 @@ document.addEventListener("DOMContentLoaded", function() {
     // Configuraciones para la pestana de Agendas
     var bp_grupo = document.getElementById("pills-agendas-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-agendas',`/get_agendas`))
-    ConfigurarFiltro("boton-buscar-agenda", 'search_agenda', 'tabla-agendas');
+    // ConfigurarFiltro("boton-buscar-agenda", 'search_agenda', 'tabla-agendas');
+    ConfigFiltrarText('search_agenda', 'tabla-agendas',0)
     ConfigurarTabla('tabla-agendas','botones_ag')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_agenda','tabla-agendas',"/agregar_agendas","#modal_agenda")
     SetDeleteButton('b_eliminar_agenda','tabla-agendas','/eliminar_agenda')
@@ -764,12 +854,54 @@ document.addEventListener("DOMContentLoaded", function() {
     // Configuraciones para la pestana de Agendas
     var bp_grupo = document.getElementById("pills-agendas-tab");
     bp_grupo.addEventListener('click', RellenarTabla('tabla-bu',`/get_business_units`))
-    ConfigurarFiltro("boton-buscar-bu", 'search_bu', 'tabla-bu');
+    // ConfigurarFiltro("boton-buscar-bu", 'search_bu', 'tabla-bu');
     ConfigurarTabla('tabla-bu','botones_bu')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
     ConfigModalForm('Form_bu','tabla-bu',"/agregar_business_units","#modal_bu")
     SetDeleteButton('b_eliminar_bu','tabla-bu','/eliminar_bu')
     SetEditButton("b_editar_bu",'Form_bu','modal_bu','tabla-bu',"/actualizar_business_units",configBU,'id_bu')
     setNewButton('b_nuevo_bu', 'modal_bu', 'Form_bu', "/agregar_business_units")
+
+
+    // Configuraciones para la pestana de Usuarios
+    var bp_grupo = document.getElementById("gestion_users");
+    bp_grupo.addEventListener('click', RellenarTabla('tabla_usuarios',`/get_users`))
+    RellenarSelect("s_type_of_user", 'Description', 'public.IsRole');
+    // ConfigurarFiltro("boton-buscar-usuario", 'search_group_users', 'tabla_usuarios');
+    ConfigFiltrarText('search_group_users', 'tabla_usuarios',0)
+    ConfigurarTabla('tabla_usuarios','botones_user')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
+    ConfigModalForm('Form_user','tabla_usuarios',"/create_user","#modal_users")
+    setNewButton('b_nuevo_user', 'modal_users', 'Form_user', "/create_user")
+    SetDeleteButton('b_eliminar_user','tabla_usuarios','/delete_user')
+    SetEditButton("b_editar_user",'Form_user','modal_users','tabla_usuarios',"/edit_user",configUser,'id_user')
+
+    // Configuraciones para la pestana de Medicos solicitantes
+    var bp_grupo = document.getElementById("pills_med_request");
+    bp_grupo.addEventListener('click', RellenarTabla('tabla_med_sol',`/get_med_sol`))
+    // ConfigurarFiltro("boton_buscar_med_sol", 'label_med_sol', 'tabla_med_sol');
+    ConfigFiltrarText('label_med_sol', 'tabla_med_sol',0)
+    ConfigurarTabla('tabla_med_sol','botones_ms')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
+    ConfigModalForm('Form_med_sol','tabla_med_sol',"/agregar_med_sol","#modal_med_sol")
+    setNewButton('b_nuevo_med_sol', 'modal_med_sol', 'Form_med_sol', "/agregar_med_sol")
+    SetDeleteButton('b_eliminar_med_sol','tabla_med_sol','/eliminar_med_sol')
+    SetEditButton("b_editar_med_sol",'Form_med_sol','modal_med_sol','tabla_med_sol',"/actualizar_med_sol",configMedSol,'id_ms')
+    
+    // Configuraciones para la pestana de Agendas de medicos
+    var bp_grupo = document.getElementById("pills_med_agenda");
+    bp_grupo.addEventListener('click', RellenarTabla('tabla_med_ag',`/get_agenda_med`))
+    // ConfigurarFiltro("boton_buscar_doc", 'search_doctor', 'tabla_med_ag');
+    ConfigurarTabla('tabla_med_ag','botones_va')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
+    var bp_grupo = document.getElementById("b_ver_agenda_med");
+    bp_grupo.addEventListener('click',function(){
+        DesplegarAgendaMed('tabla_med_ag')
+    })
+
+    ConfigurarTabla('tabla_seg_ag','botones_am')//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
+    ConfigModalForm('Form_am','tabla_seg_ag',"/agregar_item","#modal_am")
+    setNewButton('b_agregar_item', 'modal_am', 'Form_am', "/agregar_item")
+    SetDeleteButton('b_eliminar_item','tabla_seg_ag','/eliminar_item_agenda')
+    SetEditButton("b_editar_item",'Form_am','modal_am','tabla_seg_ag',"/actualizar_item_agenda",configItemAgenda,'id_item_agenda')
+
+
 
     var b_dominio = document.getElementById("b_dominio_bu");
 

@@ -1,0 +1,132 @@
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_med_sol" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Medico Solicitante</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/create_med_sol" id="Form_med_sol">
+                    <input type="hidden" name="id_ms" id="id_ms">
+                    
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="description">Nombre de medico solicitante</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="description" name="description" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="phone">Telefono</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="phone" name="phone" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="mail">Mail</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="mail" name="mail" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="notes">Notas</label>
+                        </div>
+                        <div class="col-md-9">
+                            <textarea class="form-control" id="notes" name="notes" rows="4"></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_med_sol">Crear</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+
+  
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_group_origins">
+                        Buscar medico solicitante
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="label_med_sol" name="label_med_sol">
+                </div>
+
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_med_sol" class="btn btn-nr-primary btn-success"data-bs-toggle="modal" data-bs-target="#modal_med_sol" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div> 
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Lista de Medicos Solicitantes</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_ms" id="b_editar_med_sol"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_ms delete_b" id="b_eliminar_med_sol"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla_med_sol">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Telefono</th>
+                        <th>Mail</th>
+                        <th>Notas</th>                
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>
+

@@ -40,28 +40,26 @@
 
 <div class="row">
     <div class="col-12">
-        <div class="card mb-4">
-        <div class="card-header pb-0">
-        </div>
-        
-        <div class="card-body px-0 pt-0 pb-2">
+        <div class="card mb-4">        
+        <div class="card-body px-0 pt-2 pb-2">
             
             <div class="container-fluid">
-            <div class="row">
-                <div class="col-md-3">
-                    <label for="search_group_origins">
-                        Buscar grupo de procedencia
+            <div class="row align-items-center">
+                <div class="col-md-3 ">
+                    <label for="search_group_origins align-items-center">
+                        <h6>Buscar grupo de procedencia</h6>
                     </label>
                 </div>
                 <div class="col-md-6">
                     <input class="form-control" id="label_group_origins" name="group_origins">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-grupo">
-                    
-                    <button type="button" id="b_nuevo_grupo" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_go">Nuevo Grupo</button>
-                </div>
+
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_grupo" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_go" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>   
+
                 
             </div>
         </div>
@@ -79,8 +77,15 @@
                     <h6>Grupos de procedencias</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_grupo" class="btn btn-secondary botones" disabled patient-id="">Editar grupo</button>
-                    <button type="button" id="b_eliminar_grupo" class="btn btn-secondary botones delete_b" disabled patient-id="">Eliminar grupo</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones" id="b_editar_grupo"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones delete_b" id="b_eliminar_grupo"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+
+                    <!-- <button type="button" id="b_eliminar_grupo" class="btn btn-secondary botones delete_b" disabled patient-id="">Eliminar grupo</button> -->
                 </div>
                 
             </div>

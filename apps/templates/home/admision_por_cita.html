@@ -1,0 +1,213 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Admision por cita {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
+{% endblock stylesheets %} 
+
+{% block content %}
+
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/hospital.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_adm_cita" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+  <div class="modal-dialog" z-index="-2">
+      <div class="modal-content">
+
+        <div class="modal-header">
+          <h1 class="modal-title fs-5" id="t_mod_ec">Seleccione Equipo</h1>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+        </div>
+
+        <div class="modal-body">
+          <form method="POST" action="/admisionar_cita" id="Form_adm_cita">
+            <input type="hidden" name="idevent" id="idevent">
+            <input type="hidden" name="idequip" id="idequip">
+            <div class="form-group row card-tabla-equipos">
+              <table class="tabla-paciente table" id="tabla-equipo-modal">
+                <thead>
+                    <tr>
+                        <th>AETitle</th>
+                        <th>Equipo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+              </table>
+            </div>
+          </form>
+        </div>
+
+        <div class="modal-footer">
+          <button type="submit" class="btn bg-gradient-success save-changes" form="Form_adm_cita">Asignar</button>
+          <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+      </div>
+  </div>
+</div>
+<!-- FIN MODAL -->
+
+<!-- card de busqueda -->
+      <div class="row mx-6 pt-8">
+        <div class="col-12">
+          <div class="card mb-4" id="card_buscar">
+            <div class="card-header pb-0 d-flex justify-content-between align-items-center">
+              <h6>Buscar Cita</h6>
+              <div class="d-flex ms-auto">
+                <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+                  <i class="fa fa-filter" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <div id="collapseCardBody" class="collapse">
+            <div class="card-body px-0 pt-0 pb-2">
+                <input type="hidden" name="url" id="url">
+              <div class="container-fluid">
+                <div class="row datos-paciente">    
+                  <div class="col-md-5">
+                    <div class="row">
+                      <div class="col-md-4">
+                        <label for="nombre_pat">Nombre Paciente</label>
+                    </div>
+                    <div class="col-md-8">
+                      <input type="text" class="form-control" id="nombre_pat" name="nombre_pat">
+                  </div>
+                   
+                  </div>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label for="fecha_cita">
+                                Fecha de la cita
+                            </label>
+                        </div>
+                        <div class="col-md-8">
+                            <input type="date" class='dp form-control' id="fecha_cita" name="fecha_nac">
+                        </div>
+                    </div>
+                    
+    
+                </div>
+                    <div class="col-md-5">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="medico_referente">
+                                        Medico referente
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                  <label for="medico_referente">
+                                    <select id="medico_referente" class="form-control"></select>
+                                  </label>
+                              </div>
+                            </div>
+                            <div class="row">
+                              <div class="col-md-4">
+                                  <label for="medico_solicitante" >
+                                      Medico Solicitante
+                                  </label>
+                              </div>
+                              <div class="col-md-8">
+                                <label for="medico_solicitante">
+                                  <select id="medico_solicitante" class="form-control"></select>
+                                </label>
+                            </div>
+                          </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-2 d-flex justify-content-end">
+                      <button type="button" id="limpiar_filtros" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp btn-danger">
+                          <i class="fa fa-eraser" aria-hidden="true" style="font-size: 25px;"></i>
+                      </button>
+                  </div>              
+                </div>
+              
+            </div>
+           
+
+            </div>
+          </div><div class="card-footer"></div>
+            
+          </div>
+        </div>
+      </div>
+<!-- FIN card de busqueda -->
+      <div class="row">
+        <div class="col-12">
+          <div class="card mb-4 shadow" id="card_citas">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Citas a admisionar</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_ec" disabled patient-id="" id="b_admisionar_cita" >
+                          <i class="fa fa-check" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button"  class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_ec" disabled patient-id="" id="b_editar_fecha">
+                          <i class="fa fa-calendar" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" id="eliminar_cita" class="btn btn-nr-primary botones_ec delete_b" disabled patient-id="">
+                          <i class="fa fa-trash" aria-hidden="true"></i>
+                      </button>
+                      <button type="button" id="imprimir_lista" class="btn btn-nr-primary botones_ec btn-info" disabled patient-id="">
+                        <i class="fa fa-print" aria-hidden="true"></i>
+                    </button>
+                    </div>
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-primary table" id="tabla-citas">
+                    <thead>
+                        <tr>
+                            <th>Paciente</th>
+                            <th>Turno</th>
+                            <th>Medico Referente</th>
+                            <th>Examen</th>
+                            <th>medico solicitante</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      <div class="row">
+        <div id="calendario-content" class="mt-4" data-id=""></div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js'></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/admisionPorCita.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

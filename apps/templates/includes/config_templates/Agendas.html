@@ -70,7 +70,6 @@
                     </div>
 
                     <div class="form-group row">
-                        
                     </div>
 
                     <div class="form-group row">
@@ -78,7 +77,6 @@
                             <input type="checkbox" id="IsAc_ag" name="IsAc_ag"><label for="IsAc_ag">Activo</label>
                         </div>
                     </div>
-
             </div>
             <div class="modal-footer">
                 <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Sala</button>
@@ -86,7 +84,6 @@
                 <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
             </div>
         </div>
-
     </div>
 </div>
 <!-- Fin modal -->
@@ -161,7 +158,6 @@
                             <input type="number" class="form-control" id="lugares_x_slots" name="lugares_x_slots" required>
                         </div>
                     </div>
-
             </div>
             <div class="modal-footer">
                 <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Dia</button>
@@ -169,7 +165,6 @@
                 <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
             </div>
         </div>
-
     </div>
 </div>
 <!-- Fin modal dias -->
@@ -193,13 +188,10 @@
                 <div class="col-md-6">
                     <input class="form-control" id="search_agenda" name="search_agenda">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-agenda">
-                    
-                    <button type="button" id="b_nueva_agenda" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_agenda">Nueva Agenda</button>
-                </div>
-                
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nueva_agenda" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_agenda" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>                
             </div>
         </div>
         </div>
@@ -220,14 +212,20 @@
                     <h2 id="titulo_dias"> </h2>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_agregar_dia" class="btn btn-secondary botones_ag" data-bs-toggle="modal" data-bs-target="#modal_dias">Agregar Dia</button>
-                    <button type="button" id="b_editar_dia" class="btn btn-secondary botones_dia" disabled>Editar</button>
-                    <button type="button" id="b_eliminar_dia" class="btn btn-secondary botones_dia delete_b" disabled>Eliminar</button>
-                </div>
+
+                    <button type="button" id="b_agregar_dia" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_dias" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>   
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_dia" id="b_editar_dia"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_dia delete_b" id="b_eliminar_dia"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
                 
+                </div>
             </div>
-            
-            
         </div>
         
         <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
@@ -247,9 +245,8 @@
         </div> 
     </div>
     </div>
-    </div>
-
-    <!-- FIN DIAS AGENDA -->
+</div>
+<!-- FIN DIAS AGENDA -->
 
 <div class="row">
     <div class="col-12">
@@ -260,14 +257,20 @@
                     <h6>Agendas</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_dias_horas" class="btn btn-secondary botones_ag" disabled patient-id="">Ver dias y horarios</button>
-                    <button type="button" id="b_editar_agenda" class="btn btn-secondary botones_ag" disabled patient-id="">Editar Agenda</button>
-                    <button type="button" id="b_eliminar_agenda" class="btn btn-secondary botones_ag delete_b" disabled patient-id="">Eliminar Agenda</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_ag btn-success" id="b_dias_horas"  disabled>
+                        <i class="fas fa-calendar-days" aria-hidden="true"></i>
+                      </button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_ag" id="b_editar_agenda"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_ag delete_b" id="b_eliminar_agenda"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+                    
                 </div>
                 
             </div>
-            
-            
         </div>
         
         <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
@@ -288,4 +291,4 @@
         </div> 
     </div>
     </div>
-    </div>
+</div></div>

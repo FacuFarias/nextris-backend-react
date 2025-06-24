@@ -6,13 +6,14 @@
 {% block stylesheets %}{% endblock stylesheets %}
 
 {% block content %}
-  <div class="min-height-300 bg-primary position-absolute w-100"></div>
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/back_rad.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
 
   {% include "includes/sidenav.html" %}
 
   <main class="main-content position-relative border-radius-lg ">
-
-    {% include "includes/navigation.html" %}
 
 <!-- Modal -->
 <div class="modal fade custom-modal" id="modal_notas_ex" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
@@ -42,32 +43,26 @@
 </div>
 <!-- FIN MODAL -->
     
-<!-- card de notificacion -->
-    <div class="container-fluid py-4">
-        {% if cargado: %}
-        <div class="card mb-4 alert alert-success" id="notif-carga">
-            <div class="row">
-                <div class="col-md-11">
-                    <h3>Paciente cargado con éxito</h3>
-                </div>
-                <div class="col-md-1 d-flex align-items-center justify-content-end">
-                    <div>
-                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
+    <div class="container-fluid pt-2">
+        
+
+
+<!-- card de busqueda -->
+      <div class="row px-10">
+        <div class="col-12">
+          <div class="card mb-2 nr-card-1 ">
+            <div class="card-header pb-0 rounded-bottom">
+                <div class="row ">
+                    <div class="col-md-8 ms-auto"><h6>Buscar Ordenes a ejecutar</h6></div>
+                
+                    <div class="col-md-4 d-flex ms-auto justify-content-end">
+                        <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+                        <i class="fa fa-filter" aria-hidden="true"></i>
+                        </button>
                     </div>
                 </div>
             </div>
-        </div>        
-        {% endif %}
-<!-- fin card de notificacion -->
-
-<!-- card de busqueda -->
-      <div class="row">
-        <div class="col-12">
-          <div class="card mb-4">
-            <div class="card-header pb-0">
-              <h6>Buscar Ordenes a ejecutar</h6>
-            </div>
-            
+            <div id="collapseCardBody" class="collapse">
             <div class="card-body px-0 pt-0 pb-2">
                 <form class="my-form" method="GET" action="/buscar_pacientes">
                 <input type="hidden" name="url" id="url" value="buscar_paciente.html">
@@ -107,9 +102,12 @@
                                         Modalidad
                                     </label>
                                 </div>
-                                <select id="s_modalidad" name="s_modalidad">
+                                <div class="col-md-8">
+                                    <select id="s_modalidad" name="s_modalidad" class="form-control">
 
-                                  </select>
+                                    </select>
+                                </div>
+                                
                             </div>
         
                             <div class="row">
@@ -143,7 +141,7 @@
                                 </label>
                             </div>
                             <div class="col-md-8">
-                                <input type="date" class='dp' id="fecha_nac" name="fecha_nac">
+                                <input type="date" class='dp form-control' id="fecha_nac" name="fecha_nac">
                             </div>
                         </div>
         
@@ -154,7 +152,7 @@
                                 </label>
                             </div>
                             <div class="col-md-8">
-                                <input type="text" id="buscar_adm" name="buscar_adm">
+                                <input type="text" id="buscar_adm" name="buscar_adm" class="form-control">
                             </div>
                         </div>
                         <div class="row">
@@ -164,7 +162,7 @@
                                 </label>
                             </div>
                             <div class="col-md-8">
-                                <input type="text" id="idP" name="idP">
+                                <input type="text" id="idP" name="idP" class="form-control">
                             </div>
                         </div>
                     </div>
@@ -173,7 +171,8 @@
                         <input type="submit" value="Buscar" class="btn btn-primary" id="b_search"></form>
                         
                                               
-                    </div>             
+                    </div>  
+                </div>           
                 </div>
               
             </div>
@@ -186,19 +185,29 @@
       </div>
 <!-- FIN card de busqueda -->
       <div class="row">
-        <div class="col-12">
-          <div class="card mb-4 shadow">
+        
+          <div class="card mb-4 nr-card-1">
             <div class="card-header pb-0">
                 <div class="row">
                     <div class="col-md-4">
                         <h6>Resultados</h6>
+                        
                     </div>
                     <div class="col-md-8 d-flex justify-content-end">
-                        <button type="button" id="b_ejecutar_orden" class="btn btn-secondary botones_sp" disabled patient-id="">Ejecutar Orden</button>
-                        <button type="button" id="b_cancelar_orden" class="btn btn-warning botones_sp" disabled patient-id="">Cancelar Orden</button>
-                        <button type="button" class="btn btn-primary botones_sp" data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex" disabled>Agregar notas</button>
-                        
-                        
+
+                        <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp" disabled patient-id="" id="b_ejecutar_orden" >
+                            <i class="ni ni-active-40" aria-hidden="true"></i>
+                        </button>
+
+                        <button type="button" class="btn btn-nr-primary botones_sp btn-warning" disabled id="b_cancelar_orden">
+                            <i class="fa fa-trash" aria-hidden="true"></i>
+                        </button>
+
+                        <button type="button" id="b_agregar_notas" class="btn btn-nr-primary botones_sp btn-info" disabled data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex">
+                            <i class="fa fa-file" aria-hidden="true"></i>
+                        </button>
+
+                    
                     </div>
                     
                 </div>
@@ -206,7 +215,7 @@
                 
             </div>
             <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-                <table class="tabla-paciente table" id="tabla_ordenes">
+                <table class="tabla-primary table" id="tabla_ordenes">
                     <thead>
                         <tr>
                             <th>Hora</th>
@@ -225,7 +234,7 @@
                 </table>
             </div> 
         </div>
-      </div>
+      
       </div>
 
       {% include "includes/footer.html" %}

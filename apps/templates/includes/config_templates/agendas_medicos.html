@@ -1,0 +1,185 @@
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_am" tabindex="-1" data-bs-keyboard="true" aria-labelledby="modalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="modalLabel">Nuevo Segmento de Agenda</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/agregar_item" id="Form_am">
+                    <input type="hidden" name="id_agenda_med" id="id_agenda_med">
+                    <input type="hidden" name="id_item_agenda" id="id_item_agenda">
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="day">Día</label>
+                        </div>
+                        <div class="col-md-9">
+                            <select class="form-control" id="day" name="day" required>
+                                <option value="lunes">Lunes</option>
+                                <option value="martes">Martes</option>
+                                <option value="miércoles">Miércoles</option>
+                                <option value="jueves">Jueves</option>
+                                <option value="viernes">Viernes</option>
+                                <option value="sábado">Sábado</option>
+                                <option value="domingo">Domingo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="timefrom">Inicio</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="time" class="form-control" id="timefrom" name="timefrom" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="timeto">Final</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="time" class="form-control" id="timeto" name="timeto" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="initday">A partir del</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="date" class="form-control" id="initday" name="initday" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="finishday">Hasta el</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="date" class="form-control" id="finishday" name="finishday" required>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_am">Crear item</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_doctor">
+                        Introduce nombre del medico
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_doctor" name="search_doctor">
+                </div>
+
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+
+
+
+    <!-- Tabla de Profesionales -->
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Medicos de la institución</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" id="b_ver_agenda_med" class="btn btn-secondary botones_va" disabled patient-id="">Ver Agenda</button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla_med_ag">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Nombre</th>
+                        <th>Apellido</th>
+                        <th>DNI</th>                
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>
+
+
+     <!-- Tabla de agendas -->
+     <div class="row">
+        <div class="col-12">
+            <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Agenda creada para el profesional</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_am" id="b_agregar_item" data-bs-toggle="modal" data-bs-target="#modal_am" style="font-size: 25px;">
+                            <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                          </button>
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_am" id="b_editar_item"  disabled>
+                            <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                          </button>
+                          <button type="button" class="btn btn-nr-primary rounded-circle botones_am delete_b" id="b_eliminar_item"  disabled>
+                            <i class="fas fa-trash" aria-hidden="true"></i>
+                          </button>
+                    </div>
+                </div>
+                
+                
+            </div>
+            <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla_seg_ag">
+                    <thead>
+                        <tr>
+                            <th>Dia</th>
+                            <th>Inicio</th>
+                            <th>Final</th>
+                            <th>A partir del</th> 
+                            <th>Hasta el</th>                 
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+        </div>
+        </div>

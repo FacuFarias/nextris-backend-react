@@ -6,34 +6,23 @@
 {% block stylesheets %}
 <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
 {% endblock stylesheets %}
-
+  
 
 {% block content %}
-  <div class="min-height-300 bg-primary position-absolute w-100"></div>
 
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/hospital.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
       
   {% include "includes/sidenav.html" %}
 
   <main class="main-content position-relative border-radius-lg ">
+    <div id="toastContainer"></div>
 
     <div class="container-fluid py-4">
-        {% if cargado: %}
-        <div class="card mb-4 alert alert-success" id="notif-carga">
-            <div class="row">
-                <div class="col-md-11">
-                    <h3>Paciente cargado con éxito</h3>
-                </div>
-                <div class="col-md-1 d-flex align-items-center justify-content-end">
-                    <div>
-                        <button type="button" class="btn-close" aria-label="Close" id="btn-close"></button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        {% endif %}
         <div class="row mb-4">
-            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+            <ul class="nav nav-pills mb-3 align-items-center" id="pills-tab" role="tablist">
                 <li class="nav-item" role="presentation">
                   <button class="nav-link active" id="pills-paciente-tab" data-bs-toggle="pill" data-bs-target="#pills-paciente" type="button" role="tab" aria-controls="pills-paciente" aria-selected="true">Paciente</button>
                 </li>
@@ -46,6 +35,12 @@
                 <li class="nav-item" role="presentation" id="dni-item" style="pointer-events: none; margin-left: auto;">
                     <span class="nav-link hidden" aria-selected="false" id="dni-value">hola</span>
                 </li>
+                <!-- Botón adicional con clase ms-auto -->
+                <li class="nav-item align-items-end pt-2" role="presentation">
+                  <button type="button" id="finalizar_orden" class="btn btn-nr-primary btn-success">
+                      <i class="fa fa-check-circle" aria-hidden="true" style="font-size: 30px;"></i>
+                  </button>
+              </li>
             </ul>
               <div class="tab-content" id="pills-tabContent">
                 <div class="tab-pane fade show active" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
@@ -57,9 +52,7 @@
                 <div class="tab-pane fade" id="pills-prest" role="tabpanel" aria-labelledby="pills-prest-tab">
                     {% include "includes/admision_templates/prestacion.html" %}
                 </div>
-                <div class="tab-pane fade" id="pills-Otros" role="tabpanel" aria-labelledby="pills-Otros-tab"></div>
-                <div class="tab-pane fade" id="pills-Anamn" role="tabpanel" aria-labelledby="pills-Anamn-tab">Datos Anamnesicos</div>
-                <div class="tab-pane fade" id="pills-Autoriz" role="tabpanel" aria-labelledby="pills-Autoriz-tab">Autorizaciones</div>
+                
               </div>
         </div>
       
@@ -70,6 +63,7 @@
 
     </div>
     <script src="{{ config.ASSETS_ROOT }}/js/admision.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
     <!-- <script src="{{ config.ASSETS_ROOT }}/js/scriptsCitas.js"></script> -->
     
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.js'></script>

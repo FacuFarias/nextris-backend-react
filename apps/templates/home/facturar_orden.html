@@ -1,0 +1,245 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/calculator.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+
+  <div class="row">
+    <div id="modal_content" class="mt-4" data-id=""></div>
+  </div>
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+    <div id="toastContainer"></div>
+
+    <!-- Modal -->
+<div class="modal fade custom-modal" id="modal_fact_orden" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+  <div class="modal-dialog">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h1 class="modal-title fs-5" id="exampleModalLabel">Opciones de facturación</h1>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+              <form method="POST" action="/facturar_orden" id="Form_factura">
+                  <input type="hidden" name="id_order" id="id_order">
+
+                  <div class="form-group row">
+                    <div class="col-md-6">
+                      <input type="checkbox" id="IsOs" name="IsOs"><label for="IsOs">Cobertura Obra Social</label>  <br>
+                        
+                    </div>
+                    <div class="col-md-6">
+                        <label for="os">Nombre OS</label>
+                        <select class="form-control" id="os" name="os"></select>
+                    </div>
+                  </div>
+
+                  <div class="form-group row">
+                    <div class="col-md-6">
+                      <label for="type_os">Tipo de cobertura</label>
+                      <select id="type_os" name="type_os" class="form-control">
+                        <option value="porcentual">Porcentual </option>
+                        <option value="fijo">Monto fijo</option>
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="os">Indique cantidad</label>
+                      <input type="number" class="form-control" id="mount_os" name="mount_os">
+                    </div>
+                  </div>
+
+                  <div class="form-group row">
+                    <div class="col-md-4">
+                      <label for="price_order">Precio de la imagen</label>
+                      <input type="number" class="form-control" id="price_order" name="price_order" disabled>
+                    </div>
+                    <div class="col-md-4">
+                      <label for="cover">Cobertura</label>
+                      <input type="number" class="form-control" id="cover" name="cover" disabled>
+                    </div>
+                    <div class="col-md-4">
+                      <label for="to_bill">A Cobrar</label>
+                      <input type="number" class="form-control" id="to_bill" name="to_bill" disabled>
+                    </div>
+                  </div>
+
+                  <div class="form-group row">
+                      <div class="col-md-12">
+                          <label for="execution_notes">Notas</label>
+                          <textarea class="form-control" id="bill_notes" name="bill_notes" rows="5"></textarea>
+                      </div>
+                  </div>
+              </form>
+          </div>
+          <div class="modal-footer">
+              <button type="submit" class="btn bg-gradient-success save-changes" form="Form_factura">Facturar</button>
+              <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+          </div>
+      </div>
+  </div>
+</div>
+<!-- FIN MODAL -->
+
+<!-- card de busqueda -->
+<div class="row mx-10 pt-2">
+    <div class="col-12">
+      <div class="card mb-2 nr-card-1" id="card_buscar">
+        <div class="card-header pb-0 d-flex justify-content-between align-items-center">
+          <h3><i class="fa fa-money-bill"></i></i> Buscar Ordenes a facturar</h3>
+          <div class="d-flex ms-auto">
+            <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+              <i class="fa fa-filter" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        
+        <div id="collapseCardBody" class="collapse">
+        <div class="card-body px-0 pt-0 pb-2">
+            <input type="hidden" name="url" id="url">
+          <div class="container-fluid">
+            <div class="row datos-paciente">    
+              <div class="col-md-5">
+                <div class="row">
+                  <div class="col-md-4">
+                    <label for="nombre_pat">Nombre Paciente</label>
+                </div>
+                <div class="col-md-8">
+                  <input type="text" class="form-control" id="nombre_pat" name="nombre_pat">
+              </div>
+               
+              </div>
+                <div class="row">
+                    <div class="col-md-4">
+                        <label for="fecha_cita">
+                            Fecha de la cita
+                        </label>
+                    </div>
+                    <div class="col-md-8">
+                        <input type="date" class='dp form-control' id="fecha_cita" name="fecha_nac">
+                    </div>
+                </div>
+                
+
+            </div>
+                <div class="col-md-5">
+                    <div class="row">
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="medico_referente">
+                                    Medico referente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                              <label for="medico_referente">
+                                <select id="medico_referente" class="form-control"></select>
+                              </label>
+                          </div>
+                        </div>
+                        <div class="row">
+                          <div class="col-md-4">
+                              <label for="medico_solicitante">
+                                  Medico Solicitante
+                              </label>
+                          </div>
+                          <div class="col-md-8">
+                            <label for="medico_solicitante">
+                              <select id="medico_solicitante" class="form-control"></select>
+                            </label>
+                        </div>
+                      </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-2 d-flex justify-content-end">
+                  <button type="button" id="limpiar_filtros" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp btn-danger">
+                      <i class="fa fa-eraser" aria-hidden="true" style="font-size: 25px;"></i>
+                  </button>
+              </div>            
+            </div>
+          
+        </div>
+       
+
+        </div>
+      </div>
+      
+        
+      </div>
+    </div>
+  </div>
+<!-- FIN card de busqueda -->
+
+
+      <div class="row" id="card_ordenes">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <i class="fa fa-money-bill"></i></i> <h6>Ordenes</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <!-- <button type="button" class="btn btn-primary botones_sp" disabled data-bs-toggle="modal" id="b_facturar" data-bs-target="#modal_fact_orden"> -->
+                          <button type="button" class="btn btn-primary botones_sp" disabled id="b_facturar">
+                            <i class="fa fa-money-bill" aria-hidden="true"></i>  Facturar
+                        </button>
+
+                        <!-- <button type="button" id="b_facturar" class="btn btn-nr-primary botones_sp btn-info" disabled data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex">
+                          <i class="fa fa-file" aria-hidden="true"></i>
+                      </button> -->
+                    </div>
+                </div>
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-primary table" id="tabla-ordenes">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>N de Orden</th>
+                            <th>Paciente</th>
+                            <th>Examen</th>
+                            <th>Obra Social</th>
+                            <th>Medico Autor</th>
+                            <th>Medico Sol</th>
+                            <th>Costo</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      <div class="row">
+        <div id="informe-content" class="mt-4" data-id=""></div>
+      </div>
+      
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/facturacion.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

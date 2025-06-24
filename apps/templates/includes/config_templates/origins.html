@@ -68,18 +68,20 @@
             <div class="row">
                 <div class="col-md-3">
                     <label for="search_group_origins">
-                        Buscar grupo de procedencia
+                        <h6>Buscar grupo de procedencia</h6>
                     </label>
                 </div>
                 <div class="col-md-6">
                     <input class="form-control" id="label_origins" name="group_origins">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-origen">
+
+
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_origen" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_or" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>    
                     
-                    <button type="button" id="b_nuevo_origen" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_or">Nueva Procedencia</button>
-                </div>
                 
             </div>
         </div>
@@ -97,8 +99,14 @@
                     <h6>Procedencias</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_origen" class="btn btn-secondary botones_or" disabled patient-id="">Editar Procedencia</button>
-                    <button type="button" id="b_eliminar_origen" class="btn btn-secondary botones_or delete_b" disabled patient-id="">Eliminar Procedencia</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones" id="b_editar_origen"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones delete_b" id="b_eliminar_origen"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+
                 </div>
                 
             </div>

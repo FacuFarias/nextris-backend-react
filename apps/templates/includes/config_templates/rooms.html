@@ -11,7 +11,7 @@
 
           <div class="modal-body">
             <form id="Form_rooms" method="POST" action="/agregar_room">
-                <input type="hidden" name="id_room" id="id_room">
+                <input type="hidden" name="id_room" id="id_room" >
         
                 <div class="form-group row">
                     <div class="col-md-8">
@@ -60,13 +60,12 @@
                 <div class="col-md-6">
                     <input class="form-control" id="search_room" name="search_room">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-room">
-                    
-                    <button type="button" id="b_nuevo_room" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_rooms">Nueva Sala</button>
-                </div>
-                
+
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_room" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_rooms" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>                           
             </div>
         </div>
         </div>
@@ -83,8 +82,14 @@
                     <h6>Salas</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_room" class="btn btn-secondary botones_room" disabled patient-id="">Editar Sala</button>
-                    <button type="button" id="b_eliminar_room" class="btn btn-secondary botones_room delete_b" disabled patient-id="">Eliminar Sala</button>
+
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_room" id="b_editar_room"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_room delete_b" id="b_eliminar_room"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
                 </div>
                 
             </div>

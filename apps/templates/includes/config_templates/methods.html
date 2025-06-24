@@ -55,13 +55,11 @@
                 <div class="col-md-6">
                     <input class="form-control" id="search_mod" name="search_mod">
                 </div>
-                        
-                <div class="col-md-3">
-                    <input type="button" value="Buscar" class="btn btn-primary" id="boton-buscar-mod">
-                    
-                    <button type="button" id="b_nuevo_mod" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal_mod">Nueva Modalidad</button>
-                </div>
-                
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_mod" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_mod" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>                  
             </div>
         </div>
         </div>
@@ -78,8 +76,13 @@
                     <h6>Modalidades</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_editar_mod" class="btn btn-secondary botones_mod" disabled patient-id="">Editar Modalidad</button>
-                    <button type="button" id="b_eliminar_mod" class="btn btn-secondary botones_mod delete_b" disabled patient-id="">Eliminar Modalidad</button>
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_mod" id="b_editar_mod"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_mod delete_b" id="b_eliminar_mod"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
                 </div>
                 
             </div>

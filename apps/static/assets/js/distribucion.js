@@ -289,6 +289,7 @@ function RellenarSelectCondicional(SelectId,dNeeded,TableId,dCond,IdCond){
     });
 }
 
+// IdCond sería el dato que quiero para filtrar en la columna colCond
 function RellenarSelectCondicionalId(SelectId,dNeeded,TableId,idCond,colCond){
     fetch('/rellenar_select_cond_id', {
         method: 'POST',
@@ -319,85 +320,6 @@ function RellenarSelectCondicionalId(SelectId,dNeeded,TableId,idCond,colCond){
 document.addEventListener("DOMContentLoaded", function() {
     // configuracion de busqueda y llenado de tabla
     RellenarTabla('tabla-pacientes',`/get_orders_to_distribution`)
-
-    //funcionalidad de la card buscar
-    var myForm = document.querySelector('.my-form');
-    myForm.addEventListener('submit', function(event) {
-        // Evitar el envío predeterminado del formulario
-        event.preventDefault();
-
-        // Obtener los valores del formulario
-        var name = document.getElementById("name").value;
-        var surname = document.getElementById("surname").value;
-        var documento = document.getElementById("documento").value;
-        var Telefono = document.getElementById("Telefono").value;
-        var buscar_mail = document.getElementById("buscar_mail").value;
-        var sex = document.getElementById("sex").value;
-        var fecha_nacimiento = document.getElementById("fecha_nac").value;
-        var tarjeta_sanitaria = document.getElementById("tarjeta_sanitaria").value;
-        var idP = document.getElementById("idP").value;
-
-        // Construir el cuerpo de la solicitud
-        var requestBody = {
-            name: name,
-            surname: surname,
-            documento: documento,
-            Telefono: Telefono,
-            buscar_mail: buscar_mail,
-            sex: sex,
-            fecha_nacimiento: fecha_nacimiento,
-            tarjeta_sanitaria: tarjeta_sanitaria,
-            idP: idP
-        };
-
-        // Realizar la solicitud HTTP usando fetch
-        fetch('/buscar_pacientes', {
-            method: 'POST',  // Puedes cambiarlo a 'POST' si prefieres enviar datos en el cuerpo
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
-        })
-        .then(response => response.json())
-        .then(data => {
-            var tablaPacientes = document.getElementById("tabla-pacientes");
-            var tbody_ = tablaPacientes.querySelector('tbody');
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
-
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-    });
-    //---------------------------------------------
 
     var boton_vi=document.getElementById("b_ver_info")
     boton_vi.addEventListener("click",function(){VerPDF()})
