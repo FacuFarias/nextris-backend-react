@@ -2110,7 +2110,7 @@ def delete_user():
         query=f"SELECT username FROM public.tbuser WHERE guid='{user_id}'"
         cursor.execute(query)
         username=cursor.fetchone()[0]
-        print("username: ",username)
+        print("usernameeee: ",username)
         
         delete_query = "DELETE FROM public.tbuser WHERE guid=%s"
         cursor.execute(delete_query, (user_id,))
