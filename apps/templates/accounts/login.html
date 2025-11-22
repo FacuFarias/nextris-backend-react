@@ -3,18 +3,124 @@
 {% block title %} Sign IN {% endblock title %}
 
 <!-- Specific CSS goes HERE -->
-{% block stylesheets %}{% endblock stylesheets %}
+{% block stylesheets %}
+<style>
+  /* Canvas de partículas */
+  #particles-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* Asegurar que el contenido esté encima de las partículas */
+  .container.position-relative {
+    z-index: 2 !important;
+  }
+
+  /* Animación suave para las partículas */
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-20px);
+    }
+  }
+
+  /* Estilos para el switch de tipo de usuario */
+  .user-type-switch-container {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  }
+
+  .user-type-switch-container label.form-label {
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  #userTypeSwitch {
+    width: 70px;
+    height: 35px;
+    cursor: pointer;
+  }
+
+  .user-type-switch-container .form-check {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 8px;
+  }
+
+  .user-type-switch-container .form-check-label {
+    color: white;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .user-type-switch-container small {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.85rem;
+    display: block;
+    margin-top: 8px;
+  }
+
+  /* Animación del switch */
+  #userTypeSwitch:checked {
+    background-color: #10b981 !important;
+    border-color: #10b981 !important;
+  }
+
+  #userTypeSwitch:not(:checked) {
+    background-color: #3b82f6 !important;
+    border-color: #3b82f6 !important;
+  }
+
+  /* Efecto hover */
+  .user-type-switch-container:hover {
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    transform: translateY(-2px);
+    transition: all 0.3s ease;
+  }
+</style>
+{% endblock stylesheets %}
 
 {% block content %}
 
-  <main class="main-content  mt-0">
+  <main class="main-content-index mt-0">
 
     <section>
       <div class="page-header min-vh-100">
-        <div class="container">
+        <!-- Imagen de fondo con máscara desenfocada -->
+        <div class="position-absolute w-100 h-100 top-0 start-0" style="background-image: url('/static/assets/img/back_rad2.jpg'); background-size: cover; background-position: center;">
+          <span class="mask" style="backdrop-filter: blur(1.5rem); -webkit-backdrop-filter: blur(1.5rem); background: rgba(53, 14, 114, 0.678);"></span>
+          <!-- Canvas para partículas -->
+          <canvas id="particles-canvas"></canvas>
+        </div>
+        
+        <!-- Contenedor del formulario centrado -->
+        <div class="container position-relative z-index-2">
           <div class="row">
-            <div class="col-xl-4 col-lg-5 col-md-7 d-flex flex-column mx-lg-0 mx-auto">
+            <div class="col-xl-4 col-lg-5 col-md-6 col-sm-8 mx-auto">
               <div class="card card-plain">
+                <!-- Logo dentro del card -->
+                <div class="text-center pt-4 pb-3">
+                  <img src="{{ config.ASSETS_ROOT }}/img/logo/logo5.png" alt="NextRIS Logo" style="max-width: 120px; height: auto;">
+                </div>
+                
                 <div class="card-header pb-0 text-start">
                   <h4 class="font-weight-bolder">Iniciar Sesion</h4>
                   <p class="mb-0">
@@ -32,6 +138,19 @@
                   <form role="form" method="post" action="">
 
                     {{ form.hidden_tag() }}
+                    
+                    <!-- Switch para tipo de usuario -->
+                    <div class="user-type-switch-container">
+                      <label class="form-label mb-2">Tipo de acceso</label>
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="userTypeSwitch" name="user_type" value="patient">
+                        <label class="form-check-label" for="userTypeSwitch">
+                          <span id="userTypeLabel">Personal Médico</span>
+                        </label>
+                      </div>
+                      <small id="userTypeDescription">Sistema de gestión médica</small>
+                    </div>
+
                     <div class="mb-3">
                       {{ form.username(placeholder="Username",class="form-control") }}
                     </div>
@@ -47,19 +166,6 @@
                     </div>
                   </form>
                 </div>
-                <div class="card-footer text-center pt-0 px-lg-2 px-1">
-                  <p class="mb-4 text-sm mx-auto">
-                    No tienes cuenta?
-                    <a href="{{ url_for('authentication_blueprint.register') }}" class="text-primary text-gradient font-weight-bold">Crear Usuario</a>
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div class="col-6 d-lg-flex d-none h-100 my-auto pe-0 position-absolute top-0 end-0 text-center justify-content-center flex-column">
-              <div class="position-relative h-100 m-3 px-7 border-radius-lg d-flex flex-column justify-content-center overflow-hidden" style="background-image: url('/static/assets/img/back_rad2.jpg');
-          background-size: cover;">
-                <span class="mask bg-gradient-primary opacity-6"></span>
-                <h4 class="mt-5 text-white font-weight-bolder position-relative">"La radiología ve lo invisible para curar lo incurable."</h4>
                 
               </div>
             </div>
@@ -73,4 +179,201 @@
 {% endblock content %}
 
 <!-- Specific JS goes HERE --> 
-{% block javascripts %}{% endblock javascripts %}
+{% block javascripts %}
+<script>
+  // Manejar el switch de tipo de usuario
+  document.addEventListener('DOMContentLoaded', function() {
+    const userTypeSwitch = document.getElementById('userTypeSwitch');
+    const userTypeLabel = document.getElementById('userTypeLabel');
+    const userTypeDescription = document.getElementById('userTypeDescription');
+    const usernameInput = document.querySelector('input[name="username"]');
+    const loginForm = document.querySelector('form[role="form"]');
+    
+    if (userTypeSwitch) {
+      userTypeSwitch.addEventListener('change', function() {
+        if (this.checked) {
+          // Modo Paciente
+          userTypeLabel.textContent = 'Portal del Paciente';
+          userTypeDescription.textContent = '🩺 Acceso a consultas y resultados médicos';
+          usernameInput.placeholder = 'Usuario del paciente';
+          console.log('[LOGIN DEBUG] Switch cambiado a: PACIENTE');
+        } else {
+          // Modo Personal
+          userTypeLabel.textContent = 'Personal Médico';
+          userTypeDescription.textContent = '👨‍⚕️ Sistema de gestión médica';
+          usernameInput.placeholder = 'Username';
+          console.log('[LOGIN DEBUG] Switch cambiado a: PERSONAL');
+        }
+      });
+    }
+    
+    // Debug del submit del formulario
+    if (loginForm) {
+      loginForm.addEventListener('submit', function(e) {
+        const username = document.querySelector('input[name="username"]').value;
+        const isPatient = userTypeSwitch.checked;
+        const formAction = loginForm.action || window.location.href;
+        
+        console.log('═══════════════════════════════════════════');
+        console.log('[LOGIN FORM SUBMIT DEBUG]');
+        console.log('═══════════════════════════════════════════');
+        console.log('Ruta de destino:', formAction);
+        console.log('Método:', loginForm.method.toUpperCase());
+        console.log('Username:', username);
+        console.log('Tipo de usuario:', isPatient ? 'PACIENTE' : 'PERSONAL');
+        console.log('Campo user_type:', isPatient ? 'patient' : '(no enviado)');
+        console.log('Tabla a consultar:', isPatient ? 'nextris.tbuser_patient' : 'nextris.tbuser');
+        console.log('═══════════════════════════════════════════');
+        
+        // No prevenir el submit, solo loguearlo
+      });
+    }
+  });
+
+  // Configuración de partículas
+  (function() {
+    const canvas = document.getElementById('particles-canvas');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    let animationFrameId;
+
+    // Ajustar tamaño del canvas
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Clase Particle
+    class Particle {
+      constructor() {
+        this.reset();
+        this.y = Math.random() * canvas.height;
+        this.fadeDelay = Math.random() * 600;
+        this.fadeStart = Date.now() + this.fadeDelay;
+        this.fadingIn = true;
+      }
+
+      reset() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.speed = 0.2 + Math.random() * 0.5;
+        this.radius = 2 + Math.random() * 3; // Puntos más grandes
+        this.opacity = 0;
+        this.fadeSpeed = 0.005 + Math.random() * 0.01;
+        this.angle = Math.random() * Math.PI * 2;
+        this.drift = (Math.random() - 0.5) * 0.3;
+      }
+
+      update() {
+        // Efecto de fade in/out
+        const now = Date.now();
+        if (now > this.fadeStart) {
+          if (this.fadingIn) {
+            this.opacity += this.fadeSpeed;
+            if (this.opacity >= 0.9) { // Opacidad máxima más alta
+              this.fadingIn = false;
+            }
+          } else {
+            this.opacity -= this.fadeSpeed;
+            if (this.opacity <= 0) {
+              this.reset();
+              this.fadeStart = Date.now() + this.fadeDelay;
+              this.fadingIn = true;
+            }
+          }
+        }
+
+        // Movimiento suave
+        this.y -= this.speed;
+        this.x += Math.sin(this.angle) * 0.3 + this.drift;
+        this.angle += 0.01;
+
+        // Resetear si sale de la pantalla
+        if (this.y < -10) {
+          this.y = canvas.height + 10;
+          this.x = Math.random() * canvas.width;
+        }
+        if (this.x < -10 || this.x > canvas.width + 10) {
+          this.x = Math.random() * canvas.width;
+        }
+      }
+
+      draw() {
+        if (this.opacity > 0) {
+          // Dibujar punto más visible
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+          ctx.fill();
+
+          // Añadir brillo más pronunciado
+          const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius * 3);
+          gradient.addColorStop(0, `rgba(255, 255, 255, ${this.opacity})`);
+          gradient.addColorStop(0.5, `rgba(255, 255, 255, ${this.opacity * 0.5})`);
+          gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
+          ctx.fillStyle = gradient;
+          ctx.fill();
+        }
+      }
+    }
+
+    // Crear partículas
+    function createParticles() {
+      const particleCount = Math.floor((canvas.width * canvas.height) / 15000);
+      particles = [];
+      for (let i = 0; i < particleCount; i++) {
+        particles.push(new Particle());
+      }
+    }
+    createParticles();
+    window.addEventListener('resize', createParticles);
+
+    // Conectar partículas cercanas con líneas
+    function connectParticles() {
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < 150) { // Mayor distancia de conexión
+            const opacity = (1 - distance / 150) * 0.4 * Math.min(particles[i].opacity, particles[j].opacity); // Líneas más visibles
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+            ctx.lineWidth = 1.5; // Líneas más gruesas
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Loop de animación
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      particles.forEach(particle => {
+        particle.update();
+        particle.draw();
+      });
+
+      connectParticles();
+      
+      animationFrameId = requestAnimationFrame(animate);
+    }
+
+    // Iniciar animación
+    animate();
+
+    // Limpiar al salir
+    window.addEventListener('beforeunload', () => {
+      cancelAnimationFrame(animationFrameId);
+    });
+  })();
+</script>
+{% endblock javascripts %}

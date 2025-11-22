@@ -16,30 +16,26 @@ function AbrirCalendarioParaEditar(TablaId) {
     
     if (filaSeleccionada) {
         var dataId = filaSeleccionada.getAttribute('data-id');
-        
-        // Extraer el nombre del paciente de la segunda columna
-        var OrderId = filaSeleccionada.getAttribute('data-id');
+        var OrderId = dataId;
         var nombrePaciente = filaSeleccionada.querySelectorAll('td')[0].textContent.trim();
         var fecha = filaSeleccionada.querySelectorAll('td')[1].textContent.trim();
         var mref = filaSeleccionada.querySelectorAll('td')[2].textContent.trim();
         var examen = filaSeleccionada.querySelectorAll('td')[3].textContent.trim();
-        
+        var equipo = filaSeleccionada.querySelectorAll('td')[4].textContent.trim();
+
         // Cargar el contenido HTML del archivo y establecer el data-id
         $.get('/b_agenda_editar_cita.html', function(data) {
-            // Reemplazar los marcadores en el contenido HTML
             var informeContent = `
               <div class="informe-details" id="data" data-id="${dataId}">
-                ${data} <!-- Contenido del archivo generacion_informe.html -->
+                ${data}
               </div>
             `;
-            // Reemplazar el marcador de nombre del paciente y examen
             informeContent = informeContent.replace('<!--Nombre del paciente-->', nombrePaciente);
             informeContent = informeContent.replace('<!--examen-->', examen);
             $('#calendario-content').html(informeContent);
             $('#calendario-content').attr('data-id', dataId);
-            
-            // Configuro la función para el botón de confirmar
-            var evento = null; // Asegurarse de que evento esté inicialmente vacío
+
+            var evento = null;
             document.getElementById('editar_fecha_cita').addEventListener('click', function() {
                 if (evento) {
                     evento.setProp('guid', OrderId);
@@ -57,76 +53,69 @@ function AbrirCalendarioParaEditar(TablaId) {
                     })
                     .then(response => response.json())
                     .then(data => {
-                        // Manejar la respuesta del servidor
                         if (data.success) {
-                            showToast("Éxito", "La cita se ha editado correctamente.", "/static/templates/includes/toast/toast_success.html");
-                            
-                            // Mostrar card_citas y card_buscar
+                            showToast("Éxito", "La cita se ha editado correctamente.", "/templates/includes/toast/toast_success.html");
                             $('#card_citas').show();
                             $('#card_buscar').show();
-                            
-                            // Eliminar el contenido de id="data"
                             $('#data').remove();
-
-                            // Actualizar la fecha de inicio del turno en la tabla
                             var tablaCitas = document.getElementById('tabla-citas');
                             var filaSeleccionadaCita = tablaCitas.querySelector('.fila-seleccionada');
                             if (filaSeleccionadaCita) {
                                 filaSeleccionadaCita.querySelectorAll('td')[1].textContent = evento.start.toISOString().split('T')[0] + " " + evento.start.toTimeString().split(' ')[0];
                             }
-
                         } else {
-                            showToast("Error", "Hubo un problema al insertar las citas: " + data.message, "/static/templates/includes/toast/toast_alert.html");
+                            showToast("Error", "Hubo un problema al insertar las citas: " + data.message, "/templates/includes/toast/toast_alert.html");
                         }
                     })
                     .catch(error => {
                         console.error('Error:', error);
-                        showToast("Error", "Hubo un error al insertar las citas.", "/static/templates/includes/toast/toast_alert.html");
+                        showToast("Error", "Hubo un error al insertar las citas.", "/templates/includes/toast/toast_alert.html");
                     });
                 }
             });
 
-            fetch('/get_events', {
+            // Ahora envío equipo y guid al backend para obtener los eventos correctos
+            fetch('/get_events_para_editar', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ prof_ag_text: mref })
+                body: JSON.stringify({ guid: OrderId, equipo: equipo })
             })
             .then(response => response.json())
             .then(data => {
-                console.log('Received events and work hours:', data);
                 document.getElementById('card-agenda').hidden = false;
-
                 var calendarEl = document.getElementById('calendario');
                 if (window.calendar) {
                     window.calendar.destroy();
                 }
-
                 businessHours = data.work_hours.map(wh => ({
                     daysOfWeek: [wh.day],
                     startTime: wh.start,
                     endTime: wh.end
                 }));
-
-                // Iterar sobre data.events y modificar eventos con guid = OrderId
+                console.log(data);
                 var events = data.events.map(event => {
-                    if (event.guid === OrderId) {
-                        event.backgroundColor = 'green';
-                        event.editable = true;
-                        evento = event; // Asigna el evento aquí
+                    let ev = {
+                        id: event.guid,
+                        guid: event.guid,
+                        start: event.start,
+                        end: event.end,
+                        editable: event.editable,
+                        backgroundColor: event.editable ? '#800080' : '#bdbdbd', // morado para editable, gris para fijo
+                        borderColor: event.editable ? '#800080' : '#bdbdbd',
+                        title: `${event.nombre} - ${event.exam}`,
+                    };
+                    if (event.editable) {
+                        evento = ev;
                     }
-                    // Asegúrate de que cada evento tenga un ID
-                    event.id = event.guid; // Si no tiene un ID, asígale el guid como ID
-                    return event;
+                    return ev;
                 });
-
                 window.calendar = new FullCalendar.Calendar(calendarEl, {
-                    timeZone: 'local', // Usa la zona horaria local del navegador
+                    timeZone: 'local',
                     droppable: false,
                     eventChange: function(info) {
                         evento = info.event;
-                        console.log('Evento cambiado:', info.event);
                     },
                     initialView: 'timeGridWeek',
                     editable: true,
@@ -143,59 +132,62 @@ function AbrirCalendarioParaEditar(TablaId) {
                     businessHours: businessHours,
                     selectConstraint: businessHours,
                     eventConstraint: businessHours,
+                    allDaySlot: false,
                 });
-
                 window.calendar.render();
-
-                // Inicializar evento después de renderizar el calendario
+                // Ajuste de estilos para quitar el fondo morado de los slots y agregar hover
+                setTimeout(function() {
+                    let slotEls = calendarEl.querySelectorAll('.fc-timegrid-slot, .fc-timegrid-axis');
+                    slotEls.forEach(el => {
+                        el.style.backgroundColor = '#fff';
+                        // Agregar efecto hover para resaltar solo la fila bajo el mouse
+                        el.addEventListener('mouseover', function() {
+                            slotEls.forEach(e => e.classList.remove('fc-slot-hover'));
+                            el.classList.add('fc-slot-hover');
+                        });
+                        el.addEventListener('mouseout', function() {
+                            el.classList.remove('fc-slot-hover');
+                        });
+                    });
+                }, 100);
+                // Agregar la clase CSS para el hover
+                if (!document.getElementById('fc-slot-hover-style')) {
+                    var style = document.createElement('style');
+                    style.id = 'fc-slot-hover-style';
+                    style.innerHTML = '.fc-slot-hover { background-color: #e5e5ff !important; }';
+                    document.head.appendChild(style);
+                }
                 evento = window.calendar.getEventById(OrderId);
-                console.log('Evento obtenido:', evento);  // Verificar que se haya obtenido el evento
             })
             .catch(error => {
                 console.error('Error:', error);
             });
 
             document.getElementById('wish_date').addEventListener('change', function() {
-                // Tomar el evento editable y moverlo a la nueva fecha seleccionada
                 var nuevaFecha = this.value;
-                
                 if (evento) {
-                    // Convertir nuevaFecha a un objeto Date
-                    var nuevaFechaDate = new Date(nuevaFecha + 'T00:00:00'); // Agregar la hora para evitar problemas de zona horaria
-                    // Encontrar el primer bloque de tiempo disponible en la nueva fecha
+                    var nuevaFechaDate = new Date(nuevaFecha + 'T00:00:00');
                     var startTime = businessHours.find(bh => bh.daysOfWeek.includes(nuevaFechaDate.getDay())).startTime;
                     var nuevaFechaConHora = new Date(nuevaFechaDate.setHours(parseInt(startTime.split(':')[0]), parseInt(startTime.split(':')[1])));
-                    
-                    // Ajustar el evento con la nueva fecha y hora
                     var duracion = evento.end.getTime() - evento.start.getTime();
                     var nuevaFechaFin = new Date(nuevaFechaConHora.getTime() + duracion);
-                    
-                    // Actualizar el evento con la nueva fecha
-                    evento.setStart(nuevaFechaConHora); // Usar setStart para actualizar la fecha de inicio
-                    evento.setEnd(nuevaFechaFin); // Usar setEnd para actualizar la fecha de fin
-
-                    // Mover el calendario a la nueva fecha
+                    evento.setStart(nuevaFechaConHora);
+                    evento.setEnd(nuevaFechaFin);
                     window.calendar.gotoDate(nuevaFechaConHora);
                 }
             });
 
             document.getElementById('volver').addEventListener('click',function(){
-                // Mostrar card_citas y card_buscar
                 $('#card_citas').show();
                 $('#card_buscar').show();
-                
-                // Eliminar el contenido de id="data"
                 $('#data').remove();
             })
-
         }).fail(function() {
             console.error('Error al cargar el archivo generacion_informe.html');
         });
 
-        // Ocultar los elementos #card_ordenes y #card_buscar
         $('#card_citas').hide();
         $('#card_buscar').hide();
-
     } else {
         console.log('No hay fila seleccionada.');
     }
@@ -203,26 +195,113 @@ function AbrirCalendarioParaEditar(TablaId) {
 
 
 
+    function FiltroSumatorioCitas() {
+        FiltroSumatorioTabla(
+            'tabla-citas',
+            [
+                {inputId: 'nombre_pat', colIdx: 0},
+                {inputId: 'medico_referente', colIdx: 2},
+                {inputId: 'medico_solicitante', colIdx: 5},
+                {inputId: 'equipo', colIdx: 4}
+            ],
+            {desdeId: 'fecha_desde', hastaId: 'fecha_hasta', colIdx: 1}
+        );
+    }
 
 
 document.addEventListener("DOMContentLoaded", function() {
+
+    // Escuchar todos los campos de filtro
+    document.getElementById('fecha_desde').addEventListener('change', FiltroSumatorioCitas);
+    document.getElementById('fecha_hasta').addEventListener('change', FiltroSumatorioCitas);
+    document.getElementById('nombre_pat').addEventListener('input', FiltroSumatorioCitas);
+    document.getElementById('medico_referente').addEventListener('input', FiltroSumatorioCitas);
+    document.getElementById('medico_solicitante').addEventListener('input', FiltroSumatorioCitas);
+    document.getElementById('equipo').addEventListener('input', FiltroSumatorioCitas);
  
     RellenarTabla('tabla-citas', '/get_citas')
     ConfigurarTabla('tabla-citas','botones_ec')
-    RellenarSelect('medico_solicitante', 'description', 'public.isrequestingphysician')
-    RellenarSelectCondicionalId('medico_referente','username','public.tbuser','88e340f5-6fa5-4df1-aef6-c911625a4427','idrole')
+    
 
-    document.getElementById("nombre_pat").addEventListener("change",function(){
-        FiltrarText('nombre_pat', 'tabla-citas',0)
-    })
-    document.getElementById("medico_referente").addEventListener("change",function(){
-        FiltrarSelect('medico_referente', 'tabla-citas',2)
-    })
-    document.getElementById("medico_solicitante").addEventListener("change",function(){
-        FiltrarSelect('medico_solicitante', 'tabla-citas',4)
-    })
 
-    SetDeleteButton('eliminar_cita','tabla-citas','/eliminar_cita')
+    // mostrar un modal de confirmación para eliminar cita
+    document.getElementById('eliminar_cita').addEventListener('click', function() {
+            var tabla = document.getElementById('tabla-citas');
+            var tbody_ = tabla.querySelector('tbody');
+            var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+            if (filaSeleccionada) {
+                    var celdas = filaSeleccionada.querySelectorAll('td');
+                    var paciente = celdas[0].textContent;
+                    var fecha = celdas[1].textContent;
+                    var med_ref = celdas[2].textContent;
+                    var examen = celdas[3].textContent;
+                    var med_sol = celdas[4].textContent;
+                    var dataId = filaSeleccionada.getAttribute('data-id');
+
+                    // Construyo el contenido del modal
+                    var modalHtml = `
+                            <div class="modal fade" id="modalEliminarCita" tabindex="-1" aria-labelledby="modalEliminarCitaLabel" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title" id="modalEliminarCitaLabel">Confirmar eliminación de cita</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <p>¿Está seguro que desea eliminar la siguiente cita?</p>
+                                            <ul>
+                                                <li><strong>Paciente:</strong> ${paciente}</li>
+                                                <li><strong>Fecha:</strong> ${fecha}</li>
+                                                <li><strong>Médico referente:</strong> ${med_ref}</li>
+                                                <li><strong>Examen:</strong> ${examen}</li>
+                                                <li><strong>Médico solicitante:</strong> ${med_sol}</li>
+                                            </ul>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="button" class="btn btn-danger" id="confirmarEliminarCita">Eliminar</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>`;
+
+                    // Agrego el modal al body si no existe
+                    if (!document.getElementById('modalEliminarCita')) {
+                            document.body.insertAdjacentHTML('beforeend', modalHtml);
+                    }
+
+                    var modal = new bootstrap.Modal(document.getElementById('modalEliminarCita'));
+                    modal.show();
+
+                    // Elimino cualquier listener previo para evitar duplicados
+                    var btnConfirmar = document.getElementById('confirmarEliminarCita');
+                    btnConfirmar.onclick = function() {
+                            // Aquí va la lógica de eliminación real
+                            console.log('Eliminando cita con ID:', dataId);
+                            fetch('/eliminar_cita', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id_cita: dataId })
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                    if (data.success) {
+                                            modal.hide();
+                                            // Elimino la fila de la tabla
+                                            filaSeleccionada.remove();
+                                            showToast('Éxito', 'La cita ha sido eliminada correctamente.', '/templates/includes/toast/toast_success.html');
+                                    } else {
+                                            showToast('Error', 'No se pudo eliminar la cita.', '/templates/includes/toast/toast_alert.html');
+                                    }
+                            })
+                            .catch(error => {
+                                    showToast('Error', 'Error al eliminar la cita.', '/templates/includes/toast/toast_alert.html');
+                            });
+                    };
+            } else {
+                    showToast('Error', 'Seleccione una cita para eliminar.', '/templates/includes/toast/toast_alert.html');
+            }
+    });
 
 
     document.getElementById('editar_cita').addEventListener('click', function(){
@@ -236,7 +315,8 @@ document.addEventListener("DOMContentLoaded", function() {
             var paciente= celdas[0].textContent
             var med_ref = celdas[2].textContent
             var examen = celdas[3].textContent
-            var med_sol = celdas[4].textContent
+            var equipo = celdas[4].textContent
+            var med_sol = celdas[5].textContent
             var fecha = celdas[1].textContent
             document.getElementById('ex_old').value=examen
             document.getElementById('t_mod_ec').textContent=paciente
@@ -244,8 +324,8 @@ document.addEventListener("DOMContentLoaded", function() {
             document.getElementById('id_ec').value=dataId
             document.getElementById('fecha').value=fecha
         }
-        RellenarSelect('s_msol', 'description', 'public.isrequestingphysician', med_sol);
-        RellenarSelectCondicionalId('s_mref', 'username', 'public.tbuser', '88e340f5-6fa5-4df1-aef6-c911625a4427', 'idrole', med_ref);
+        RellenarSelect('s_msol', 'description', 'nextris.isrequestingphysician', med_sol);
+        RellenarSelectCondicionalId('s_mref', 'username', 'nextris.tbuser', '88e340f5-6fa5-4df1-aef6-c911625a4427', 'idrole', med_ref);
         // Mostrar el modal
         var modal = new bootstrap.Modal(document.getElementById('modal_ec'));
         modal.show();
@@ -264,8 +344,6 @@ document.addEventListener("DOMContentLoaded", function() {
             var dataId = filaSeleccionada.getAttribute('data-id');
             var columnas = filaSeleccionada.getElementsByTagName('td');
             var examen = columnas[1].textContent.trim(); 
-            
-            
             console.log(dataId)
             document.getElementById('ex_old').value =examen
             document.getElementById('id_est').value=dataId
@@ -280,14 +358,17 @@ document.addEventListener("DOMContentLoaded", function() {
         var formData = new FormData(this);
     
         // Realiza la lógica que necesites con los datos del formulario
-        fetch('/actualizar_cita', {
+        fetch('/actualizar_datos_cita', {
             method: 'POST',
             body: formData,
-        })
+        }) 
         .then(response => response.json())
         .then(data => {
             // Maneja la respuesta del servidor
             if (data.success) {
+                // Mostrar notificación de éxito
+                showToast("Éxito", "Cita actualizada exitosamente", "/templates/includes/toast/toast_success.html");
+                
                 // Cierra el modal y realiza cualquier otra acción necesaria
                 var modal = bootstrap.Modal.getInstance(document.getElementById('modal_ec'));
                 modal.hide();
@@ -296,11 +377,13 @@ document.addEventListener("DOMContentLoaded", function() {
                 actualizarFilaSeleccionada(data.data);
             } else {
                 // Maneja los errores
+                showToast("Error", "Error al editar la cita: " + (data.error || data.message), "/templates/includes/toast/toast_alert.html");
                 console.error('Error al editar la cita:', data.error);
             }
         })
         .catch(error => {
             console.error('Error:', error);
+            showToast("Error", "Hubo un error al actualizar la cita", "/templates/includes/toast/toast_alert.html");
         });
     });
     
@@ -325,7 +408,17 @@ document.addEventListener("DOMContentLoaded", function() {
     }
     
     document.getElementById('b_editar_fecha').addEventListener('click', function(){
-        console.log("aca estoy pa")
+        // Ocultar el card de búsqueda y el card de citas
+        const cardBuscar = document.getElementById('card_buscar');
+        const cardCitas = document.getElementById('card_citas');
+        
+        if (cardBuscar) {
+            cardBuscar.style.display = 'none';
+        }
+        if (cardCitas) {
+            cardCitas.style.display = 'none';
+        }
+        
         AbrirCalendarioParaEditar('tabla-citas')
     })
     

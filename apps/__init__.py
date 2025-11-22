@@ -20,6 +20,18 @@ def register_extensions(app):
     login_manager.init_app(app)
 
 
+def register_context_processors(app):
+    """Registra funciones globales para usar en templates"""
+    from apps.home.utils.helpers import user_has_permission, get_current_user_permissions
+    
+    @app.context_processor
+    def inject_permissions():
+        return {
+            'user_has_permission': user_has_permission,
+            'get_current_user_permissions': get_current_user_permissions
+        }
+
+
 def register_blueprints(app):
     for module_name in ('authentication', 'home'):
         module = import_module('apps.{}.routes'.format(module_name))
@@ -28,19 +40,22 @@ def register_blueprints(app):
 
 def configure_database(app):
 
-    @app.before_first_request
-    def initialize_database():
+    # Flask 2.2+ ya no soporta before_first_request, usar with app.app_context()
+    with app.app_context():
         try:
             db.create_all()
         except Exception as e:
-
-            print('> Error: DBMS Exception: ' + str(e) )
-
+            print(f"Error creating database tables: {e}")
+            
             # fallback to SQLite
             basedir = os.path.abspath(os.path.dirname(__file__))
             app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(basedir, 'db.sqlite3')
-
+            
             print('> Fallback to SQLite ')
+            try:
+                db.create_all()
+            except Exception as fallback_e:
+                print(f'> SQLite fallback failed: {fallback_e}')
             db.create_all()
 
     @app.teardown_request
@@ -52,6 +67,7 @@ def create_app(config):
     app = Flask(__name__)
     app.config.from_object(config)
     register_extensions(app)
+    register_context_processors(app)
     register_blueprints(app)
     configure_database(app)
     return app

@@ -1,0 +1,316 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}{% endblock stylesheets %}
+
+{% block content %}
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/back_rad.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+<!-- Modal -->
+<div class="modal fade custom-modal" id="modal_notas_ex" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Agregar notas</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/agregar_notas" id="Form_notas">
+                    <input type="hidden" name="id_order" id="id_np">
+                    <div class="form-group row">
+                        <div class="col-md-12">
+                            <label for="execution_notes">Notas</label>
+                            <textarea class="form-control" id="execution_notes" name="execution_notes" rows="5" required></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_notas">Guardar notas</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="removeModalBackdrop()">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+    
+    <div class="container-fluid pt-2">
+        
+
+
+<!-- card de busqueda -->
+      <div class="row px-10">
+        <div class="col-12">
+          <div class="card mb-2 nr-card-1 ">
+            <div class="card-header pb-0 rounded-bottom">
+                <div class="row ">
+                    <div class="col-md-8 ms-auto"><h6>Buscar Ordenes a ejecutar</h6></div>
+                
+                    <div class="col-md-4 d-flex ms-auto justify-content-end">
+                        <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+                        <i class="fa fa-filter" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="collapseCardBody" class="collapse">
+            <div class="card-body px-0 pt-0 pb-2">
+                <form class="my-form" method="GET" action="/buscar_pacientes">
+                <input type="hidden" name="url" id="url" value="buscar_paciente.html">
+              <div class="container-fluid">
+                <div class="row datos-paciente">    
+                    <div class="col-md-5">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        Nombre
+                                    </label>
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="name" name="name">
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="surname" name="surname">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="documento">
+                                        DNI
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="documento" name="documento">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="s_modalidad">
+                                        Modalidad
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <select id="s_modalidad" name="s_modalidad" class="form-control">
+
+                                    </select>
+                                </div>
+                                
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="buscar_mail">
+                                        Grupo de procedencia
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="buscar_mail" name="buscar_mail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="buscar_mail">
+                                    Accesion Number
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input class="form-control" id="buscar_acc" name="buscar_acc">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="fecha_nac">
+                                    Fecha
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="date" class='dp form-control' id="fecha_nac" name="fecha_nac">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tarjeta_sanitaria">
+                                    Numero de admisión
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="buscar_adm" name="buscar_adm" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Id Paciente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="idP" name="idP" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        
+                        <input type="submit" value="Buscar" class="btn btn-primary" id="b_search"></form>
+                        
+                                              
+                    </div>  
+                </div>           
+                </div>
+              
+            </div>
+           
+
+            </div>
+            
+          </div>
+        </div>
+      </div>
+<!-- FIN card de busqueda -->
+      <div class="row">
+        
+          <div class="card mb-4 nr-card-1 mt-3">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Resultados</h6>
+                        
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+
+                        <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp" disabled patient-id="" id="b_ejecutar_orden" >
+                            <i class="ni ni-active-40" aria-hidden="true"></i>
+                        </button>
+
+                        <button type="button" class="btn btn-nr-primary botones_sp btn-warning" disabled id="b_cancelar_orden">
+                            <i class="fa fa-trash" aria-hidden="true"></i>
+                        </button>
+
+                        <button type="button" id="b_agregar_notas" class="btn btn-nr-primary botones_sp btn-info" disabled data-bs-toggle="modal" id="b_agregar_notas" data-bs-target="#modal_notas_ex">
+                            <i class="fa fa-file" aria-hidden="true"></i>
+                        </button>
+
+                    
+                    </div>
+                    
+                </div>
+                <!-- ...existing code... -->
+                
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-primary table" id="tabla_ordenes">
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Nombre</th>
+                            <th>Apellido</th>
+                            <th>Examen</th>
+                            <th>Estado</th>
+                            <th>Maquina</th>
+                            <th>Admision</th>
+                            <th>Accesion N.</th>
+                            
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      
+      </div>
+
+      <div class="row">
+        
+          <div class="card mb-4 nr-card-1">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Detalles de la orden</h6>
+                        
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+
+                        <button type="button" class="btn shadow-primary mx-2 botones_sp" disabled patient-id="" id="b_confirmar_datos" >
+                            Confirmar datos
+                        </button>                    
+                    </div>
+                    
+                </div>
+                
+                
+            </div>
+            <div class="card-body px-0 pt-0 pb-2">
+                <form id="form_detalles_orden">
+                  <div class="row mb-5">
+                    <div class="col-md-6">
+                      <label for="historia_clinica" class="form-label">Historia</label>
+                      <textarea class="form-control" id="historia_clinica" name="historia_clinica" rows="2"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="pregunta_clinica" class="form-label">Pregunta Clínica</label>
+                      <textarea class="form-control" id="pregunta_clinica" name="pregunta_clinica" rows="2"></textarea>
+                    </div>
+                  </div>
+                  <div class="row mb-2">
+                    <div class="col-md-4">
+                      <label for="s_lateralidad" class="form-label">Lateralidad</label>
+                      <select class="form-control" id="s_lateralidad" name="s_lateralidad">
+                        
+                      </select>
+                    </div>
+                    <div class="col-md-4">
+                      <label for="stat" class="form-label">STAT</label>
+                      <select class="form-control" id="stat" name="stat">
+                        <option value="">Seleccionar</option>
+                        <option value="No">No</option>
+                        <option value="Sí">Sí</option>
+                      </select>
+                    </div>
+                    <div class="col-md-4">
+                      <label for="num_vistas" class="form-label">Number of Views</label>
+                      <input type="number" min="1" class="form-control" id="num_vistas" name="num_vistas">
+                    </div>
+                  </div>
+                  <div class="row mb-2">
+                    <div class="col-md-12">
+                      <label for="detalle_tecnico" class="form-label">Otros detalles</label>
+                      <textarea class="form-control" id="detalle_tecnico" name="detalle_tecnico" rows="2" placeholder="Observaciones, preparación, etc."></textarea>
+                    </div>
+                  </div>
+                </form>
+            </div> 
+        </div>
+      
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    <script src="{{ config.ASSETS_ROOT }}/js/ejecucion.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

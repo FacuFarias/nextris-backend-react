@@ -58,10 +58,9 @@
     });
     });
   </script>
-
   <div class="sidenav-header">
     <i class="fas fa-times p-3 cursor-pointer text-secondary opacity-5 position-absolute end-0 top-0 d-none" aria-hidden="true" id="iconSidenav"></i>
-    <a class="navbar-brand m-0" href="/" target="_blank">
+    <a class="navbar-brand m-0" href="/" data-title="Página Principal">
       <img src="{{ config.ASSETS_ROOT }}/img/logo/logo5.png" class="navbar-brand-img h-60" alt="main_logo">
       <span class="ms-1 font-weight-bold nav-link-text">NextRIS</span>
     </a>
@@ -70,43 +69,50 @@
   
   <div class="collapse navbar-collapse w-xl" id="sidenav-collapse-main">
     <ul class="navbar-nav">
+
+      {% if session.get('is_patient') %}
+      <!-- MENÚ PARA PACIENTES -->
       <li class="nav-item">
-        <a class="nav-link {% if 'index' in segment %} active {% endif %}" href="/">
+        <a class="nav-link {% if 'mis_estudios' in segment %} active {% endif %}" href="/mis_estudios">
           <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
-            <i class="ni ni-tv-2 text-primary text-sm opacity-10"></i>
+            <i class="ni ni-books text-primary text-sm opacity-10"></i>
           </div>
-          <span class="nav-link-text ms-1">Pagina Principal</span>
+          <span class="nav-link-text ms-1">Mis Estudios</span>
         </a>
       </li>
 
       <li class="nav-item">
-        <a class="nav-link {% if 'buscar' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-pacientes">
+        <a class="nav-link {% if 'mis_datos' in segment %} active {% endif %}" href="/mis_datos">
+          <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
+            <i class="ni ni-badge text-info text-sm opacity-10"></i>
+          </div>
+          <span class="nav-link-text ms-1">Mis Datos</span>
+        </a>
+      </li>
+
+      {% else %}
+      <!-- MENÚ PARA PERSONAL (STAFF) -->
+
+      <!-- PACIENTES - Todos los roles pueden acceder -->
+      <li class="nav-item">
+        <a class="nav-link {% if 'buscar' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-pacientes" data-title="Pacientes">
             <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
                 <i class="ni ni-single-02 text-dark text-sm opacity-10"></i>
             </div>
             <span class="nav-link-text ms-1">Pacientes</span>
         </a>
         <ul id="pacientes-options" style="display: none;">
-          
-          <li>
-            <hr class="horizontal dark mt-1">
-            <a class="nav-link {% if 'buscar' in segment %} active {% endif %}" href="/buscar_paciente.html">
-              <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
-                  <i class="ni ni-single-02 text-dark text-sm opacity-10"></i>
-              </div>
-              <span class="nav-link-text ms-1">Buscar Pacientes</span>
-            </a>
-          </li>
-
           <li>
             <a class="nav-link {% if 'historial' in segment %} active {% endif %}" href="/historial_paciente.html">
               <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
                 <i class="ni ni-single-02 text-dark text-sm opacity-10"></i>
               </div>
-              <span class="nav-link-text ms-1">Historial del paciente</span>
+              <span class="nav-link-text ms-1">Buscar Pacientes</span>
             </a>
           </li>
 
+          <!-- Unificación y Reasignación solo para Administrativo, Tecnico y Sysadmin -->
+          {% if session.get('user_type') in ['Administrativo', 'Tecnico', 'Sysadmin'] %}
           <li>
             <a class="nav-link {% if 'unificar' in segment %} active {% endif %}" href="/unificar_paciente.html">
               <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
@@ -118,21 +124,22 @@
           </li>
           
           <li>
-            <a class="nav-link" href="javascript:void(0);">
+            <a class="nav-link {% if 'reasignar' in segment %} active {% endif %}" href="/reasignar_examenes.html">
               <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
                 <i class="ni ni-single-02 text-dark text-sm opacity-10"></i>
               </div>
               <span class="nav-link-text ms-1">Reasignacion de examenes</span>
             </a>
           </li>
+          {% endif %}
           <hr class="horizontal dark mt-1">
         </ul>
-        
       </li>
       
-      {% if session['user_type'] == 'Administrativo' or session['user_type'] == 'Sysadmin' %}
+      <!-- CITAS - Solo Administrativo y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Sysadmin'] %}
       <li class="nav-item">
-        <a class="nav-link {% if 'nueva_cita' in segment or 'cita_editar' in segment%} active {% endif %}" href="javascript:void(0);" id="toggle-citas">
+        <a class="nav-link {% if 'nueva_cita' in segment or 'cita_editar' in segment%} active {% endif %}" href="javascript:void(0);" id="toggle-citas" data-title="Citas">
             <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
                 <i class="ni ni-badge text-dark text-sm opacity-10"></i>
             </div>
@@ -153,9 +160,10 @@
       </li>
       {% endif %}
       
-      {% if session['user_type'] == 'Administrativo' or session['user_type'] == 'Sysadmin' %}
+      <!-- ADMISION - Solo Administrativo y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Sysadmin'] %}
       <li class="nav-item">
-        <a class="nav-link {% if 'admision' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-admision">
+        <a class="nav-link {% if 'admision' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-admision" data-title="Admisión">
             <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
                 <i class="ni ni-circle-08 text-dark text-sm opacity-10"></i>
             </div>
@@ -167,16 +175,21 @@
                 <i class="ni ni-circle-08 text-dark text-sm opacity-10"></i>
               <span class="nav-link-text ms-1">Adm por cita</span>
           </a></li>
-          <li><a class="nav-link {% if 'admision_directa' in segment %} active {% endif %}" href="/admision_directa">
-                <i class="ni ni-circle-08 text-dark text-sm opacity-10"></i>
-              <span class="nav-link-text ms-1">Adm Directa</span>
+          <li><a class="nav-link {% if 'admision_espontanea' in segment %} active {% endif %}" href="/admision_espontanea">
+          <i class="ni ni-circle-08 text-dark text-sm opacity-10"></i>
+          <span class="nav-link-text ms-1">Admision Espontánea</span>
+          </a></li>
+          <li><a class="nav-link {% if 'hostorico_visitas' in segment %} active {% endif %}" href="/historico_visitas">
+            <i class="ni ni-circle-08 text-dark text-sm opacity-10"></i>
+          <span class="nav-link-text ms-1">Historico de visitas</span>
           </a></li>
           <hr class="horizontal dark mt-1">
         </ul>
       </li>
       {% endif %}
       
-      {% if session['user_type'] == 'Tecnico' or session['user_type'] == 'Sysadmin' %}
+      <!-- EJECUCION - Solo Tecnico y Sysadmin -->
+      {% if session.get('user_type') in ['Tecnico', 'Sysadmin'] %}
       <li class="nav-item">
         <a class="nav-link {% if 'ejecucion' in segment %} active {% endif %}" href="/ejecucion.html">
           <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
@@ -187,9 +200,10 @@
       </li>
       {% endif %}
       
-      {% if session['user_type'] == 'Medico' or session['user_type'] == 'Sysadmin' %}
+      <!-- REDACCION - Solo Medico y Sysadmin -->
+      {% if session.get('user_type') in ['Medico', 'Sysadmin'] %}
       <li class="nav-item">
-        <a class="nav-link {% if 'redaccion' in segment or 'informmes_predef' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-informes">
+        <a class="nav-link {% if 'redaccion' in segment or 'informes_predef' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-informes">
           <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
             <i class="ni ni-align-center text-success text-sm opacity-10"></i>
           </div>
@@ -205,7 +219,7 @@
           </li>
 
           <li>
-            <a class="nav-link" href="/informmes_predef">
+            <a class="nav-link" href="/informes_predef">
               <i class="ni ni-align-center text-success text-sm opacity-10"></i>
               <span class="nav-link-text ms-1">Inf. Predef</span>
             </a>
@@ -215,52 +229,20 @@
       </li>
       {% endif %}
       
-      {% if session['user_type'] == 'Administrativo' or session['user_type'] == 'Sysadmin' %}
+      <!-- DISTRIBUCION - Solo Administrativo, Medico y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Medico', 'Sysadmin'] %}
       <li class="nav-item">
         <a class="nav-link {% if 'distribucion' in segment %} active {% endif %}" href="/distribucion.html">
-          <div class="icon icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
+          <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
             <i class="ni ni-send text-success text-sm opacity-10"></i>
           </div>
           <span class="nav-link-text ms-1">Distribucion</span>
         </a>
       </li>
       {% endif %}
-
-      {% if session['user_type'] == 'Medico' or session['user_type'] == 'Sysadmin' %}
-      <li class="nav-item">
-        <a class="nav-link {% if 'facturacion' in segment or 'informmes_predef' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-facturacion">
-          <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
-            <i class="fa fa-calculator text-success text-sm opacity-10"></i>
-          </div>
-            <span class="nav-link-text ms-1">Facturacion</span>
-        </a>
-        <ul id="facturacion-options" style="display: none;">
-          <hr class="horizontal dark mt-1">
-          <li>
-            <a class="nav-link {% if 'facturar_informe' in segment %} active {% endif %}" href="/facturar_orden">
-              <i class="fa fa-calculator text-success text-sm opacity-10"></i>
-              <span class="nav-link-text ms-1">Facturar Orden</span>
-            </a>
-          </li>
-
-          <li>
-            <a class="nav-link {% if 'historial_facturacion' in segment %} active {% endif %}" href="/historial_facturacion">
-              <i class="fa fa-calculator text-success text-sm opacity-10"></i>
-              <span class="nav-link-text ms-1">Historial Facturación</span>
-            </a>
-          </li>
-          <li>
-            <a class="nav-link {% if 'analisis' in segment %} active {% endif %}" href="/analisis_facturacion">
-              <i class="fa fa-calculator text-success text-sm opacity-10"></i>
-              <span class="nav-link-text ms-1">Análisis Facturación</span>
-            </a>
-          </li>
-          <hr class="horizontal dark mt-1">
-        </ul>
-      </li>
-      {% endif %}
       
-      {% if session['user_type'] == 'Sysadmin' %}
+      <!-- CONFIGURACIONES Y PREFERENCIAS - Solo Sysadmin -->
+      {% if session.get('user_type') == 'Sysadmin' %}
       <li class="nav-item">
           <a class="nav-link {% if 'configuraciones' in segment %} active {% endif %}" href="/configuraciones.html">
               <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
@@ -269,27 +251,49 @@
               <span class="nav-link-text ms-1">Configuraciones</span>
           </a>
       </li>
-
-      <li class="nav-item">
-        <a class="nav-link {% if 'preferencias' in segment %} active {% endif %}" href="/preferencias.html">
-            <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
-                <i class="ni ni-settings text-success text-sm opacity-10"></i>
-            </div>
-            <span class="nav-link-text ms-1">Preferencias</span>
-        </a>
-    </li>
       {% endif %}
+
+      {% endif %} <!-- Fin del if is_patient -->
     </ul>
   </div>
 
+  <!-- User ID para JS -->
+  {% if session['user_id'] %}
+    <input type="hidden" id="current_user_id" value="{{ session['user_id'] }}">
+  {% endif %}
+  
   <div class="sidenav-footer mt-3">
-    <div class="card card-plain shadow-none" id="sidenavCard">
-      <div class="card-body p-3 text-center">
-        <div class="user-info">
-          <span class="font-weight-bold"><p>{{ session['username'] }}</p></span>
+    
+
+    <!-- Información del usuario rediseñada -->
+    {% if session.get('is_patient') %}
+    <!-- Información del paciente -->
+    <div class="user-profile-section">
+      <div class="user-profile-card">
+        <div class="user-avatar">
+          <i class="ni ni-badge"></i>
+        </div>
+        <div class="user-details">
+          <div class="user-name">{{ session.get('username', 'Paciente') }}</div>
+          <div class="user-role">Portal de Pacientes</div>
         </div>
       </div>
     </div>
+    {% elif session.get('user_type') %}
+    <!-- Información del personal -->
+    <div class="user-profile-section">
+      <div class="user-profile-card">
+        <div class="user-avatar">
+          <i class="ni ni-single-02"></i>
+        </div>
+        <div class="user-details">
+          <div class="user-name">{{ session.get('username', 'Usuario') }}</div>
+          <div class="user-role">{{ session.get('user_type', 'Sin rol') }}</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    
     <!-- Nuevo item para Desconectarse -->
     <ul class="navbar-nav">
         <li class="nav-item">

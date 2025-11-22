@@ -1,294 +1,102 @@
-<!-- modal -->
-<div class="modal fade custom-modal" id="modal_agenda" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
-    <div class="modal-dialog" z-index="-2">
-        <div class="modal-content">
-
-            <div class="modal-header">
-                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Agenda</h1>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
-            </div>
-
-            <div class="modal-body">
-                <form id="Form_agenda" method="POST" action="/agregar_agenda">
-                    <input type="hidden" name="id_agenda" id="id_agenda">
-
-                    <div class="form-group row">
-                        <div class="col-md-8">
-                            <label for="Description_agenda">Descripción</label>
-                            <input type="text" class="form-control" id="Description_agenda" name="Description_agenda" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="s_equip">Equipo</label><br>
-                            <select id="s_equip" name="s_equip" required>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-4">
-                            <label for="Ex_agenda">Cod Externo</label>
-                            <input type="text" class="form-control" id="Ex_agenda" name="Ex_agenda" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="fecha_inicio_agenda">Inicio Agenda</label>
-                            <div class='input-group date'>
-                                <input type='text' class="form-control dp" id='fecha_inicio_agenda_input' name="fecha_inicio_agenda_input" />
-                                <span class="input-group-addon">
-                                    <span class="glyphicon glyphicon-calendar"></span>
-                                </span>
-                            </div>
-                            <script type="text/javascript">
-                                $(function() {
-                                    // Asigna el datepicker al input de fecha
-                                    $('#fecha_inicio_agenda_input').datetimepicker({
-                                        format: 'YYYY-MM-DD', // Configura el formato de fecha deseado
-                                        useCurrent: true,
-                                        showClear: true,
-                                    });
-                                });
-                            </script>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="fecha_inicio_agenda">Fin Agenda</label>
-                            <div class='input-group date'>
-                                <input type='text' class="form-control dp" id='fecha_fin_agenda_input' name='fecha_fin_agenda_input' />
-                                <span class="input-group-addon">
-                                    <span class="glyphicon glyphicon-calendar"></span>
-                                </span>
-                            </div>
-                            <script type="text/javascript">
-                                $(function() {
-                                    // Asigna el datepicker al input de fecha
-                                    $('#fecha_fin_agenda_input').datetimepicker({
-                                        format: 'YYYY-MM-DD', // Configura el formato de fecha deseado
-                                        useCurrent: true,
-                                        showClear: true,
-                                    });
-                                });
-                            </script>
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-6">
-                            <input type="checkbox" id="IsAc_ag" name="IsAc_ag"><label for="IsAc_ag">Activo</label>
-                        </div>
-                    </div>
-            </div>
-            <div class="modal-footer">
-                <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Sala</button>
-                </form>
-                <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
-            </div>
-        </div>
-    </div>
-</div>
-<!-- Fin modal -->
-
-<!-- modal dias -->
-<div class="modal fade custom-modal" id="modal_dias" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
-    <div class="modal-dialog" z-index="-2">
-        <div class="modal-content">
-
-            <div class="modal-header">
-                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Agenda</h1>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
-            </div>
-
-            <div class="modal-body">
-                <form id="Form_dia" method="POST" action="/agregar_dia">
-                    <input type="hidden" name="id_agenda_" id="id_agenda_" class="noborrar">
-                    <input type="hidden" name="id_dia" id="id_dia">
-
-                    <div class="form-group row">
-                        <div class="col-md-2">
-                            <label for="dia_ag">Dia</label><br>
-                            <input type="number" class="form-control" id="dia_ag" name="dia_ag" required>
-                        </div>
-                        <div class="col-md-5">
-                            <label for="hora_inicio_dia">Inicio del dia</label>
-                            <div class='input-group date'>
-                                <input type='text' class="form-control dp" id='hora_inicio_dia' name="hora_inicio_dia" />
-                                <span class="input-group-addon">
-                                    <span class="glyphicon glyphicon-calendar"></span>
-                                </span>
-                            </div>
-                            <script type="text/javascript">
-                                $(function() {
-                                    // Asigna el datepicker al input de fecha
-                                    $('#hora_inicio_dia').datetimepicker({
-                                        format: 'HH:mm', // Configura el formato de fecha deseado
-                                        useCurrent: true,
-                                        showClear: true,
-                                    });
-                                });
-                            </script>
-                        </div>
-                        <div class="col-md-5">
-                            <label for="hora_final_dia">Fin del dia</label>
-                            <div class='input-group date'>
-                                <input type='text' class="form-control dp" id='hora_final_dia' name="hora_final_dia" />
-                                <span class="input-group-addon">
-                                    <span class="glyphicon glyphicon-calendar"></span>
-                                </span>
-                            </div>
-                            <script type="text/javascript">
-                                $(function() {
-                                    // Asigna el datepicker al input de fecha
-                                    $('#hora_final_dia').datetimepicker({
-                                        format: 'HH:mm',  // Configura el formato de fecha deseado
-                                        useCurrent: true,
-                                        showClear: true,
-                                    });
-                                });
-                            </script>
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="n_slots">N de Slots</label><br>
-                            <input type="number" class="form-control" id="n_slots" name="n_slots" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="lugares_x_slots">Lugares por Slots</label><br>
-                            <input type="number" class="form-control" id="lugares_x_slots" name="lugares_x_slots" required>
-                        </div>
-                    </div>
-            </div>
-            <div class="modal-footer">
-                <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Dia</button>
-                </form>
-                <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
-            </div>
-        </div>
-    </div>
-</div>
-<!-- Fin modal dias -->
-
-<!-- Barra de busqueda -->
 <div class="row">
-    <div class="col-12">
-        <div class="card mb-4">
-        <div class="card-header pb-0">
-        </div>
-        
-        <div class="card-body px-0 pt-0 pb-2">
+    <!-- Tabla de Equipos - col-8 -->
+    <div class="col-md-8">
+        <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Agendas de Equipos</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">  
+                        <input class="form-control" id="search_agenda" name="search_agenda" placeholder="Buscar...">
+                    </div>
+                </div>
+            </div>
             
-            <div class="container-fluid">
-            <div class="row">
-                <div class="col-md-3">
-                    <label for="search_agenda">
-                        Buscar Agenda
-                    </label>
+            <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla-agendas">
+                    <thead>
+                        <tr>
+                            <th>AETitle</th>
+                            <th>Modalidad</th>
+                            <th>IP</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+    </div>
+
+    <!-- Columna derecha con las otras dos tablas - col-4 -->
+    <div class="col-md-4">
+        <!-- Días de la agenda -->
+        <div class="card mb-4 shadow" id="card_dias">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Días de agenda</h6>
+                    </div>
+                    <div class="col-md-6 d-flex justify-content-end">
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_ag" id="b_agregar_dia_equip" data-bs-toggle="modal" data-bs-target="#modal_age" style="font-size: 20px;" disabled>
+                            <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_ag2" id="b_editar_dia_equip" disabled>
+                            <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_ag2 delete_b" id="b_eliminar_dia_equip" disabled>
+                            <i class="fas fa-trash" aria-hidden="true"></i>
+                        </button>
+                    </div>
                 </div>
-                <div class="col-md-6">
-                    <input class="form-control" id="search_agenda" name="search_agenda">
-                </div>
-                <div class="col-md-3 d-flex ms-auto justify-content-end ">
-                    <button type="button" id="b_nueva_agenda" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_agenda" style="font-size: 25px;">
-                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
-                    </button>                
             </div>
+            
+            <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="tabla_seg_ag_equip">
+                    <thead>
+                        <tr>
+                            <th>Dia</th>
+                            <th>Inicio</th>
+                            <th>Final</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
         </div>
-        </div>
-        
+
+        <!-- Grupos de estudios -->
+        <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Grupos que lee</h6>
+                    </div>
+                    <div class="col-md-6 d-flex justify-content-end">
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_ag" id="b_agregar_grupo_equip" data-bs-toggle="modal" data-bs-target="#modal_agregar_grupo_equip" style="font-size: 20px;" disabled>
+                            <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="btn btn-nr-primary rounded-circle botones_gde delete_b" id="b_eliminar_grupo_equip" disabled>
+                            <i class="fas fa-trash" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+                <table class="tabla-paciente table" id="grupos_del_equipo">
+                    <thead>
+                        <tr>
+                            <th>Grupo</th>            
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                    </tbody>
+                </table>
+            </div> 
         </div>
     </div>
 </div>
-<!-- Fin barra busqueda -->
 
-<!-- INICIO DIAS AGENDA -->
-<div class="row hidden" id="card_dias" >
-    <div class="col-12">
-        <div class="card mb-4 shadow">
-        <div class="card-header pb-0">
-            <div class="row">
-                <div class="col-md-4">
-                    <!-- <h6>Dias de la agenda: </h6> -->
-                    <h2 id="titulo_dias"> </h2>
-                </div>
-                <div class="col-md-8 d-flex justify-content-end">
-
-                    <button type="button" id="b_agregar_dia" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_dias" style="font-size: 25px;">
-                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
-                    </button>   
-                    <button type="button" class="btn btn-nr-primary rounded-circle botones_dia" id="b_editar_dia"  disabled>
-                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
-                      </button>
-
-                      <button type="button" class="btn btn-nr-primary rounded-circle botones_dia delete_b" id="b_eliminar_dia"  disabled>
-                        <i class="fas fa-trash" aria-hidden="true"></i>
-                      </button>
-                
-                </div>
-            </div>
-        </div>
-        
-        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
-            <table class="tabla-paciente table" id="tabla-dias">
-                <thead>
-                    <tr>
-                        <th>Dia</th>
-                        <th>Inicio</th>
-                        <th>Fin</th>
-                        <th>Numero de slots</th>
-                        <th>Lugares por slots</th> 
-                    </tr>
-                </thead>
-                <tbody>
-                </tbody>
-            </table>
-        </div> 
-    </div>
-    </div>
-</div>
-<!-- FIN DIAS AGENDA -->
-
-<div class="row">
-    <div class="col-12">
-        <div class="card mb-4 shadow">
-        <div class="card-header pb-0">
-            <div class="row">
-                <div class="col-md-4">
-                    <h6>Agendas</h6>
-                </div>
-                <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" class="btn btn-nr-primary rounded-circle botones_ag btn-success" id="b_dias_horas"  disabled>
-                        <i class="fas fa-calendar-days" aria-hidden="true"></i>
-                      </button>
-                    <button type="button" class="btn btn-nr-primary rounded-circle botones_ag" id="b_editar_agenda"  disabled>
-                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
-                      </button>
-
-                      <button type="button" class="btn btn-nr-primary rounded-circle botones_ag delete_b" id="b_eliminar_agenda"  disabled>
-                        <i class="fas fa-trash" aria-hidden="true"></i>
-                      </button>
-                    
-                </div>
-                
-            </div>
-        </div>
-        
-        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
-            <table class="tabla-paciente table" id="tabla-agendas">
-                <thead>
-                    <tr>
-                        <th>Descripción</th>
-                        <th>Equipo</th>
-                        <th>Codigo Ex</th>
-                        <th>Activo</th>
-                        <th>Fecha inicio</th>
-                        <th>Fecha Final</th>
-                    </tr>
-                </thead>
-                <tbody>
-                </tbody>
-            </table>
-        </div> 
-    </div>
-    </div>
-</div></div>

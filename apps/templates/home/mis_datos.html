@@ -1,0 +1,157 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Mis Datos {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-header-sheet.css">
+<link rel="stylesheet" href="/static/assets/css/mis_datos.css">
+{% endblock stylesheets %}
+
+{% block content %}
+
+<div class="position-fixed w-100 h-100 top-0 start-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/hospital.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center; z-index: -1;">
+<span class="mask" style="background: linear-gradient(135deg, rgba(118, 75, 162, 0.85) 0%, rgba(212, 217, 247, 0.7) 50%, rgba(255, 255, 255, 0.6) 100%); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></span>
+</div>
+
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative">
+    <div class="content-wrapper">
+
+      <!-- card header -->
+      <div class="card shadow-lg mx-2 mx-md-4 mt-5 modern-header-sheet">
+        <div class="card-body py-3">
+          <div class="row g-3 align-items-center">
+            <div class="col-lg-12 col-md-12 col-12 d-flex align-items-center justify-content-center">
+              <h3 class="mb-0 d-flex align-items-center">
+                <i class="ni ni-single-02 me-2"></i> Mis Datos Personales
+              </h3>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fin card header -->
+
+      <!-- Información del paciente -->
+      <div class="row mx-2 mx-md-4 mt-3">
+        <div class="col-12">
+          <div class="card shadow">
+            <div class="card-header pb-0">
+              <div class="row">
+                <div class="col-md-6 col-12 mb-2 mb-md-0">
+                  <h6>Información Personal</h6>
+                </div>
+                
+                <div class="col-md-6 col-12 d-flex justify-content-center justify-content-md-end">
+                  <div class="btn-group-header">
+                    <button type="button" class="btn-primary" id="editar-datos" title="Editar Datos">
+                      <i class="fa fa-edit" aria-hidden="true"></i>
+                      <span class="btn-text">Editar Datos</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <hr class="horizontal dark mt-0">
+            </div>
+            <div class="card-body px-4 pt-0 pb-4">
+              <div class="row" id="datos-paciente">
+                <div class="col-12 text-center py-5">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Cargando...</span>
+                  </div>
+                  <p class="mt-2">Cargando tus datos...</p>
+                </div>
+              </div>
+            </div> 
+          </div>
+        </div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <div id="toastContainer"></div>
+  </main>
+
+  <!-- Modal Solicitar Cambio de Datos -->
+  <div class="modal fade" id="modalSolicitudCambio" tabindex="-1" role="dialog" aria-labelledby="modalSolicitudLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+      <div class="modal-content">
+        <div class="modal-header bg-gradient-primary">
+          <h5 class="modal-title text-white" id="modalSolicitudLabel">
+            <i class="ni ni-email-83"></i> Solicitar Cambio de Datos
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true" class="text-white">&times;</span>
+          </button>
+        </div>
+          <div class="modal-body px-4 py-4">
+            <form id="formSolicitudCambio">
+              <div class="alert alert-info" role="alert">
+                <i class="fa fa-info-circle"></i>
+                <strong>Importante:</strong> Esta solicitud será revisada por el administrador. Los cambios no se aplicarán automáticamente.
+              </div>
+              
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label for="campo-a-modificar" class="form-label fw-bold">Campo a Modificar *</label>
+                  <select class="form-select" id="campo-a-modificar" required>
+                    <option value="">Selecciona un campo...</option>
+                    <option value="nombre">Nombre</option>
+                    <option value="telefono">Teléfono</option>
+                    <option value="celular">Celular</option>
+                    <option value="email">Email</option>
+                    <option value="direccion">Dirección</option>
+                    <option value="obra_social">Obra Social</option>
+                    <option value="numero_afiliado">Número de Afiliado</option>
+                  </select>
+                </div>
+                
+                <div class="col-md-6 mb-3">
+                  <label for="valor-actual" class="form-label fw-bold">Valor Actual</label>
+                  <input type="text" class="form-control" id="valor-actual" readonly>
+                </div>
+              </div>
+              
+              <div class="mb-3">
+                <label for="nuevo-valor" class="form-label fw-bold">Nuevo Valor *</label>
+                <input type="text" class="form-control" id="nuevo-valor" placeholder="Ingresa el nuevo valor" required>
+              </div>
+              
+              <div class="mb-3">
+                <label for="motivo-cambio" class="form-label fw-bold">Motivo del Cambio *</label>
+                <textarea class="form-control" id="motivo-cambio" rows="3" placeholder="Explica por qué necesitas este cambio..." required></textarea>
+              </div>
+              
+              <div class="mb-3">
+                <label for="email-contacto" class="form-label fw-bold">Email de Contacto *</label>
+                <input type="email" class="form-control" id="email-contacto" placeholder="correo@ejemplo.com" required>
+                <small class="form-text text-muted">Te contactaremos a este email cuando se procese tu solicitud.</small>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              <i class="fa fa-times"></i> Cancelar
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-enviar-solicitud">
+              <i class="fa fa-paper-plane"></i> Enviar Solicitud
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+<script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+<script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+<script src="{{ config.ASSETS_ROOT }}/js/mis_datos.js"></script>
+{% endblock javascripts %}

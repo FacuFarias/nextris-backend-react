@@ -1,0 +1,50 @@
+<!-- Modal para agregar paciente rápido -->  
+<div class="modal fade custom-modal" id="modal_np_para_cita" data-bs-keyboard="true" aria-labelledby="modalPacienteRapidoLabel" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalPacienteRapidoLabel">Agregar paciente rápido</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <form id="form_paciente_rapido">
+          <div class="mb-3">
+            <label for="nombre_paciente_rapido" class="form-label">Nombre</label>
+            <input type="text" class="form-control" id="nombre_paciente_rapido" name="nombre" required>
+          </div>
+          <div class="mb-3">
+            <label for="apellido_paciente_rapido" class="form-label">Apellido</label>
+            <input type="text" class="form-control" id="apellido_paciente_rapido" name="apellido" required>
+          </div>
+          <div class="mb-3">
+            <label for="dni_paciente_rapido" class="form-label">DNI</label>
+            <input type="text" class="form-control" id="dni_paciente_rapido" name="dni" required>
+          </div>
+          <div class="mb-3">
+            <label for="fecha_nac_paciente_rapido" class="form-label">Fecha de nacimiento</label>
+            <input type="date" class="form-control" id="fecha_nac_paciente_rapido" name="fecha_nac" required>
+          </div>
+          <div class="mb-3">
+            <label for="sexo_paciente_rapido" class="form-label">Sexo</label>
+            <select class="form-control" id="sexo_paciente_rapido" name="sexo" required>
+              <option value="M">Masculino</option>
+              <option value="F">Femenino</option>
+              <option value="I">Indefinido</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary btn-back" data-bs-dismiss="modal">
+          <i class="fas fa-times"></i>
+          <span class="btn-text">Cancelar</span>
+        </button>
+        <button type="submit" class="btn-primary btn-save" form="form_paciente_rapido" id="btn_agregar_paciente_rapido">
+          <i class="fas fa-check"></i>
+          <span class="btn-text">Agregar</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- FIN Modal para agregar paciente rápido -->

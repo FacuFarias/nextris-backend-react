@@ -1,0 +1,52 @@
+<div class="row bl_prest" id="cardId">
+    <div class="card mb-4 shadow-lg">
+        <div class="card-header pb-0" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%); border-bottom: 1px solid rgba(102, 126, 234, 0.1);">
+            <div class="row align-items-center">
+                <div class="col-md-10">
+                    <h6 class="mb-0" style="color: #667eea; font-weight: 600;">
+                        <i class="fas fa-file-medical me-2"></i>
+                        <!-- IdEstudio -->
+                    </h6>
+                </div>
+                <div class="col-md-2 d-flex justify-content-end">
+                    <button type="button" id="confirmar_dato" class="btn-primary btn-primary-icon btn-save" title="Confirmar prestación">
+                        <i class="fa fa-check-circle" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body" style="padding: 1.5rem;">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="modern-select-label">
+                        <i class="fas fa-user-md"></i>
+                        Médico solicitante
+                    </label>
+                    <select class="modern-select medico_solicitante">
+                        <option value="">Seleccione un médico...</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="modern-select-label">
+                        <i class="fas fa-hospital"></i>
+                        Obra social
+                    </label>
+                    <select class="modern-select obra_social">
+                        <option value="">Seleccione una obra social...</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="modern-select-label">
+                        <i class="fas fa-user-check"></i>
+                        Asignar a
+                    </label>
+                    <select class="modern-select rads">
+                        <option value="">Seleccione profesional...</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

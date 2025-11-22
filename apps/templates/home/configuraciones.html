@@ -6,107 +6,111 @@
 {% block stylesheets %}
 <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
 
 <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css"> -->
 <!-- <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css"> -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.css">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
 
+<style>
+    /* Ocultar el indicador moving-tab ya que usamos dropdowns en lugar de pills directos */
+    .nav-pills .moving-tab {
+        display: none !important;
+    }
+    
+    /* Mejorar el estilo de los dropdowns en nav-pills */
+    .nav-pills .dropdown-toggle {
+        cursor: pointer;
+    }
+    
+    .nav-pills .dropdown-toggle:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 0.5rem;
+    }
+    
+    .nav-pills .dropdown-toggle.show {
+        background-color: rgba(255, 255, 255, 0.2);
+        border-radius: 0.5rem;
+    }
+</style>
 
 {% endblock stylesheets %}
 
 
 {% block content %}
-<div class="position-absolute w-100 min-height-300 top-0" 
-style="background-image: url('{{ config.ASSETS_ROOT }}/img/config.png'); background-size: cover; background-repeat: no-repeat; background-position: center;">
-<span class="mask bg-primary opacity-6"></span>
+<div class="position-fixed w-100 h-100 top-0 start-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/config.png'); background-size: cover; background-repeat: no-repeat; background-position: center; z-index: -1;">
+<span class="mask" style="background: linear-gradient(135deg, rgba(118, 75, 162, 0.85) 0%, rgba(212, 217, 247, 0.7) 50%, rgba(255, 255, 255, 0.6) 100%); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></span>
 </div>
 
       
   {% include "includes/sidenav.html" %}
 
-  <main class="main-content position-relative flex-grow-1 min-vh-100">
+  <main class="main-content position-relative d-flex flex-column" style="min-height: 100vh;">
 
-    <div class="container-fluid py-2">
+    <div class="container-fluid py-2 flex-grow-1">
       
         
         <div class="row mb-4 ">
             <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+
                 <li class="nav-item dropdown" role="presentation">
-                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown"  role="button">Procedencias</a>
+                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button">Institucional</a>
                     <ul class="dropdown-menu">
-                        <li><button class="nav-link" id="pills-group-origins-tab" data-bs-toggle="pill" data-bs-target="#pills-group-origins" type="button" >Grupos de Procedencias</button></li>
-                        <li><button class="nav-link" id="pills-origins-tab" data-bs-toggle="pill" data-bs-target="#pills-origins" type="button" >Lista de Procedencias</button></li>
+                      <li><button class="nav-link" id="pills-facilities-tab" data-bs-toggle="pill" data-bs-target="#pills_facilities" type="button" role="tab">Facilities</button></li>
+                      <li><button class="nav-link" id="pills-locations-tab" data-bs-toggle="pill" data-bs-target="#pills_locations" type="button" role="tab">Locations</button></li>
+                      <li><button class="nav-link" id="pills-infbasica-tab" data-bs-toggle="pill" data-bs-target="#pills_inf_basica" type="button" role="tab">Informacion basica</button></li>
+                      <li><button class="nav-link" id="pills-workflow-tab" data-bs-toggle="pill" data-bs-target="#pills_workflow" type="button" role="tab">Flujo de trabajo</button></li>
+                      <li><button class="nav-link" id="pills-smtp-tab" data-bs-toggle="pill" data-bs-target="#pills_smtp" type="button" role="tab">Servidor SMTP</button></li>
+                      <li><button class="nav-link" id="pills-backend-tab" data-bs-toggle="pill" data-bs-target="#pills_backend" type="button" role="tab">Datos Backend</button></li>
+                      <li><button class="nav-link" id="pills-whatsapp-tab" data-bs-toggle="pill" data-bs-target="#pills_whatsapp" type="button" role="tab">Whatsapp</button></li>
+                      
                     </ul>
                 </li>
                 <li class="nav-item dropdown" role="presentation">
                     <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" role="button">Examenes</a>
                     <ul class="dropdown-menu" id="examenes_wacas">
-                      <li><button class="nav-link" id="pills-ministerial-codes-tab" data-bs-toggle="pill" data-bs-target="#pills-ministerial-codes" type="button" role="tab">Codigo Ministerial </button></li>
-                      <li><button class="nav-link" id="pills-methods-tab" data-bs-toggle="pill" data-bs-target="#pills-methods" type="button" role="tab">Metodos</button></li>
+                      <li><button class="nav-link" id="pills-study-types-tab" data-bs-toggle="pill" data-bs-target="#pills-study-types" type="button" role="tab">Tipos de Estudio</button></li>
+                      <li><button class="nav-link" id="pills-methods-tab" data-bs-toggle="pill" data-bs-target="#pills-methods" type="button" role="tab">Modalidades</button></li>
                       <li><button class="nav-link" id="pills-body-parts-tab" data-bs-toggle="pill" data-bs-target="#pills-body-parts" type="button" role="tab" >Partes del cuerpo</button></li>
-                      <li><button class="nav-link" id="pills-exams-tab" data-bs-toggle="pill" data-bs-target="#pills-exams" type="button" role="tab">Exámenes</button></li>
                     </ul>
                 </li>
                 <li class="nav-item dropdown" role="presentation" >
-                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" id="agendasss" role="button">Agendas</a>
+                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" id="Equipos-dropdown" role="button">Equipos</a>
                     <ul class="dropdown-menu">
-                        <li><button class="nav-link" id="pills-rooms-tab" data-bs-toggle="pill" data-bs-target="#pills-rooms" type="button" role="tab">Habitaciones</button></li>
                         <li><button class="nav-link" id="pills-machines-tab" data-bs-toggle="pill" data-bs-target="#pills-machines" type="button" role="tab">Maquinas</button></li>
-                        <li><button class="nav-link" id="pills-agendas-tab" data-bs-toggle="pill" data-bs-target="#pills-agendas" type="button" role="tab">Agendas</button></li>
-                        <li><button class="nav-link" id="pills-business-unit-tab" data-bs-toggle="pill" data-bs-target="#pills-business-unit" type="button" role="tab">Unidades de negocios</button></li>
+                        <li><button class="nav-link" id="pills-agendas-tab" data-bs-toggle="pill" data-bs-target="#pills-agendas" type="button" role="tab">Agendas de Maquinas</button></li>
+                        <!-- <li><button class="nav-link" id="pills-bu-tab" data-bs-toggle="pill" data-bs-target="#pills-bu" type="button" role="tab">Unidades de negocios</button></li> -->
                     </ul>
                 </li>
                 <li class="nav-item dropdown" role="presentation">
-                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button">Usuarios/Personal</a>
+                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" id='usuarios-personal-dropdown' href="#" role="button">Usuarios/Personal</a>
                     <ul class="dropdown-menu">
                         <li><button class="nav-link" id="pills-positions-tab" data-bs-toggle="pill" data-bs-target="#gestion_users" type="button" role="tab">Gestion de usuarios</button></li>
+                        <li><button class="nav-link" id="pills-patients-tab" data-bs-toggle="pill" data-bs-target="#gestion_patients" type="button" role="tab">Gestion de pacientes</button></li>
                         <li><button class="nav-link" id="pills-qualification-tab" data-bs-toggle="pill" data-bs-target="#pills_med_request" type="button" role="tab">Medicos Solicitantes</button></li>
-                        <li><button class="nav-link" id="pills-qualification-tab" data-bs-toggle="pill" data-bs-target="#pills_med_agenda" type="button" role="tab">Agenda de medicos</button></li>
-                    </ul>
-                </li>
-                <li class="nav-item dropdown" role="presentation">
-                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button">Materiales</a>
-                    <ul class="dropdown-menu">
-                      <li><a class="dropdown-item" href="#">Radionucleidos</a></li>
-                      <li><a class="dropdown-item" href="#">RadioFármacos</a></li>
+                        <li><button class="nav-link" id="pills-med-agenda" data-bs-toggle="pill" data-bs-target="#pills_med_agenda" type="button" role="tab">Agenda de medicos</button></li>
                     </ul>
                 </li>
               </ul>
               <!-- Lista de pills -->
               <div class="tab-content" id="pills-tabContent">
 
-                <div class="tab-pane fade" id="pills-group-origins" role="tabpanel" aria-labelledby="pills-group-origins-tab">
-                    
-                    {% include "includes/config_templates/group_origins.html" %}
-
-                </div>
-
-                <div class="tab-pane fade" id="pills-origins" role="tabpanel" aria-labelledby="pills-origins-tab">
-                    {% include "includes/config_templates/origins.html" %}
-                </div>
-
-                <div class="tab-pane fade" id="pills-ministerial-codes" role="tabpanel" aria-labelledby="pills-ministerial-codes-tab">
-                    {% include "includes/config_templates/ministerial_codes.html" %}
+                <div class="tab-pane fade" id="pills-study-types" role="tabpanel" aria-labelledby="pills-study-types-tab">
+                    {% include "includes/config_templates/studytypes.html" %}
                 </div>
 
                 <div class="tab-pane fade" id="pills-methods" role="tabpanel" aria-labelledby="pills-methods-tab">
                     
-                    {% include "includes/config_templates/methods.html" %}
+                    {% include "includes/config_templates/modalities.html" %}
                 </div>
 
                 <div class="tab-pane fade" id="pills-body-parts" role="tabpanel" aria-labelledby="pills-body-parts-tab">
                     {% include "includes/config_templates/anatomilal_part.html" %}
                 </div>
-
-                <div class="tab-pane fade" id="pills-exams" role="tabpanel" aria-labelledby="pills-exams-tab">
-                    {% include "includes/config_templates/exams.html" %}
-                </div>
                 
-                <div class="tab-pane fade" id="pills-rooms" role="tabpanel" aria-labelledby="pills-rooms">
-                    {% include "includes/config_templates/rooms.html" %}
-                </div>
-
                 <div class="tab-pane fade" id="pills-machines" role="tabpanel" aria-labelledby="pills-machines">
                     {% include "includes/config_templates/machines.html" %}
                 </div>
@@ -114,13 +118,13 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/config.png'); backgro
                 <div class="tab-pane fade" id="pills-agendas" role="tabpanel" aria-labelledby="pills-agendas">
                     {% include "includes/config_templates/Agendas.html" %}
                 </div>
-
-                <div class="tab-pane fade" id="pills-business-unit" role="tabpanel" aria-labelledby="pills-business-unit">
-                    {% include "includes/config_templates/BusinessUnits.html" %}
-                </div>
                 
                 <div class="tab-pane fade" id="gestion_users" role="tabpanel" aria-labelledby="gestion_users">
                     {% include "includes/config_templates/users.html" %}
+                </div>
+
+                <div class="tab-pane fade" id="gestion_patients" role="tabpanel" aria-labelledby="gestion_patients">
+                    {% include "includes/config_templates/patients.html" %}
                 </div>
 
                 <div class="tab-pane fade" id="pills_med_request" role="tabpanel" aria-labelledby="pills_med_request">
@@ -131,19 +135,48 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/config.png'); backgro
                     {% include "includes/config_templates/agendas_medicos.html" %}
                 </div>
 
+                <div class="tab-pane fade" id="pills_inf_basica" role="tabpanel" aria-labelledby="pills_inf_basica">
+                    {% include "includes/config_templates/informacion_basica.html" %}
+                </div>
 
+                <div class="tab-pane fade" id="pills_workflow" role="tabpanel" aria-labelledby="pills_workflow">
+                    {% include "includes/config_templates/workflow.html" %}
+                
+
+                <div class="tab-pane fade" id="pills_smtp" role="tabpanel" aria-labelledby="pills_smtp">
+                    {% include "includes/config_templates/smtp.html" %}
+                </div>
+
+                <div class="tab-pane fade" id="pills_backend" role="tabpanel" aria-labelledby="pills_backend">
+                    {% include "includes/config_templates/backend.html" %}
+                </div>
+
+                <div class="tab-pane fade" id="pills_whatsapp" role="tabpanel" aria-labelledby="pills_whatsapp">
+                    {% include "includes/config_templates/whatsapp.html" %}
+                </div>
+
+                <div class="tab-pane fade" id="pills_facilities" role="tabpanel" aria-labelledby="pills_facilities">
+                    {% include "includes/config_templates/facilities.html" %}
+                </div>
+
+                <div class="tab-pane fade" id="pills_locations" role="tabpanel" aria-labelledby="pills_locations">
+                    {% include "includes/config_templates/locations.html" %}
+                </div>
 
               </div>
         </div>
-      {% include "includes/footer.html" %}
 
     </div>
-    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+    
+    {% include "includes/footer.html" %}
+    
+    <div id="toastContainer"></div>
     <script src="{{ config.ASSETS_ROOT }}/js/scriptsConfiguraciones.js"></script>    
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.js'></script>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-
+    
+    <!-- jQuery y Bootstrap ya vienen de base.html (Bootstrap 5) -->
+    <!-- NO cargar Bootstrap 3 aquí porque causa conflictos con los modales -->
+    
     <!-- Scripts de datepicker -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js"></script>
@@ -154,6 +187,51 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/config.png'); backgro
   </main>
 
 {% endblock content %}
+
+<!-- Modales de configuraciones - FUERA de main-content para evitar stacking context -->
+{% block modals %}
+<div id="configuraciones_modals_container">
+  <!-- Modales de Study Types -->
+  {% include "includes/config_templates/modals/studytypes_modals.html" %}
+  
+  <!-- Modales de Machines -->
+  {% include "includes/config_templates/modals/machines_modals.html" %}
+  
+  <!-- Modales de Agendas -->
+  {% include "includes/config_templates/modals/agendas_modals.html" %}
+  
+  <!-- Modales de Users -->
+  {% include "includes/config_templates/modals/users_modals.html" %}
+  
+  <!-- Modales de Patients -->
+  {% include "includes/config_templates/modals/patients_modals.html" %}
+  
+  <!-- Modales de Medicos Solicitantes -->
+  {% include "includes/config_templates/modals/medicos_modals.html" %}
+  
+  <!-- Modales de Anatomical Parts -->
+  {% include "includes/config_templates/modals/anatomical_modals.html" %}
+  
+  <!-- Modales de Modalities -->
+  {% include "includes/config_templates/modals/modalities_modals.html" %}
+  
+  <!-- Modales de Origins -->
+  {% include "includes/config_templates/modals/origins_modals.html" %}
+  
+  <!-- Modales de Rooms -->
+  {% include "includes/config_templates/modals/rooms_modals.html" %}
+  
+  <!-- Modal de Agendas Medicos -->
+  {% include "includes/config_templates/modals/agendas_medicos_modals.html" %}
+  
+  <!-- Modales de Facilities -->
+  {% include "includes/config_templates/modals/facilities_modals.html" %}
+  
+  <!-- Modales de Locations -->
+  {% include "includes/config_templates/modals/locations_modals.html" %}
+  {% include "includes/config_templates/modals/location_logo_modal.html" %}
+</div>
+{% endblock modals %}
 
 <!-- Specific JS goes HERE --> 
 {% block javascripts %}

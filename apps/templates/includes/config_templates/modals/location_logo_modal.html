@@ -1,0 +1,51 @@
+<!-- Modal Logo de Location -->
+<div class="modal fade custom-modal" id="modal_logo_location" data-bs-keyboard="true" aria-labelledby="modalLogoLocationLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog modal-md">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="modalLogoLocationLabel">Logo de Location</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_logo_location" method="POST" action="/actualizar_logo_location" enctype="multipart/form-data">
+                    <input type="hidden" name="location_id" id="location_id_logo">
+
+                    <!-- Vista previa del logo actual -->
+                    <div class="text-center mb-4">
+                        <div id="logo_preview_container">
+                            <img id="logo_preview" src="" alt="Logo" class="img-thumbnail" style="max-width: 300px; max-height: 300px; display: none;">
+                            <p id="no_logo_message" class="text-muted">No hay logo cargado</p>
+                        </div>
+                    </div>
+
+                    <!-- Input para seleccionar nuevo logo -->
+                    <div class="form-group">
+                        <label for="logo_file">Cambiar Logo</label>
+                        <div class="d-flex align-items-center">
+                            <input type="file" class="form-control" id="logo_file" name="logo_file" accept="image/*" style="max-width: 300px; display: none;">
+                            <button type="button" class="btn btn-primary" id="btn_logo_select_location">Seleccionar logo</button>
+                        </div>
+                        <small class="form-text text-muted">Formatos permitidos: JPG, PNG, GIF. Tamaño máximo: 2MB</small>
+                    </div>
+
+                    <!-- Vista previa del nuevo logo -->
+                    <div class="text-center mt-3">
+                        <img id="new_logo_preview" src="" alt="Vista previa" class="img-thumbnail" style="max-width: 300px; max-height: 300px; display: none;">
+                    </div>
+
+                    <!-- Opción para eliminar el logo -->
+                    <div class="form-check mt-3">
+                        <input type="checkbox" class="form-check-input" id="remove_logo" name="remove_logo">
+                        <label class="form-check-label" for="remove_logo">
+                            Eliminar logo actual
+                        </label>
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success">Guardar Cambios</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>

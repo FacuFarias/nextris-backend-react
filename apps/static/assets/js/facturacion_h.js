@@ -144,7 +144,7 @@ function ConfigModalRetiro(){
             filaSeleccionada.remove()
             const modal = bootstrap.Modal.getInstance(document.getElementById('modal_fact_orden'));
             modal.hide();
-            showToast('Perfecto!', 'Orden facturada Exitosamente:', "/static/templates/includes/toast/toast_success.html");
+            showToast('Perfecto!', 'Orden facturada Exitosamente:', "/templates/includes/toast/toast_success.html");
         }) 
         .catch(error => {
             console.error('Error:', error);

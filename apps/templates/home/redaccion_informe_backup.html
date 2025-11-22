@@ -1,0 +1,226 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Tables {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+
+{% endblock stylesheets %}
+
+{% block content %}
+<div class="position-absolute w-100 min-height-300 top-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/writing.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
+<span class="mask bg-primary opacity-6"></span>
+</div>
+
+
+  <div class="row">
+    <div id="modal_content" class="mt-4" data-id=""></div>
+  </div>
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative border-radius-lg ">
+
+    <div class="container-fluid px-1">
+        
+
+
+<!-- card de busqueda -->
+      <div class="row" id="card_buscar pt-3">
+        <div class="col-12">
+          <div class="card mb-4 nr-card-1" id="card_buscar"> 
+            <div class="card-header pb-0 d-flex justify-content-between align-items-center rounded-bottom">
+                <h6>Buscar Paciente</h6>
+                <div class="d-flex ms-auto">
+                  <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2" id="b_search">
+                    <i class="fa fa-search" aria-hidden="true"></i>
+                  </button>
+
+                  <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
+                    <i class="fa fa-filter" aria-hidden="true"></i> 
+                  </button>
+                </div>
+              </div>
+              
+              <div id="collapseCardBody" class="collapse">
+                <hr class="horizontal dark mt-0">
+            <div class="card-body px-0 pt-0 pb-2">
+                <input type="hidden" name="url" id="url" value="buscar_paciente.html">
+              <div class="container-fluid">
+                <div class="row datos-paciente">    
+                    <div class="col-md-6">
+                        <div class="row">
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="name">
+                                        Nombre
+                                    </label>
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="name" name="name">
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control" id="surname" name="surname">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="documento">
+                                        DNI
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="documento" name="documento">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="Telefono">
+                                        N Telefono
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="Telefono" name="Telefono">
+                                </div>
+                            </div>
+        
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="buscar_mail">
+                                        Mail
+                                    </label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input class="form-control" id="buscar_mail" name="buscar_mail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="sex">
+                                    Sexo
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <select id="sex" name="sex" class="form-control">
+                                    <option value="M">Masculino </option>
+                                    <option value="F">Femenino</option>
+                                    <option value="I">Indefinido</option>
+                                    <option value="D">Desconocido</option>
+                                  </select>
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="fecha_nac">
+                                    Fecha
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="date" class='dp form-control' id="fecha_nac" name="fecha_nac">
+                            </div>
+                        </div>
+        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tarjeta_sanitaria">
+                                    Tarjeta Sanitaria
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="tarjeta_sanitaria" name="tarjeta_sanitaria" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="tsan">
+                                    Id Paciente
+                                </label>
+                            </div>
+                            <div class="col-md-8">
+                                <input type="text" id="idP" name="idP" class="form-control">
+                            </div>
+                        </div>
+                    </div>       
+                </div>
+              
+            </div>
+           
+
+            </div></div>
+            
+          </div>
+        </div>
+      </div>
+<!-- FIN card de busqueda -->
+      <div class="row" id="card_ordenes">
+        <div class="col-12">
+          <div class="card mb-4 shadow">
+            <div class="card-header pb-0">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Estudios</h6>
+                    </div>
+                    <div class="col-md-8 d-flex justify-content-end">
+                        <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary botones_sp" id="editar-paciente"  disabled>
+                            <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                          </button>
+
+                          <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary  botones_sp" id="eliminar-paciente"  disabled>
+                            <i class="fa fa-sticky-note" aria-hidden="true"></i>
+                          </button>
+
+                          <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary  botones_sp" id="generar_informe"  disabled>
+                            <i class="fa fa-file" aria-hidden="true"></i>
+                          </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+                <table class="tabla-primary table" id="tabla-pacientes">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Paciente</th>
+                            <th>DNI</th>
+                            <th>Sexo</th>
+                            <th>Examen</th>
+                            <th>Estado</th>
+                            <th>Urgencia</th>
+                            <th>Medico Autor</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div> 
+        </div>
+      </div>
+      </div>
+
+      <div class="row">
+        <div id="informe-content" class="mt-4" data-id=""></div>
+      </div>
+      
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
+    <script src="{{ config.ASSETS_ROOT }}/js/redaccion.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/tinymce/tinymce.min.js"></script>
+  </main>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

@@ -1,0 +1,201 @@
+<!-- Modal Usuario -->
+<div class="modal fade custom-modal" id="modal_users" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo usuario</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/create_user" id="Form_user">
+                    
+                    <input type="hidden" name="id_user" id="id_user">
+                    
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Nombre de usuario</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="username" name="username" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Tipo de usuario</label>
+                        </div>
+                        <div class="col-md-9">
+                            <select id="s_type_of_user" name="s_type_of_user">
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Nombre</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="name" name="name" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">Apellido</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="surname" name="surname" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="username">DNI</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="nationalnumber" name="nationalnumber" required>
+                            
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="mail">Mail</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="text_mail" name="text_mail">
+                            
+                        </div>
+                    </div>
+                    
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_user">Crear usuario</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL -->
+
+<!-- Modal para resetear contraseña -->
+<div class="modal fade custom-modal" id="modal_reset_password" tabindex="-1" aria-labelledby="resetPasswordModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="resetPasswordModalLabel">Reiniciar contraseña</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Esta acción generará una contraseña temporal para el usuario seleccionado.
+                </div>
+                <p><strong>Usuario:</strong> <span id="reset_username"></span></p>
+                <p><strong>Nombre:</strong> <span id="reset_fullname"></span></p>
+                <div class="form-group mt-3">
+                    <label for="temp_password">Contraseña temporal:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="temp_password" readonly>
+                        <button class="btn btn-outline-secondary" type="button" id="generate_temp_password">
+                            <i class="fas fa-sync-alt"></i> Generar
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" id="copy_temp_password">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <small class="form-text text-muted">El usuario deberá cambiar esta contraseña en su primer inicio de sesión.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-warning" id="confirm_reset_password">
+                    <i class="fas fa-key me-2"></i>Reiniciar contraseña
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL RESET PASSWORD -->
+
+<!-- Modal para datos médicos -->
+<div class="modal fade custom-modal" id="modal_medical_data" tabindex="-1" aria-labelledby="medicalDataModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="medicalDataModalLabel">Datos Médicos</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/save_medical_data" id="form_medical_data" enctype="multipart/form-data">
+                    <input type="hidden" name="user_id_medical" id="user_id_medical">
+                    
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <div class="alert alert-info" role="alert">
+                                <i class="fas fa-info-circle me-2"></i>
+                                Complete los datos médicos para el usuario: <strong id="medical_username"></strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="aclaracion_firma" class="form-label">Aclaración de Firma <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="aclaracion_firma" name="aclaracion_firma" 
+                                   placeholder="Ej: Dr. Juan Pérez" required>
+                            <small class="form-text text-muted">Nombre completo que aparecerá en los informes</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="matricula_nacional" class="form-label">Matrícula Nacional <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="matricula_nacional" name="matricula_nacional" 
+                                   placeholder="Ej: MN 12345" required>
+                            <small class="form-text text-muted">Número de matrícula profesional</small>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <label for="firma_digital" class="form-label">Firma Digital</label>
+                            <input type="file" class="form-control" id="firma_digital" name="firma_digital" 
+                                   accept="image/png,image/jpeg,image/jpg">
+                            <small class="form-text text-muted">Formatos permitidos: PNG, JPG, JPEG (máximo 2MB)</small>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3" id="current_signature_section" style="display: none;">
+                        <div class="col-12">
+                            <label class="form-label">Firma Actual</label>
+                            <div class="border p-3 rounded bg-light">
+                                <img id="current_signature_img" src="" alt="Firma actual" style="max-width: 200px; max-height: 100px;">  
+                            </div>          
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="firma_habilitada" name="firma_habilitada">
+                                <label class="form-check-label" for="firma_habilitada">
+                                    Habilitar uso de firma digital en informes
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-success" form="form_medical_data">
+                    <i class="fas fa-save me-2"></i>Guardar datos médicos
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL MEDICAL DATA -->

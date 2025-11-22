@@ -1,0 +1,76 @@
+<!-- Modal Nuevo Paciente -->
+<div class="modal fade custom-modal" id="modal_np" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Paciente</h1>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <form method="POST" action="/agregar_paciente" id="Form_ag">
+          <input type="hidden" name="id_np" id="id_np">
+          <div class="form-group row">
+            <div class="col-md-6 col-12 mb-2">
+              <label for="p_name">Nombre</label>
+              <input type="text" class="form-control" id="p_name" name="p_name" required>
+            </div>
+            <div class="col-md-6 col-12 mb-2">
+              <label for="p_surname">Apellido</label>
+              <input type="text" class="form-control" id="p_surname" name="p_surname" required>
+            </div>
+          </div>
+
+          <div class="form-group row">
+            <div class="col-md-4 col-12 mb-2">
+              <label for="p_dni">DNI</label>
+              <input type="number" class="form-control" id="p_dni" name="p_dni" required>
+            </div>
+            <div class="col-md-4 col-12 mb-2 d-flex flex-column justify-content-end">
+              <label for="especialidad">Sexo</label>
+              <select id="sex" name="sex" class="form-control mt-1">
+                <option value="M">Masculino </option>
+                <option value="F">Femenino</option>
+                <option value="I">Indefinido</option>
+              </select>
+            </div>
+            <div class="col-md-4 col-12 mb-2 d-flex flex-column justify-content-end">
+              <label for="fecha_nacimiento">Fecha de nacimiento</label>
+              <input type="date" id="fecha_nacimiento" name="fecha_nacimiento" class="form-control mt-1">
+            </div>
+          </div>
+
+          <div class="form-group row">
+            <div class="col-md-4 col-12 mb-2">
+              <label for="nvademecum">Telefono</label>
+              <input type="text" class="form-control" id="telefono" name="telefono">
+            </div>
+            <div class="col-md-8 col-12 mb-2">
+              <label for="nvademecum">Mail</label>
+              <input type="email" class="form-control" id="mail" name="mail">
+            </div>
+          </div>
+
+          <div class="form-group row">
+            <div class="col-md-6 col-12 mb-2">
+              <label for="p_healthcard">CUIL</label>
+              <input type="text" class="form-control" id="p_healthcard" name="p_healthcard">
+            </div>
+            <div class="col-md-6 col-12 mb-2">
+              <label for="p_healthcard">Identificador de Obra Social</label>
+              <input type="text" class="form-control" id="p_id" name="p_id">
+            </div>
+          </div>
+        </form>
+      </div>
+      
+      <div class="modal-footer">
+        <button type="submit" class="btn bg-gradient-success save-changes" form="Form_ag">Guardar paciente</button>
+        <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+      
+    </div>
+  </div>
+</div>
+<!-- FIN MODAL -->

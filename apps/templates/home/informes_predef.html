@@ -1,0 +1,518 @@
+{% extends 'layouts/base.html' %}
+{% block title %}Editor de informe predefinido{% endblock %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-header-sheet.css">
+<link rel="stylesheet" href="/static/assets/css/generacion_informe.css">
+<style>
+  /* Botones de acción modernos */
+  .btn-action {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    color: #5e72e4;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    z-index: 10;
+    margin: 0 5px;
+  }
+
+  .btn-action:hover:not(:disabled) {
+    transform: translateY(-3px) scale(1.08);
+    box-shadow: 0 8px 20px rgba(94, 114, 228, 0.35);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .btn-action:active:not(:disabled) {
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  .btn-action:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: rgba(255, 255, 255, 0.6);
+    color: #8898aa;
+  }
+
+  /* Colores específicos por tipo */
+  .btn-save:hover:not(:disabled) {
+    background: linear-gradient(135deg, #2dce89 0%, #2dcecc 100%);
+  }
+
+  .btn-edit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #11cdef 0%, #1171ef 100%);
+  }
+
+  .btn-add:hover:not(:disabled) {
+    background: linear-gradient(135deg, #f5365c 0%, #f56036 100%);
+  }
+
+  /* Fijar footer a la parte inferior */
+  .main-content {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-content .container-fluid {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-content footer {
+    margin-top: auto;
+  }
+
+  /* Altura de la fila principal */
+  .main-row {
+    flex: 1;
+    min-height: 75vh!important;
+  }
+
+  .main-row > div {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .generacion-informe-scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    max-height: calc(100vh - 240px);
+  }
+
+  /* Estilos modernos para panels */
+  .panel {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    overflow: hidden;
+  }
+
+  .panel:hover {
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+    transform: translateY(-2px);
+  }
+
+  .panel-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.3s ease;
+    user-select: none;
+  }
+
+  .panel-header:hover {
+    background: linear-gradient(135deg, #7086ec 0%, #7f5aaa 100%);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  }
+
+  details[open] .panel-header {
+    background: white;
+    color: #344767;
+    border-bottom: 2px solid #e9ecef;
+  }
+
+  details[open] .panel-header:hover {
+    background: #f8f9fa;
+  }
+
+  details[open] .panel-header .panel-title::before {
+    background: #667eea;
+  }
+
+  .panel-header::after {
+    content: '▼';
+    font-size: 0.8rem;
+    transition: transform 0.3s ease;
+  }
+
+  details[open] .panel-header::after {
+    transform: rotate(180deg);
+  }
+
+  .panel-title {
+    display: flex;
+    align-items: center;
+  }
+
+  .panel-title::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.8);
+    margin-right: 10px;
+    border-radius: 2px;
+  }
+
+  .panel-body {
+    padding: 20px;
+    background: white;
+  }
+
+  /* Animación de apertura/cierre */
+  details[open] .panel-body {
+    animation: slideDown 0.3s ease-out;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Tabla dentro de panels */
+  .tabla-scroll {
+    max-height: calc(100vh - 450px);
+    min-height: 300px;
+    overflow-y: auto;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+  }
+
+  .tabla-primary {
+    margin-bottom: 0;
+  }
+
+  .tabla-primary thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .tabla-primary thead tr {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }
+
+  .tabla-primary thead th {
+    background: transparent;
+    color: white;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 12px;
+    border: none;
+  }
+
+  .tabla-primary tbody tr {
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+
+  .tabla-primary tbody tr:hover {
+    background: rgba(102, 126, 234, 0.08);
+  }
+
+  .tabla-primary tbody tr.fila-seleccionada {
+    background: rgba(102, 126, 234, 0.15);
+    font-weight: 500;
+  }
+
+  .panel-body .form-control:disabled {
+    background: repeating-linear-gradient(
+      45deg,
+      #f5f5f5,
+      #f5f5f5 10px,
+      #e8e8e8 10px,
+      #e8e8e8 20px
+    );
+    color: #999;
+    cursor: not-allowed;
+    border-color: #ddd;
+    opacity: 0.7;
+  }
+
+  .panel-body .form-control:disabled::placeholder {
+    color: #bbb;
+  }
+
+  /* Campo con cambios - Morado claro */
+  .field-modified {
+    background: linear-gradient(135deg, #e9e4f6 0%, #f0ebfa 100%) !important;
+    border: 2px solid #8a6ccf !important;
+    box-shadow: 0 0 0 3px rgba(138, 108, 207, 0.15) !important;
+    transition: all 0.3s ease !important;
+  }
+
+  /* Overlay para campos deshabilitados */
+  .panel-body:has(textarea:disabled)::before,
+  .panel-body:has(input:disabled)::before {
+    content: '🔒 Campo bloqueado';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(220, 53, 69, 0.9);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+    z-index: 10;
+  }
+
+  .panel-body {
+    position: relative;
+  }
+
+  /* Inputs y textareas mejorados */
+  .panel-body .form-control {
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    padding: 10px 14px;
+    transition: all 0.3s ease;
+    font-size: 0.95rem;
+  }
+
+  .panel-body .form-control:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.15);
+  }
+
+  .panel-body .form-control:disabled {
+    background: #f8f9fa;
+    border-color: #dee2e6;
+    color: #6c757d;
+  }
+
+  .panel-body textarea.form-control {
+    min-height: 200px;
+    resize: vertical;
+  }
+
+  /* Checkbox mejorado */
+  .form-check-input {
+    width: 1.2rem;
+    height: 1.2rem;
+    margin-right: 8px;
+    cursor: pointer;
+    border: 2px solid #667eea;
+  }
+
+  .form-check-input:checked {
+    background-color: #667eea;
+    border-color: #667eea;
+  }
+
+  .form-check-label {
+    cursor: pointer;
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 8px;
+    display: inline-block;
+  }
+
+  /* Labels de formulario */
+  .form-label {
+    color: #344767;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-label.fw-bold {
+    font-weight: 600;
+  }
+
+  /* Scrollbar personalizado */
+  .tabla-scroll::-webkit-scrollbar,
+  .generacion-informe-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .tabla-scroll::-webkit-scrollbar-track,
+  .generacion-informe-scroll::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+  }
+
+  .tabla-scroll::-webkit-scrollbar-thumb,
+  .generacion-informe-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+  }
+
+  .tabla-scroll::-webkit-scrollbar-thumb:hover,
+  .generacion-informe-scroll::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  }
+</style> 
+{% endblock stylesheets %}
+
+{% block content %}
+
+<!-- Fondo con imagen y gradiente -->
+<div class="position-fixed w-100 h-100 top-0 start-0" style="z-index: -1;">
+  <img src="{{ config.ASSETS_ROOT }}/img/writing.jpg" 
+       style="width: 100%; height: 100%; object-fit: cover; object-position: center;">
+  <div class="position-absolute top-0 start-0 w-100 h-100" 
+       style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.6) 0%, rgba(118, 75, 162, 0.5) 50%, rgba(255, 255, 255, 0.7) 100%);"></div>
+</div>
+
+{% include "includes/sidenav.html" %}
+
+<main class="main-content position-relative border-radius-lg">
+  <div class="container-fluid">
+
+    <!-- card switch -->
+    <div class="card shadow-lg mx-2 mx-md-4 mt-2 modern-header-sheet">
+      <div class="card-body">
+        <div class="row g-3 align-items-center">
+
+          <div class="col-lg-4 col-md-12 col-12 d-flex align-items-center justify-content-center justify-content-md-start mb-2 mb-lg-0">
+            <h3 class="mb-0 d-flex align-items-center">
+              <i class="fa fa-file-alt me-2"></i> Informes Predefinidos
+            </h3>
+          </div>
+
+          <div class="col-lg-5 col-md-8 col-12 d-flex align-items-center search-wrapper">
+            <div class="input-group input-group-lg nr-input-group w-100 my-0">
+              <input type="text" class="form-control" id="busquedaInf" placeholder="Buscar informe predefinido...">
+              <button class="btn btn-nr-primary btn-lg" type="button" id="l_exam">
+                <i class="fa fa-search"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="col-lg-3 col-md-4 col-12 d-flex justify-content-center justify-content-lg-end align-items-center gap-2">
+            <button type="button" class="btn-primary botones_sp" id="b_guardar_predef" disabled title="Guardar">
+                <i class="fas fa-save"></i>
+                <span>Guardar</span>
+            </button>
+            <button type="button" class="btn-primary btn-edit botones_sp" id="b_edit_predef" disabled title="Editar">
+                <i class="fas fa-pencil-alt"></i>
+                <span>Editar</span>
+            </button>
+            <button type="button" class="btn-primary btn-success" id="add_predef" title="Agregar nuevo">
+                <i class="fas fa-plus"></i>
+                <span>Agregar</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+    <!-- Fin card switch -->
+
+  <!-- Contenido principal -->
+  <div class="row px-2 py-4 main-row">
+    <div class="col-12 col-lg-4">
+      <section class="generacion-informe-scroll">
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Lista de informes</span></summary>
+          <div class="panel-body">
+            <div class="tabla-scroll">
+              <table class="tabla-primary table" id="tabla_inf_predef">
+                <thead>
+                  <tr>
+                    <th>Título de informe</th>
+                    <th>Tipo de estudio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Cargado dinámicamente desde JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Título y tipo de estudio</span></summary>
+          <div class="panel-body">
+            <label for="l_title" class="form-label fw-bold mb-1">Título del informe:</label>
+            <input class="form-control mb-3" id="l_title" name="l_title" placeholder="Título del informe" disabled>
+            
+            <label for="s_tipo_estudio" class="form-label fw-bold mb-1">Tipo de estudio:</label>
+            <select class="form-control mb-3" id="s_tipo_estudio" name="s_tipo_estudio" disabled></select>
+            
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input" id="chk_default_report" name="chk_default_report">
+              <label for="chk_default_report" class="form-check-label">Configurar como informe por defecto</label>
+            </div>
+          </div>
+        </details>
+
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Técnica de examen</span></summary>
+          <div class="panel-body">
+            <textarea class="form-control" id="text_tecnicas" disabled></textarea>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <div class="col-12 col-lg-8">
+      <!-- Área principal -->
+      <section class="generacion-informe-scroll px-2">
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Hallazgos</span></summary>
+          <div class="panel-body">
+            <textarea class="form-control" id="text_hallazgos" disabled></textarea>
+          </div>
+        </details>
+        
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Impresiones</span></summary>
+          <div class="panel-body">
+            <textarea class="form-control" id="text_impresiones" disabled></textarea>
+          </div>
+        </details>
+        
+        <details class="panel" open>
+          <summary class="panel-header"><span class="panel-title">Conclusiones</span></summary>
+          <div class="panel-body">
+            <textarea class="form-control" id="text_conclusiones" disabled></textarea>
+          </div>
+        </details>
+      </section>
+    </div>
+  </div>
+
+  {% include "includes/footer.html" %}
+
+  <!-- Contenedor para toasts -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer">
+    <!-- Los toasts se cargarán dinámicamente aquí -->
+  </div>
+
+  </div>
+
+  <script src="{{ config.ASSETS_ROOT }}/js/infpredef.js"></script>
+  <script src="{{ config.ASSETS_ROOT }}/js/tinymce/tinymce.min.js"></script>
+</main>
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

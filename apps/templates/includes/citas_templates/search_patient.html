@@ -1,143 +1,43 @@
-<div class="row">
-    <div class="col-12">
-      <div class="card mb-4 nr-card-1">
-        <div class="card-header pb-0">
-          <h6>Buscar Paciente</h6>
-        </div>
-        
-        <div class="card-body px-0 pt-0 pb-2">
-            <form id="search_patient"  method="POST" action="/buscar_pacientes">
-                <input type="hidden" name="url" id="url" value="buscar_paciente.html">
-              <div class="container-fluid">
-                <div class="row datos-paciente">    
-                    <div class="col-md-5">
-                        <div class="row">
-                            
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="name">
-                                        Nombre
-                                    </label>
-                                </div>
-                                <div class="col-md-4">
-                                    <input class="form-control" id="name" name="name">
-                                </div>
-                                <div class="col-md-4">
-                                    <input class="form-control" id="surname" name="surname">
-                                </div>
-                            </div>
-        
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="documento">
-                                        DNI
-                                    </label>
-                                </div>
-                                <div class="col-md-8">
-                                    <input class="form-control" id="documento" name="documento">
-                                </div>
-                            </div>
-        
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="Telefono">
-                                        N Telefono
-                                    </label>
-                                </div>
-                                <div class="col-md-8">
-                                    <input class="form-control" id="Telefono" name="Telefono">
-                                </div>
-                            </div>
-        
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="buscar_mail">
-                                        Mail
-                                    </label>
-                                </div>
-                                <div class="col-md-8">
-                                    <input class="form-control" id="buscar_mail" name="buscar_mail">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-5">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <label for="sex">
-                                    Sexo
-                                </label>
-                            </div>
-                            <div class="col-md-8">
-                                <select id="sex" name="sex">
-                                    <option value="M">Masculino </option>
-                                    <option value="F">Femenino</option>
-                                    <option value="I">Indefinido</option>
-                                    <option value="D">Desconocido</option>
-                                  </select>
-                            </div>
-                        </div>
-        
-                        <div class="row">
-                            <div class="col-md-4">
-                                <label for="fecha_nac">
-                                    Fecha
-                                </label>
-                            </div>
-                            <div class="col-md-8">
-                                <input type="date" class='dp' id="fecha_nac" name="fecha_nac">
-                            </div>
-                        </div>
-        
-                        <div class="row">
-                            <div class="col-md-4">
-                                <label for="tarjeta_sanitaria">
-                                    Tarjeta Sanitaria
-                                </label>
-                            </div>
-                            <div class="col-md-8">
-                                <input type="text" id="tarjeta_sanitaria" name="tarjeta_sanitaria">
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <label for="tsan">
-                                    Id Paciente
-                                </label>
-                            </div>
-                            <div class="col-md-8">
-                                <input type="text" id="idP" name="idP">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        
-                        <input type="submit" value="Buscar" class="btn btn-primary" id="b_search"></form>
-                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" id="asd" data-bs-target="#modal_np">Nuevo</button><br>
-                    
-                    
-                </div>
-                
-            </div>
-    
-    
-            <div class="row">
-                <div class="col-md-12">
-                    <table>
-    
-                    </table>
-                </div>
-            </div>
-          
-        </div>
-       
+<div class="card shadow-lg mx-2 mx-md-4 mb-4 modern-header-sheet">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
 
-        </div>
-        
+      <div class="col-lg-3 col-md-12 col-12 d-flex align-items-center justify-content-center justify-content-md-start mb-2 mb-lg-0">
+        <h6 class="mb-0 d-flex align-items-center text-white">
+          <i class="fa fa-search me-2"></i> Buscar Paciente
+        </h6>
       </div>
+
+      <!-- Selector de ubicación -->
+      <div class="col-lg-2 col-md-4 col-12">
+        <select class="form-select form-select-lg" id="location_selector" style="background-color: rgba(255,255,255,0.95); border: 2px solid rgba(102, 126, 234, 0.3);">
+          <option value="">Seleccione ubicación...</option>
+        </select>
+      </div>
+
+      <div class="col-lg-4 col-md-8 col-12 d-flex align-items-center search-wrapper">
+        <div class="input-group input-group-lg nr-input-group w-100 my-0">
+          <input type="text" class="form-control" id="busquedaSwitch" placeholder="Buscar paciente..." disabled>
+          <button class="btn-primary btn-primary-icon" type="button" id="b_search" title="Buscar" disabled>
+            <i class="fa fa-search"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="col-lg-3 col-md-4 col-12 d-flex justify-content-center justify-content-lg-end align-items-center">
+        <div class="btn-group-header">
+          <button type="button" class="btn-primary btn-primary-icon btn-save" id="b_agregar_paciente_rapido" data-bs-target="#modal_np_para_cita" data-bs-toggle="modal" title="Agregar paciente rápido">
+            <i class="fa fa-user-plus" aria-hidden="true"></i>
+            <span>Nuevo</span>
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
-  <div class="row">
+</div>
+
+<div class="row">
     <div class="col-12">
         <div class="card mb-4 shadow">
         <div class="card-header pb-0">
@@ -146,15 +46,15 @@
                     <h6>Resultados</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_sel_pac_para_cita" class="btn btn-secondary botones_sp" disabled patient-id="">Seleccionar paciente</button>
+                    <button type="button" id="b_sel_pac_para_adm" class="btn-primary btn-primary-icon btn-save botones_sp" disabled patient-id="" title="Seleccionar paciente">
+                        <i class="fa fa-check-circle" aria-hidden="true"></i>
+                    </button>
                 </div>
-                
             </div>
-            
-            
         </div>
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-                <table class="tabla-paciente table" id="tabla-paciente">
+        <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+            <div class="table-responsive-custom">
+                <table class="tabla-primary table" id="tabla-paciente">
                     <thead>
                         <tr>
                             <th>Nombre</th>
@@ -165,15 +65,13 @@
                         </tr>
                     </thead>
                     <tbody>
-
-                            <tr class="patient-row">
-
-                            </tr>
-                        
-                    
+                        <tr class="patient-row">
+                            <!-- Contenido dinámico aquí -->
+                        </tr>
                     </tbody>
                 </table>
-            </div> 
+            </div>
+        </div> 
         </div>
     </div>
-  </div>
+</div>

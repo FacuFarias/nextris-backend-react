@@ -23,18 +23,54 @@
   <link id="pagestyle" href="{{ config.ASSETS_ROOT }}/css/argon-dashboard.css?v=2.0.4" rel="stylesheet" />
   <link id="pagestyle" href="{{ config.ASSETS_ROOT }}/css/style.css" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  
+  <!-- Modern Design System -->
+  <link rel="stylesheet" href="{{ config.ASSETS_ROOT }}/css/modern-background.css" />
+  <link rel="stylesheet" href="{{ config.ASSETS_ROOT }}/css/modern-sidenav.css" />
 
     <!-- Specific CSS goes HERE -->
     {% block stylesheets %}{% endblock stylesheets %}
 
 </head>
-<body class="g-sidenav-show bg-bck-degradade">
+<body class="g-sidenav-show bg-bck-degradade d-flex flex-column min-vh-100">
+  
+  <!-- Decoración de fondo moderna -->
+  {% include "includes/background-decoration.html" %}
+  
+  <script>
+    // Asegurar que el sidenav esté siempre visible
+    document.addEventListener('DOMContentLoaded', function() {
+      const body = document.body;
+      // Siempre mostrar el sidenav
+      body.classList.add('g-sidenav-show');
+      body.classList.remove('g-sidenav-hidden');
+    });
+  </script>
 
   {% block content %}{% endblock content %}
+
+  <!-- ====================================
+       GLOBAL MODAL CONTAINER
+       Este div está FUERA de main-content para evitar problemas de stacking context
+       Bootstrap inserta los backdrops aquí automáticamente
+       Los modales dinámicos también deben ir aquí
+       ==================================== -->
+  <div id="global_modal_container"></div>
+
+  <!-- ====================================
+       MODALS BLOCK
+       Bloque para incluir modales desde páginas específicas
+       Los modales aquí también estarán fuera de main-content
+       ==================================== -->
+  {% block modals %}{% endblock modals %}
 
   {% include "includes/fixed-plugin.html" %}
 
   {% include "includes/scripts.html" %}
+
+  <!-- NextRIS Framework - Sistema global de notificaciones y funciones -->
+  <!-- DEBE CARGARSE ANTES de los scripts específicos de cada página -->
+  <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
 
   <!-- Specific JS goes HERE --> 
   {% block javascripts %}{% endblock javascripts %}
@@ -50,7 +86,23 @@
   </script>
 
   <!-- Control Center for Soft Dashboard: parallax effects, scripts for the example pages etc -->
-  <script src="{{ config.ASSETS_ROOT }}/js/argon-dashboard.min.js?v=2.0.4"></script>
+  <script>
+    // Cargar argon-dashboard de manera segura
+    document.addEventListener('DOMContentLoaded', function() {
+      // Pequeña pausa para asegurar que todos los elementos estén listos
+      setTimeout(function() {
+        var script = document.createElement('script');
+        script.src = "{{ config.ASSETS_ROOT }}/js/argon-dashboard.min.js?v=2.0.4";
+        script.onload = function() {
+          console.log('Argon Dashboard loaded successfully');
+        };
+        script.onerror = function() {
+          console.warn('Failed to load Argon Dashboard');
+        };
+        document.head.appendChild(script);
+      }, 100);
+    });
+  </script>
 
 </body>
 </html>

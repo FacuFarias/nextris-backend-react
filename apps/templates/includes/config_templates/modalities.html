@@ -1,0 +1,68 @@
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_mod">
+                        Buscar Modalidad
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_mod" name="search_mod">
+                </div>
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_mod" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_mod" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                    </button>
+                </div>                  
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Modalidades</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" class="btn btn-nr-primary rounded-circle botones_mod" id="b_editar_mod"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                      </button>
+
+                      <button type="button" class="btn btn-nr-primary rounded-circle botones_mod delete_b" id="b_eliminar_mod"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                      </button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-mod">
+                <thead>
+                    <tr>
+                        <th>Descripcion</th>
+                        <th>Codigo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>

@@ -1,92 +1,4 @@
 <div class="row">
-    <div id="modal_content" class="mt-4" data-id=""></div>
-  </div>
-<!-- Modal -->
-<div class="modal fade custom-modal" id="modal_users" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                
-                <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo usuario</h1>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <form method="POST" action="/create_user" id="Form_user">
-                    
-                    <input type="hidden" name="id_user" id="id_user">
-                    
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="username">Nombre de usuario</label>
-                        </div>
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="username" name="username" required>
-                            
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="username">Tipo de usuario</label>
-                        </div>
-                        <div class="col-md-9">
-                            <select id="s_type_of_user" name="s_type_of_user">
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="username">Nombre</label>
-                        </div>
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="name" name="name" required>
-                            
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="username">Apellido</label>
-                        </div>
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="surname" name="surname" required>
-                            
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="username">DNI</label>
-                        </div>
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="nationalnumber" name="nationalnumber" required>
-                            
-                        </div>
-                    </div>
-
-                    <div class="form-group row">
-                        <div class="col-md-3">
-                            <label for="mail">Mail</label>
-                        </div>
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="text_mail" name="text_mail">
-                            
-                        </div>
-                    </div>
-                    
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_user">Crear usuario</button>
-                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
-            </div>
-        </div>
-    </div>
-</div>
-<!-- FIN MODAL -->
-
-<div class="row">
     <div class="col-12">
         <div class="card mb-4">
         <div class="card-header pb-0">
@@ -105,8 +17,9 @@
                     <input class="form-control" id="search_group_users" name="search_group_users">
                 </div>
                 <div class="col-md-3 d-flex ms-auto justify-content-end ">
-                    <button type="button" id="b_nuevo_user" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_users" style="font-size: 25px;">
+                    <button type="button" id="b_nuevo_user" class="btn btn-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_users" style="font-size: 25px;">
                         <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        <span>Añadir usuario</span>
                     </button>
                 </div>           
                 
@@ -122,16 +35,41 @@
         <div class="card mb-4 shadow">
         <div class="card-header pb-0">
             <div class="row">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <h6>Lista de usuarios</h6>
                 </div>
-                <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" class="btn btn-nr-primary rounded-circle botones_user" id="b_editar_user"  disabled>
+                <div class="col-md-2 d-flex align-items-center">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="show_inactive_users">
+                        <label class="form-check-label" for="show_inactive_users">
+                            Mostrar usuarios desactivados
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-7 d-flex justify-content-end">
+                    <button type="button" class="btn btn-primary botones_user" id="b_editar_user"  disabled>
                         <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        <span>Editar</span>
                       </button>
 
-                      <button type="button" class="btn btn-nr-primary rounded-circle botones_user delete_b" id="b_eliminar_user"  disabled>
+                      <button type="button" class="btn btn-primary rounded-circle botones_user" id="b_medical_data" title="Agregar datos médicos" disabled>
+                        <i class="fas fa-user-md" aria-hidden="true"></i>
+                        <span>Datos médicos</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary botones_user" id="b_reset_password" title="Reiniciar contraseña" disabled>
+                        <i class="fas fa-key" aria-hidden="true"></i>
+                        <span>Reiniciar contraseña</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary rounded-circle botones_user delete_b" id="b_eliminar_user"  disabled>
                         <i class="fas fa-trash" aria-hidden="true"></i>
+                        <span>Eliminar</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary rounded-circle botones_user" id="b_activar_user" style="background-color: #28a745; display: none;" disabled>
+                        <i class="fas fa-undo" aria-hidden="true"></i>
+                        <span>Activar</span>
                       </button>
                 </div>
                 

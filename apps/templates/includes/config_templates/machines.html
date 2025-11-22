@@ -1,90 +1,3 @@
-<!-- modal -->
-
-<div class="modal fade custom-modal" id="modal_mach" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
-    <div class="modal-dialog" z-index="-2">
-        <div class="modal-content">
-
-          <div class="modal-header">
-            <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Equipo</h1>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
-          </div>
-
-          <div class="modal-body">
-            <form id="Form_mach" method="POST" action="/agregar_machine">
-                <input type="hidden" name="id_mach" id="id_mach">
-        
-                <div class="form-group row">
-                    <div class="col-md-8">
-                        <label for="Description_mach">Descripción</label>
-                        <input type="text" class="form-control" id="Description_mach" name="Description_mach" required>
-                    </div>
-                    <div class="col-md-4">
-                        <label for="AETitle">AETitle</label>
-                        <input type="text" class="form-control" id="AETitle" name="AETitle">
-                    </div>
-                </div>
-
-                <div class="form-group row"> 
-                    <div class="col-md-5">
-                        <label for="s_sala">Sala</label><br>
-                        <select id="s_sala" name="s_sala" required>
-                        </select>
-                    </div>
-                    <div class="col-md-5">
-                        <label for="s_proc">Procedencia</label><br>
-                        <select id="s_proc" name="s_proc" required>
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <label for="s_moda">Mod</label><br>
-                        <select id="s_moda" name="s_moda" required>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-group row"> 
-                    <div class="col-md-4">
-                        <label for="equip_brand">Marca</label><br>
-                        <input type="text" class="form-control" id="equip_brand" name="equip_brand">
-                    </div>
-                    <div class="col-md-4">
-                        <label for="equip_model">Modelo</label><br>
-                        <input type="text" class="form-control" id="equip_model" name="equip_model">
-                    </div>
-                    <div class="col-md-4">
-                        <label for="equip_sn">N serie</label><br>
-                        <input type="text" class="form-control" id="equip_sn" name="equip_sn">
-                    </div>
-                </div>
-
-                <div class="form-group row"> 
-                    <div class="col-md-6">
-                        <label for="equip_ip">IP</label><br>
-                        <input type="text" class="form-control" id="equip_ip" name="equip_ip">
-                    </div>
-                    <div class="col-md-6">
-                        <label for="Ext_code_equip">Codigo Externo</label><br>
-                        <input type="text" class="form-control" id="Ext_code_equip" name="Ext_code_equip">
-                    </div>
-                </div>
-                <div class="form-group row"> 
-                    <div class="col-md-6">
-                    <input type="checkbox" id="IsAc_mach" name="IsAc_mach"><label for="IsAc_mach">Activo</label>
-                </div>
-                </div>
-            
-        </div>
-          <div class="modal-footer">
-            <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Equipo</button>
-          </form>
-            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
-        </div>
-        </div>
-      
-        
-    </div>
-  </div>
-<!-- Fin modal -->
 <div class="row">
     <div class="col-12">
         <div class="card mb-4">
@@ -104,8 +17,9 @@
                     <input class="form-control" id="search_mach" name="search_mach">
                 </div>
                 <div class="col-md-3 d-flex ms-auto justify-content-end ">
-                    <button type="button" id="b_nuevo_mach" class="btn btn-nr-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_mach" style="font-size: 25px;">
+                    <button type="button" id="b_nuevo_mach" class="btn btn-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_mach" style="font-size: 25px;">
                         <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        <span>Nuevo Equipo</span>
                     </button>
                 </div>         
                 
@@ -125,12 +39,14 @@
                     <h6>Eqipos</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" class="btn btn-nr-primary rounded-circle botones_mach" id="b_editar_mach"  disabled>
+                    <button type="button" class="mx-2 btn btn-primary  botones_mach" id="b_editar_mach"  disabled>
                         <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        <span> Editar</span>
                       </button>
 
-                      <button type="button" class="btn btn-nr-primary rounded-circle botones_mach delete_b" id="b_eliminar_mach"  disabled>
+                      <button type="button" class="mx-2 btn btn-primary  btn-danger botones_mach delete_b" id="b_eliminar_mach"  disabled>
                         <i class="fas fa-trash" aria-hidden="true"></i>
+                        <span> Eliminar</span>
                       </button>
                 </div>
                 
@@ -145,14 +61,12 @@
                         <th>Descripción</th>
                         <th>AETitle</th>
                         <th>Codigo Externo</th>
-                        <th>Sala</th>
                         <th>Modalidad</th>
-                        <th>Activo</th>
-                        <th>Procedencia</th>
                         <th>IP</th>
                         <th>Marca</th>
                         <th>Modelo</th>
                         <th>N.Serie</th>
+                        <th>Activo</th>
                     </tr>
                 </thead>
                 <tbody>

@@ -1,3 +1,35 @@
+/* Ocultar los tab-pane inactivos de Bootstrap (pills) completamente */
+.tab-pane:not(.active) {
+  display: none !important;
+}
+
+/* CAMBIO-ESTILO-BARRA-LATERAL-INICIO */
+/* .sidebar-datos {
+  background: rgba(230, 4, 4, 0.18);
+  font-style: italic;
+  border-radius: 8px;
+  padding: 12px 18px;
+  margin-bottom: 12px;
+} */
+/* Ajuste para el contenedor padre de card_detalles_orden */
+#pills-detalles {
+  min-height: 900px;
+  height: 90vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* Estilo para el card de detalles de orden */
+#card_detalles_orden {
+  min-height: 800px;
+  max-height: 90%;
+  height: auto;
+  box-sizing: border-box;
+}
+
+/* CAMBIO-ESTILO-BARRA-LATERAL-FIN */
 .fila-seleccionada {
     background-color: #AFA3BF !important;
     color: white;
@@ -8,12 +40,66 @@
   color: white;
 }
  
+.row-expandible {
+  height: 60vh;
+  width: 100%; /* o el valor que prefieras */
+  margin: 0 auto; /* centra el bloque horizontalmente */
+  overflow-y: auto;
+  overflow-x: clip;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
 
+.fc-day-selected { background-color: #e5e5ff !important; }
+
+.row-expandible .card-2 {
+  height: 70%;
+}
+.row-expandible .card-3 {
+  height: 50%;
+}
+
+
+/* ================================ */
+/* ESTILOS PARA TABLA DE PACIENTES */
+/* ================================ */
+
+/* Card body se adapta al contenido, con máximo para scroll */
 .card-tabla-paciente {
-    max-height: calc(60vh - 200px) !important;  
-    overflow-y: auto;
-  }
-  
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: auto !important;
+  max-height: calc(100vh - 280px) !important; /* Altura máxima antes de scroll */
+}
+
+/* Tabla responsive con scroll interno cuando supera el máximo */
+.table-responsive-custom {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: 0 1rem !important;
+}
+
+/* Header fijo con degradado azul-morado para tabla primaria */
+.tabla-primary thead {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.tabla-primary thead th {
+  color: white !important;
+  font-weight: 600;
+  padding: 12px 16px;
+  border-bottom: none !important;
+}
+
+
 .card-tabla-quasi-full
 {
   max-height: calc(80vh - 200px) !important;  
@@ -36,9 +122,12 @@
     z-index: 1;
   }
 
+
   /* Cambiar el color de fondo de las filas impares */
 .table tbody tr:nth-child(odd) {
   background-color: #e9ecef;
+  
+  
 }
 
 /* Cambiar el color de fondo de las filas pares */
@@ -58,14 +147,15 @@
   }
 
   .card-agenda-general
-  { height: 60vh !important;  
+  { height: 40vh !important;  
     overflow-y: auto;
   }
 
-
   .calendarioo
-  { height: 55vh !important;  
-    overflow-y: auto;
+  { 
+    height: 100% !important;  
+    overflow: hidden !important;
+    width: 100% !important;
   }
 
   
@@ -127,6 +217,10 @@
   padding: 10px;
   border-radius: 5px;
   margin-bottom: 5px;
+}
+
+#top-informe{
+  background-color: white;
 }
 
 .btn-nr-primary {
@@ -303,12 +397,56 @@
     -webkit-backdrop-filter: blur(10px); /* Soporte para navegadores WebKit */
 }
 
+/* Input + botón con misma altura y unión visual */
+.nr-input-group .form-control {
+  height: 44px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.nr-input-group .btn {
+  height: 44px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* Tabs sin caja de fondo rara y con mejor separación */
+.nav.nav-pills {
+  padding: 0;          /* quita el “bloque” claro detrás */
+}
+.nav-pills .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.nr-input-group .form-control,
+.nr-input-group .btn { height:44px; }
+
+#card_detalles_orden {
+  min-height: 38vh;
+}
 
 .main-content {
   overflow: auto; /* Permitir el desplazamiento del contenido principal */
   height: calc(100vh); /* Ajusta la altura del contenedor principal para el tamaño de la pantalla */
 }
 
+#row-content {
+  padding-top: 0 !important;
+  margin-top: -23px !important;
+}
+
+.pl-30{
+  padding-left: 30px !important;
+}
+
+.minimun-padding-v{
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+}
+.minimum-padding-f{
+  padding: 0.4rem !important;
+}
 
 textarea {
   height: 100%; /* Hacer que el textarea ocupe toda la altura disponible sin mostrar barra */
@@ -321,17 +459,19 @@ textarea {
 }
 
 
+
 .card .card-body-tiny {
   padding: 0.5rem;
 }
 
+/* Tamaño cuando está full el diag principal*/
 .expand-report {
-  height: calc(83vh - 150px); 
+  height: calc(70vh - 150px); 
   transition: height 0.3s ease; 
 }
-
+/* Tamaño contraido */
 .report-container {
-  height: calc(67vh - 150px);
+  height: calc(53vh - 150px);
   transition: height 0.3s ease; 
 }
 
@@ -360,3 +500,340 @@ tbody tr td {
 }
 
 
+.bg-green {
+  background-color: #d4edda !important; /* verde tipo Bootstrap */
+  transition: background-color 0.5s ease;
+}
+
+
+.card {
+  transition: background-color 0.5s ease;
+}
+.bg-purple-flash {
+  background-color: #d6aff3 !important; /* morado claro */
+}
+
+.tabla-scroll {
+  max-height: 200px !important; /* ajustá este valor si cada fila es de ~50-55px */
+  overflow-y: auto;
+  scrollbar-width: thin; /* Firefox */
+}
+
+/* Opcional: para scroll más bonito en Webkit (Chrome/Edge) */
+.tabla-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.tabla-scroll::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 4px;
+}
+
+/* Estilos para usuarios desactivados */
+.user-inactive {
+  background-color: #f8f9fa !important;
+  opacity: 0.7;
+  border-left: 3px solid #dc3545 !important;
+}
+
+.user-inactive td {
+  color: #6c757d !important;
+  font-style: italic;
+}
+
+.user-inactive:hover {
+  background-color: #e9ecef !important;
+  cursor: pointer;
+}
+
+/* Permitir selección de usuarios inactivos */
+.user-inactive.fila-seleccionada {
+  background-color: #AFA3BF !important;
+  opacity: 1 !important;
+  border-left: 3px solid #dc3545 !important;
+}
+
+.user-inactive.fila-seleccionada td {
+  color: white !important;
+  font-style: italic;
+}
+
+/* Estilo para el checkbox de mostrar usuarios desactivados */
+#show_inactive_users {
+  margin-right: 8px;
+}
+
+/* ================================ */
+/* ESTILOS MODERNOS PARA TOASTS */
+/* ================================ */
+
+.toast-container {
+  z-index: 99999 !important;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  min-width: 300px;
+  max-width: 400px;
+  border: none !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
+  backdrop-filter: blur(10px);
+  animation: slideInFromRight 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.toast.hide {
+  animation: slideOutToRight 0.3s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+}
+
+/* Toast Success - Verde moderno */
+.toast.text-bg-success {
+  background: linear-gradient(135deg, #28a745 0%, #34ce57 100%) !important;
+  border-left: 4px solid #155724 !important;
+}
+
+/* Toast Error - Rojo moderno */
+.toast.text-bg-danger {
+  background: linear-gradient(135deg, #dc3545 0%, #e74c3c 100%) !important;
+  border-left: 4px solid #721c24 !important;
+}
+
+/* Toast Alert - Naranja moderno */
+.toast.text-bg-warning {
+  background: linear-gradient(135deg, #ffc107 0%, #ffb300 100%) !important;
+  border-left: 4px solid #856404 !important;
+  color: #212529 !important;
+}
+
+.toast-header {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 12px 12px 0 0 !important;
+  padding: 12px 16px !important;
+}
+
+.toast-header strong {
+  font-weight: 600 !important;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+}
+
+.toast-header strong::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background-size: 12px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* Iconos para cada tipo de toast */
+.text-bg-success .toast-header strong::before {
+  background-color: rgba(255, 255, 255, 0.2);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23ffffff'%3e%3cpath d='M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z'/%3e%3c/svg%3e");
+}
+
+.text-bg-danger .toast-header strong::before {
+  background-color: rgba(255, 255, 255, 0.2);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23ffffff'%3e%3cpath d='M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e");
+}
+
+.text-bg-warning .toast-header strong::before {
+  background-color: rgba(0, 0, 0, 0.1);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23212529'%3e%3cpath d='M7.938 2.016A.13.13 0 0 1 8.002 2a.13.13 0 0 1 .063.016.146.146 0 0 1 .054.057l6.857 11.667c.036.06.035.124.002.183a.163.163 0 0 1-.054.06.116.116 0 0 1-.066.017H1.146a.115.115 0 0 1-.066-.017.163.163 0 0 1-.054-.06.176.176 0 0 1 .002-.183L7.884 2.073a.147.147 0 0 1 .054-.057zm1.044-.45a1.13 1.13 0 0 0-2.008 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566z'/%3e%3cpath d='M7.002 12a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 5.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995z'/%3e%3c/svg%3e");
+}
+
+.toast-header .text-muted {
+  font-size: 0.8rem !important;
+  opacity: 0.8;
+}
+
+.toast-body {
+  padding: 12px 16px !important;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+/* Botón de cerrar personalizado */
+.toast .btn-close {
+  background: none !important;
+  opacity: 0.8 !important;
+  filter: invert(1) grayscale(100%) brightness(200%) !important;
+  width: 20px !important;
+  height: 20px !important;
+  font-size: 0.7rem !important;
+}
+
+.toast .btn-close:hover {
+  opacity: 1 !important;
+  transform: scale(1.1);
+}
+
+.text-bg-warning .btn-close {
+  filter: invert(0) grayscale(100%) brightness(0%) !important;
+}
+
+/* Animaciones de entrada y salida */
+@keyframes slideInFromRight {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutToRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Efectos adicionales para múltiples toasts */
+.toast-container .toast:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.toast-container .toast:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+/* Hover effect para toasts */
+.toast:hover {
+  transform: translateX(-5px);
+  transition: transform 0.2s ease;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Responsive para dispositivos móviles */
+@media (max-width: 576px) {
+  .toast-container {
+    left: 1rem !important;
+    right: 1rem !important;
+    bottom: 1rem !important;
+  }
+  
+  .toast {
+    min-width: auto !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+}
+
+/* ================================ */
+/* ESTILOS PARA USER PROFILE SECTION */
+/* ================================ */
+
+.user-profile-section {
+  padding: 0 1rem;
+  margin-bottom: 1rem;
+}
+
+.user-profile-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  min-height: 60px;
+}
+
+.user-profile-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  backdrop-filter: blur(10px);
+}
+
+.user-avatar i {
+  color: white;
+  font-size: 16px;
+}
+
+.user-details {
+  flex: 1;
+  min-width: 0; /* Para que el texto se trunque correctamente */
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.user-name {
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Adaptación cuando el sidenav está colapsado */
+.sidenav.sidenav-mini .user-details {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.sidenav.sidenav-mini .user-profile-card {
+  padding: 12px;
+  justify-content: center;
+}
+
+.sidenav.sidenav-mini .user-avatar {
+  margin: 0;
+}
+
+/* Animación suave para la transición */
+@media (min-width: 1200px) {
+  .sidenav:not(.sidenav-mini) .user-details {
+    animation: slideInUser 0.3s ease;
+  }
+}
+
+@keyframes slideInUser {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

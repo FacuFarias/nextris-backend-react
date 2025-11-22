@@ -1,0 +1,37 @@
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-10 col-lg-8">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h4 class="mb-0">Configuración API de WhatsApp</h4>
+                </div>
+                <div class="card-body">
+                    <form id="whatsappConfigForm">
+                        <div class="mb-3">
+                            <label for="wa_api_url" class="form-label">URL de la API</label>
+                            <input type="text" class="form-control" id="wa_api_url" name="wa_api_url" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="wa_token" class="form-label">Token de Acceso</label>
+                            <input type="text" class="form-control" id="wa_token" name="wa_token" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="wa_phone_number" class="form-label">Número de WhatsApp (con código país)</label>
+                            <input type="text" class="form-control" id="wa_phone_number" name="wa_phone_number" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="wa_business_id" class="form-label">Business ID (opcional)</label>
+                            <input type="text" class="form-control" id="wa_business_id" name="wa_business_id">
+                        </div>
+                        <div class="mb-3">
+                            <label for="wa_webhook_url" class="form-label">Webhook URL (opcional)</label>
+                            <input type="text" class="form-control" id="wa_webhook_url" name="wa_webhook_url">
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Guardar Configuración</button>
+                    </form>
+                    <div id="waConfigResult" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

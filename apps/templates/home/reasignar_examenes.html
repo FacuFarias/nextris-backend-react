@@ -1,0 +1,274 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Pacientes {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-header-sheet.css">
+<style>
+  /* Estructura para reasignar_examenes - scroll en tablas */
+  .main-content {
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Tab content con estructura flexible */
+  #pills-tabContent {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-top: 1rem;
+  }
+
+  .tab-pane {
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .tab-pane.active {
+    display: flex;
+  }
+
+  /* Row y col deben usar flexbox en cascada */
+  .tab-pane > .row {
+    flex: 1;
+    margin: 0.5rem 1rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tab-pane > .row > .col-12 {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Card ocupa espacio disponible */
+  .tab-pane .card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin: 0;
+    min-height: 0;
+  }
+
+  .tab-pane .card-header {
+    flex-shrink: 0;
+  }
+
+  /* Card-body con tablas - scroll interno */
+  .tab-pane .card-body.card-tabla-paciente,
+  .tab-pane .card-body.card-tabla-estudios {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0 !important;
+  }
+
+  /* Contenedor table-responsive-custom con scroll */
+  .tab-pane .table-responsive-custom {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    min-height: 0;
+  }
+
+  /* Eliminar altura mínima forzada */
+  .min-vh-65 {
+    min-height: auto !important;
+  }
+</style>
+{% endblock stylesheets %}
+
+{% block content %}
+
+<div class="position-fixed w-100 h-100 top-0 start-0" style="z-index: -1;">
+  <img src="{{ config.ASSETS_ROOT }}/img/hospital.jpg" 
+       style="width: 100%; height: 100%; object-fit: cover; object-position: center;">
+  <div class="position-absolute top-0 start-0 w-100 h-100" 
+       style="background: linear-gradient(135deg, #764ba2 0%, #d4d9f7 50%, #ffffff 100%); opacity: 0.85;"></div>
+</div>
+      
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content flex-grow-1 position-relative d-flex flex-column min-vh-100">
+
+
+
+<!-- card switch -->
+<div class="card shadow-lg mx-2 mx-md-4 mt-5 modern-header-sheet">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
+
+      <div class="col-lg-3 col-md-12 col-12 d-flex align-items-center justify-content-center justify-content-md-start mb-2 mb-lg-0">
+        <h3 class="mb-0 d-flex align-items-center">
+          <i class="fa fa-users me-2"></i> Estudio a reasignar
+        </h3>
+      </div>
+
+      <div class="col-lg-6 col-md-8 col-12 d-flex align-items-center search-wrapper">
+        <div class="input-group input-group-lg nr-input-group w-100 my-0">
+          <input type="text" class="form-control" id="busquedaSwitch" placeholder="Buscar paciente o historial...">
+          <button class="btn btn-nr-primary btn-lg" type="button" id="btnBuscarSwitch">
+            <i class="fa fa-search"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="col-lg-3 col-md-4 col-12 d-flex justify-content-center justify-content-lg-end align-items-center">
+        <ul class="nav nav-pills gap-2 m-0" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="pills-estudio-tab" data-bs-toggle="pill"
+                    data-bs-target="#pills-estudio" type="button" role="tab"
+                    aria-controls="pills-estudio" aria-selected="true">
+              <i class="ni ni-app"></i> Estudio
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="pills-paciente-tab" data-bs-toggle="pill"
+                    data-bs-target="#pills-paciente" type="button" role="tab"
+                    aria-controls="pills-paciente" aria-selected="false">
+              <i class="ni ni-app"></i> Pacientes
+            </button>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+<!-- Fin card switch -->
+
+
+
+  
+        <div class="tab-content" id="pills-tabContent">
+      <div class="tab-pane fade active show" id="pills-estudio" role="tabpanel" aria-labelledby="pills-estudio-tab">
+        <div class="row min-vh-65 pt-3 mx-4">
+          <div class="col-12">
+            <div class="card shadow">
+            <div class="card-header pb-0">
+              <div class="row">
+                <div class="col-md-4">
+                  <h6>Estudios posibles de reasignacion:</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                  <button type="button" id="seleccionar-estudio" class="btn-primary btn-save botones_est" disabled patient-id="" title="Seleccionar estudio">
+                    <i class="fa fa-check" aria-hidden="true"></i>
+                    <span class="btn-text">Seleccionar</span>
+                  </button>
+
+                  <button type="button" class="btn-primary btn-pdf botones_est" disabled patient-id="" id="ver-informe" title="Ver informe">
+                    <i class="fa fa-file" aria-hidden="true"></i>
+                    <span class="btn-text">Ver informe</span>
+                  </button>
+                  
+                  <button type="button" class="btn-primary btn-dcm botones_est boton_dcm" disabled patient-id="" id="ver-imagen" title="Ver imágenes DICOM">
+                    <i class="fas fa-file-image" aria-hidden="true"></i>
+                    <span class="btn-text">Ver imágenes DICOM</span>
+                  </button>
+                  
+                </div>
+              </div>
+              <hr class="horizontal dark mt-0">
+            </div>
+            <div class="card-body card-tabla-estudios px-0 pt-0 pb-2">
+              <div class="table-responsive-custom">
+                <table class="tabla-primary table" id="tabla-estudios">
+                  <thead>
+                    <tr>
+                      <th>Fecha del estudio</th>
+                      <th>Accesion number</th>
+                      <th>Id paciente</th>
+                      <th>Nombre Paciente</th>
+                      <th>Fecha Nacimiento</th>
+                      <th>Descripcion del estudio</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  </tbody>
+                </table>
+              </div>
+            </div> 
+          </div>
+          </div>
+          </div>
+      </div>
+      <div class="tab-pane fade" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
+        <div class="row min-vh-65 pt-3 mx-4">
+          <div class="col-12">
+            <div class="card shadow">
+            <div class="card-header pb-0">
+              <div class="row">
+                <div class="col-md-4">
+                  <h6>Resultados</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                  <button type="button" id="seleccionar-paciente" class="btn-primary btn-save botones_p" disabled patient-id="" title="Seleccionar paciente destino">
+                    <i class="fa fa-check" aria-hidden="true"></i>
+                    <span class="btn-text">Seleccionar</span>
+                  </button>
+                </div>
+              </div>
+              <hr class="horizontal dark mt-0">
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+              <div class="table-responsive-custom">
+                <table class="tabla-primary table" id="tabla-pacientes">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Apellido</th>
+                      <th>DNI</th>
+                      <th>Sexo</th>
+                      <th>Fecha de nacimiento</th>
+                      <th>Telefono</th>
+                      <th>Email</th>
+                      <th>Tarjeta Sanitaria</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  </tbody>
+                </table>
+              </div>
+            </div> 
+          </div>
+          </div>
+          </div>
+      </div>
+          </div>            
+
+      <div class="mt-auto">
+        {% include "includes/footer.html" %}
+      </div>
+
+    </div>
+    <div id="toastContainer"></div>
+    <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/reasignarEstudio.js"></script>
+  </main>
+
+{% endblock content %}
+
+{% block modals %}
+  {% include "home/modals/reasignar_examenes_modal.html" %}
+{% endblock modals %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+
+{% endblock javascripts %}

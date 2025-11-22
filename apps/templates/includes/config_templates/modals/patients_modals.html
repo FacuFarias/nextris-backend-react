@@ -1,0 +1,239 @@
+<!-- Modal Paciente -->
+<div class="modal fade custom-modal" id="modal_patients" tabindex="-1" data-bs-keyboard="true" aria-labelledby="patientModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="patientModalLabel">Nuevo paciente</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/create_patient" id="Form_patient">
+                    
+                    <input type="hidden" name="id_patient" id="id_patient">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_name">Nombre</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_name" name="patient_name" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_surname">Apellido</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_surname" name="patient_surname" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_dni">DNI</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_dni" name="patient_dni" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_gender">Sexo</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <select class="form-control" id="patient_gender" name="patient_gender">
+                                        <option value="">Seleccionar...</option>
+                                        <option value="M">Masculino</option>
+                                        <option value="F">Femenino</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_birthdate">Fecha de nacimiento</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="date" class="form-control" id="patient_birthdate" name="patient_birthdate" placeholder="dd/mm/aaaa">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_phone">Teléfono</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_phone" name="patient_phone">
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_email">Mail</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="email" class="form-control" id="patient_email" name="patient_email">
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_cuil">CUIL</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_cuil" name="patient_cuil">
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_insurance_number">Identificador de Obra Social</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_insurance_number" name="patient_insurance_number">
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-md-4">
+                                    <label for="patient_username">Nombre de usuario</label>
+                                </div>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="patient_username" name="patient_username" required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_patient">Crear paciente</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL PACIENTE -->
+
+<!-- Modal para ver historial del paciente -->
+<div class="modal fade custom-modal" id="modal_patient_history" tabindex="-1" aria-labelledby="patientHistoryModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="patientHistoryModalLabel">Historial médico del paciente</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <h6>Datos del paciente:</h6>
+                        <p><strong>Nombre:</strong> <span id="history_patient_name"></span></p>
+                        <p><strong>DNI:</strong> <span id="history_patient_dni"></span></p>
+                        <p><strong>Fecha de nacimiento:</strong> <span id="history_patient_birthdate"></span></p>
+                    </div>
+                </div>
+                <hr>
+                <div class="row">
+                    <div class="col-md-12">
+                        <h6>Historial de estudios:</h6>
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="patient_history_table">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Tipo de estudio</th>
+                                        <th>Modalidad</th>
+                                        <th>Estado</th>
+                                        <th>Médico solicitante</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Se cargará dinámicamente -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL HISTORIAL -->
+
+<!-- Modal para editar datos de contacto -->
+<div class="modal fade custom-modal" id="modal_patient_contact" tabindex="-1" aria-labelledby="patientContactModalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="patientContactModalLabel">Datos de contacto</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/update_patient_contact" id="Form_patient_contact">
+                    <input type="hidden" name="contact_patient_id" id="contact_patient_id">
+                    
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="contact_phone">Teléfono</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="contact_phone" name="contact_phone">
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="contact_email">Email</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="email" class="form-control" id="contact_email" name="contact_email">
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="contact_address">Dirección</label>
+                        </div>
+                        <div class="col-md-9">
+                            <textarea class="form-control" id="contact_address" name="contact_address" rows="3"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="contact_emergency_name">Contacto de emergencia</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="contact_emergency_name" name="contact_emergency_name" placeholder="Nombre del contacto">
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="contact_emergency_phone">Teléfono de emergencia</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="contact_emergency_phone" name="contact_emergency_phone">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success" form="Form_patient_contact">Guardar cambios</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- FIN MODAL CONTACTO -->

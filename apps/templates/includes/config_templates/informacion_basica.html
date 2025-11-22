@@ -1,0 +1,101 @@
+
+
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Informacion Basica</h6>
+                </div>  
+            </div>
+            
+            
+        </div>
+        <div class="card-body px-4 pt-3 pb-2">
+            <form id="form-institucional">
+                <div class="mb-3 row">
+                    <label for="institucion_nombre" class="col-sm-3 col-form-label">Nombre de la Institución</label>
+                    <div class="col-sm-9">
+                        <input type="text" class="form-control" id="institucion_nombre" name="institucion_nombre" placeholder="Ej: Sanatorio Central">
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label for="institucion_direccion" class="col-sm-3 col-form-label">Dirección</label>
+                    <div class="col-sm-9">
+                        <input type="text" class="form-control" id="institucion_direccion" name="institucion_direccion" placeholder="Ej: Av. Siempre Viva 123">
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label for="institucion_telefono" class="col-sm-3 col-form-label">Teléfono de contacto</label>
+                    <div class="col-sm-9">
+                        <input type="text" class="form-control" id="institucion_telefono" name="institucion_telefono" placeholder="Ej: +54 9 1234 567890">
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label for="institucion_mail" class="col-sm-3 col-form-label">Mail</label>
+                    <div class="col-sm-9">
+                        <input type="email" class="form-control" id="institucion_mail" name="institucion_mail" placeholder="Ej: contacto@sanatorio.com">
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label for="institucion_logo" class="col-sm-3 col-form-label">Logo institucional</label>
+                    <div class="col-sm-9 d-flex align-items-center">
+                        <input type="file" class="form-control" id="institucion_logo" name="institucion_logo" accept="image/*" style="max-width: 300px;">
+                        <button type="button" class="btn btn-primary ms-2" id="btn_logo_select">Seleccionar logo</button>
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <div class="col-sm-12 text-end">
+                        <button type="submit" class="btn btn-primary">Guardar</button>
+                    </div>
+                </div>
+            </form>
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                fetch('/api/institucional-info')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data && data.guid) {
+                            document.getElementById('institucion_nombre').value = data.name || '';
+                            document.getElementById('institucion_direccion').value = data.address || '';
+                            document.getElementById('institucion_telefono').value = data.phone || '';
+                            document.getElementById('institucion_mail').value = data.mail || '';
+                        }
+                    });
+
+                document.getElementById('btn_logo_select').addEventListener('click', function() {
+                    document.getElementById('institucion_logo').click();
+                });
+
+                document.getElementById('form-institucional').addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const formData = new FormData();
+                    formData.append('name', document.getElementById('institucion_nombre').value);
+                    formData.append('address', document.getElementById('institucion_direccion').value);
+                    formData.append('phone', document.getElementById('institucion_telefono').value);
+                    formData.append('mail', document.getElementById('institucion_mail').value);
+                    const logoInput = document.getElementById('institucion_logo');
+                    if (logoInput.files.length > 0) {
+                        formData.append('logo', logoInput.files[0]);
+                    }
+                    fetch('/api/institucional-info', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Información guardada correctamente');
+                        } else {
+                            alert('Error al guardar la información');
+                        }
+                    })
+                    .catch(() => alert('Error al guardar la información'));
+                });
+            });
+            </script>
+        </div>
+    </div>
+    </div>
+    </div>

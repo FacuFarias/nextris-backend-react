@@ -1,0 +1,56 @@
+<!-- Modal Procedencias/Orígenes -->
+<div class="modal fade custom-modal" id="modal_or" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true" >
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+
+          <div class="modal-header">
+            <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Procedencia</h1>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+          </div>
+
+          <div class="modal-body">
+            <form id="Form_origen" method="POST" action="/agregar_origen">
+                <input type="hidden" name="id_origin" id="id_origin">
+        
+                <div class="form-group row">
+                    <div class="col-md-8">
+                        <label for="Description_o">Descripción</label>
+                        <input type="text" class="form-control" id="Description_o" name="Description_o" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="especialidad">Grupo de Proveniencia</label><br>
+                        <select id="s_go" name="s_go">
+                        </select>
+                    </div>
+                </div>
+        
+                <div class="form-group row"> 
+                    <div class="col-md-6">                  
+                         <input type="checkbox" id="IsAc" name="IsAc"><label for="IsAc">Activo</label>  <br>
+                        <input type="checkbox" id="PatientCD" name="PatientCD"><label for="PatientCD">PatientCD</label><br>
+                        <input type="checkbox" id="IsEditingExaminationDisabled" name="IsEditingExaminationDisabled"><label for="IsEditingExaminationDisabled">Edición del examen</label><br>
+                        <input type="checkbox" id="PublicationWeb" name="PublicationWeb"><label for="PublicationWeb">Publicacion Web</label><br>
+                        <input type="checkbox" id="MandatoryOrder" name="MandatoryOrder"><label for="MandatoryOrder">Orden obligatoria</label><br>
+                    </div> 
+                    <div class="col-md-6">                  
+                        <input type="checkbox" id="IsChargeMandatory" name="IsChargeMandatory"><label for="IsChargeMandatory">Cargo Obligatorio</label><br>
+                        <input type="checkbox" id="IsPriceListMandatory" name="IsPriceListMandatory"><label for="IsPriceListMandatory">Obra social obligatoria</label><br>
+                        <input type="checkbox" id="IsOrderToNotify" name="IsOrderToNotify"><label for="IsOrderToNotify">Orden a notificar</label>
+                    </div> 
+                </div>
+                <div class="form-group row"> 
+                    <label for="AltCode_or">Codigo de transcodificación</label>
+                    <input type="text" class="AltCode_or" id="AltCode_or" name="AltCode_or" required>
+                </div>
+            
+        </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn bg-gradient-success save-changes">Guardar Procedencia</button>
+          </form>
+            <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+        </div>
+      
+        
+    </div>
+  </div>

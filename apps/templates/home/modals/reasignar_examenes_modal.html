@@ -1,0 +1,65 @@
+<!-- Modal Reasignar Exámenes -->
+<div class="modal fade custom-modal" id="modal_reasignar" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+  <div class="modal-dialog" z-index="-2">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h1 class="modal-title fs-5" id="exampleModalLabel">Reasignar estudio.</h1><br>
+        <!-- <h3 class="modal-title fs-5" id="exampleModalLabel">Una vez que se aplique el cambio, no hay forma de retroceder. Asegúrese que la acción es la correcta.</h3> -->
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <form method="POST" action="/reasignar_estudio" id="Form_reasignar">
+          <div class="row"><h2>Estudio a reasignar</h2></div>
+          <div class="form-group row">
+            <div class="col-md-3">
+              <label for="estudio_nombre">Nombre del paciente:</label>
+              <input type="text" class="form-control" id="estudio_nombre" name="estudio_nombre" required disabled>
+            </div>
+            <div class="col-md-3">
+              <label for="estudio_accesion">Accesion N</label>
+              <input type="text" class="form-control" id="estudio_accesion" name="estudio_accesion" required disabled>
+            </div>
+            <div class="col-md-3">
+              <label for="estudio_descripcion">Descripcion del estudio</label>
+              <input type="text" class="form-control" id="estudio_descripcion" name="estudio_descripcion" required disabled>
+            </div>
+            <div class="col-md-3">
+              <label for="estudio_fecha">Fecha de realizado</label>
+              <input type="text" class="form-control" id="estudio_fecha" name="estudio_fecha" required disabled>
+            </div>
+            <input type="hidden" id="estudio_id" name="estudio_id">
+          </div>
+          <div class="row mt-4"><h2>Paciente destino</h2></div>
+          <div class="form-group row">
+            <div class="col-md-4">
+              <label for="paciente_nombre">Nombre</label>
+              <input type="text" class="form-control" id="paciente_nombre" name="paciente_nombre" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="paciente_apellido">Apellido</label>
+              <input type="text" class="form-control" id="paciente_apellido" name="paciente_apellido" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="paciente_dni">DNI</label>
+              <input type="text" class="form-control" id="paciente_dni" name="paciente_dni" required disabled>
+            </div>
+            <input type="hidden" id="paciente_id" name="paciente_id">
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn-primary btn-save">
+              <i class="fas fa-check"></i>
+              <span class="btn-text">Confirmar</span>
+            </button>
+            <button type="button" class="btn-primary btn-back" data-bs-dismiss="modal">
+              <i class="fas fa-times"></i>
+              <span class="btn-text">Cancelar</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- FIN MODAL Reasignar Exámenes -->

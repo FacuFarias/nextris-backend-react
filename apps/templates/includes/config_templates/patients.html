@@ -1,0 +1,95 @@
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_group_patients">
+                        Buscar paciente
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_group_patients" name="search_group_patients">
+                </div>
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_patient" class="btn btn-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_patients" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        <span>Añadir paciente</span>
+                    </button>
+                </div>           
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-3">
+                    <h6>Lista de pacientes</h6>
+                </div>
+                <div class="col-md-2 d-flex align-items-center">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="show_inactive_patients">
+                        <label class="form-check-label" for="show_inactive_patients">
+                            Mostrar pacientes inactivos
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-7 d-flex justify-content-end">
+                    <button type="button" class="btn btn-primary botones_patient" id="b_editar_patient"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        <span>Editar</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary botones_patient" id="b_reset_password_patient" title="Reiniciar contraseña" disabled>
+                        <i class="fas fa-key" aria-hidden="true"></i>
+                        <span>Reiniciar contraseña</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary rounded-circle botones_patient delete_b" id="b_eliminar_patient"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                        <span>Desactivar</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary rounded-circle botones_patient" id="b_activar_patient" style="background-color: #28a745; display: none;" disabled>
+                        <i class="fas fa-undo" aria-hidden="true"></i>
+                        <span>Activar</span>
+                      </button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla_pacientes">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>DNI/Documento</th>
+                        <th>Fecha Nacimiento</th>   
+                        <th>Usuario</th>  
+                        <th>Estado</th>
+                        <th>Ult conexion</th>               
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>
+    <!-- <script src="{{ config.ASSETS_ROOT }}/js/patients.js"></script> -->

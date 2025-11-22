@@ -1,13 +1,54 @@
+// Este archivo contiene funciones JavaScript para la gestión de la distribución de informes en la aplicación NextRIS.
+// Muchas funciones que se utilizan en esta sección están definidas en otros archivos JS, como loader.js y toast.js, principalmente nrframework.js.
+// No se deberán crear funciones duplicadas aquí si ya existen en esos archivos.
 
+// Variable global para almacenar la ubicación seleccionada
+let selectedLocationId = null;
 
-//Objeto con datos de la orden
+//Objeto con datos de la orden - SIMPLIFICADO: Solo un estudio por admisión
 let OrderData = {
     patientId: null,
-    exams:[],
+    exam: null, // Ahora solo un examen en lugar de array
+    equip: null, // Equipo seleccionado
     urgencia: null,
     medico_solicitante: null,
-    obra_social:null,
+    obra_social: null,
 };
+
+function RellenarSelectRads(selectClass="rads") {
+    fetch('/get_rads_list',{
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Rellenar los selects con los datos obtenidos
+            var selectElements = document.querySelectorAll(`.${selectClass}`);
+            selectElements.forEach(selectElement => {
+                // Limpiar cualquier opción existente en el <select>
+                selectElement.innerHTML = '';
+
+                // Agregar la opción "Sin Asignar" al principio
+                var todasOption = document.createElement('option');
+                todasOption.value = '';
+                todasOption.text = 'Sin Asignar';
+                selectElement.appendChild(todasOption);
+
+                // Llenar el <select> con las opciones de los datos
+                data.data.forEach(item => {
+                    var option = document.createElement('option');
+                    option.value = item[0];
+                    option.text = item[1];
+                    selectElement.appendChild(option);
+                });
+            });
+        })
+        .catch(error => {
+            console.error('Error al obtener rads_list:', error);
+        });
+}
 
 function AsignarEquipo(TablaId) {
     var tabla = document.getElementById(TablaId);
@@ -20,40 +61,35 @@ function AsignarEquipo(TablaId) {
         var idequip = filaSeleccionada.getAttribute('data-id');
         console.log('Id del equipo:', textoColumna);
 
-        // Buscar la fila seleccionada en la otra tabla
-        var tablaEstudiosSelec = document.getElementById('tabla-estudios-selec');
-        var tbodyEstudiosSelec = tablaEstudiosSelec.querySelector('tbody');
-        var filaSeleccionadaEstudiosSelec = tbodyEstudiosSelec.querySelector('tr.fila-seleccionada');
+        // Guardar el equipo en OrderData
+        OrderData.equip = idequip;
 
-        if (filaSeleccionadaEstudiosSelec) {
-            var columnasEstudiosSelec = filaSeleccionadaEstudiosSelec.querySelectorAll('td');
-            columnasEstudiosSelec[2].textContent = textoColumna; // Insertar el texto en la tercera columna
-            var idExam = filaSeleccionadaEstudiosSelec.getAttribute('data-id');
-            var examenExistente = OrderData.exams.find(examen => examen.examId === idExam);
-            if (examenExistente) {
-                examenExistente.equip = idequip;
-            }
+        // Marcar visualmente que se seleccionó el equipo
+        var divExamen = document.getElementById('pills-examen-tab');
+        divExamen.classList.add('bg-success');
+        divExamen.classList.remove('bg-danger');
 
-            // Iterar sobre la tabla-estudios-selec para verificar si todas las filas tienen asignado un equipo
-            var todasAsignadas = true;
-            var filas = tbodyEstudiosSelec.querySelectorAll('tr');
-            filas.forEach(fila => {
-                var columnas = fila.querySelectorAll('td');
-                if (!columnas[2].textContent.trim()) {
-                    todasAsignadas = false;
-                }
-            });
+        // Mostrar el equipo seleccionado en la UI
+        var equipoSeleccionadoSpan = document.getElementById('equipo-seleccionado');
+        if (equipoSeleccionadoSpan) {
+            equipoSeleccionadoSpan.textContent = `Equipo: ${textoColumna}`;
+            equipoSeleccionadoSpan.classList.remove('d-none');
+        }
 
-            if (todasAsignadas) {
-                var divExamen = document.getElementById('pills-examen-tab');
-                divExamen.classList.add('bg-success');
-                divExamen.classList.remove('bg-danger');
-            }
+        // Actualizar resumen en prestación
+        var resumenEquipo = document.getElementById('resumen-equipo');
+        if (resumenEquipo) {
+            resumenEquipo.textContent = textoColumna;
+        }
+
+        // Ir automáticamente a la pestaña de Prestación
+        var pillPrestButton = document.querySelector('[data-bs-target="#pills-prest"]');
+        if (pillPrestButton) {
+            var tab = new bootstrap.Tab(pillPrestButton);
+            tab.show();
         }
     }
 }
-
-
 
 function FinalizarOrden() {
     var pillPaciente = document.getElementById('pills-paciente-tab');
@@ -76,13 +112,26 @@ function FinalizarOrden() {
     }
 
     if (allSuccess) {
+        // Preparar datos para enviar (estructura simplificada)
+        const orderToSend = {
+            patientId: OrderData.patientId,
+            exams: [{
+                examId: OrderData.exam.examId,
+                title: OrderData.exam.title,
+                equip: OrderData.equip,
+                medico_solicitante: OrderData.medico_solicitante,
+                obra_social: OrderData.obra_social
+            }],
+            urgencia: OrderData.urgencia
+        };
+
         // Enviar OrderData al backend si todos los datos están completos
         fetch('/crear_worklist', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(OrderData)
+            body: JSON.stringify(orderToSend)
         })
         .then(response => {
             if (response.ok) {
@@ -92,28 +141,44 @@ function FinalizarOrden() {
             }
         })
         .then(data => {
-            showToast('Perfecto!', 'Orden creada exitosamente:', "/static/templates/includes/toast/toast_success.html");
+            showToast('Perfecto!', 'Orden creada exitosamente:', "/templates/includes/toast/toast_success.html");
+            
             // Limpiar OrderData
             OrderData.patientId = null;
-            OrderData.exams = [];
+            OrderData.exam = null;
+            OrderData.equip = null;
             OrderData.medico_solicitante = null;
             OrderData.obra_social = null;
-            // Aquí puedes agregar lógica adicional después de enviar la orden exitosamente
 
-            // Vaciar la tabla de estudios seleccionados
-            var tablaEstudiosSelec = document.getElementById('tabla-estudios-selec');
-            var tbodyEstudiosSelec = tablaEstudiosSelec.querySelector('tbody');
-            while (tbodyEstudiosSelec.firstChild) {
-                tbodyEstudiosSelec.removeChild(tbodyEstudiosSelec.firstChild);
+            // Limpiar la UI
+            var estudioSeleccionadoDiv = document.getElementById('estudio-seleccionado-container');
+            if (estudioSeleccionadoDiv) {
+                estudioSeleccionadoDiv.innerHTML = '';
+                estudioSeleccionadoDiv.classList.add('d-none');
             }
+
+            var equipoSeleccionadoSpan = document.getElementById('equipo-seleccionado');
+            if (equipoSeleccionadoSpan) {
+                equipoSeleccionadoSpan.textContent = '';
+                equipoSeleccionadoSpan.classList.add('d-none');
+            }
+
+            // Limpiar resúmenes
+            var resumenPaciente = document.getElementById('resumen-paciente');
+            var resumenEstudio = document.getElementById('resumen-estudio');
+            var resumenEquipo = document.getElementById('resumen-equipo');
+            if (resumenPaciente) resumenPaciente.textContent = 'No seleccionado';
+            if (resumenEstudio) resumenEstudio.textContent = 'No seleccionado';
+            if (resumenEquipo) resumenEquipo.textContent = 'No seleccionado';
+
+            // Limpiar li_dni
+            var li_dni = document.getElementById('dni-item');
+            if (li_dni) li_dni.innerText = '';
 
             // Rellenar nuevamente tabla-estudios
             RellenarTabla('tabla-estudios', `/get_exams_adm`);
 
             // Remover clases de éxito en las pestañas
-            var pillPaciente = document.getElementById('pills-paciente-tab');
-            var pillExamen = document.getElementById('pills-examen-tab');
-
             pillPaciente.classList.remove('bg-success', 'bg-danger');
             pillExamen.classList.remove('bg-success', 'bg-danger');
 
@@ -131,104 +196,15 @@ function FinalizarOrden() {
         })
         .catch(error => {
             console.error('Error:', error);
+            showToast('Error', 'No se pudo crear la orden', "/templates/includes/toast/toast_alert.html");
         });
 
-        console.log('Datos de la orden finalizada:', OrderData);
+        console.log('Datos de la orden finalizada:', orderToSend);
     } else {
         // Mostrar el toast con los mensajes de error
-        showToast('Ha ocurrido un problema', messages.join('<br>'), "/static/templates/includes/toast/toast_alert.html");
+        showToast('Ha ocurrido un problema', messages.join('<br>'), "/templates/includes/toast/toast_alert.html");
     }
     
-}
-function RellenarTabla(TablaId, route) {
-    var tabla = document.getElementById(TablaId);
-    var tbody_ = tabla.querySelector('tbody');
-    fetch(route)
-        .then(response => response.json())
-        .then(data => {
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
-
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-}
-//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
-
-function ConfigurarTabla(TablaId,botonesClass){
-    
-    var tabla = document.getElementById(TablaId);
-    var tbody_g= tabla.querySelector('tbody');
-    tbody_g.addEventListener('click', function (event) {
-        var filas = tbody_g.querySelectorAll('tr');
-        for (var i = 0; i < filas.length; i++) {
-            filas[i].classList.remove('fila-seleccionada');
-        }
-        
-        var fila = event.target.closest('tr');
-        if (fila) {
-            fila.classList.add('fila-seleccionada');            
-            var botones = document.getElementsByClassName(botonesClass);
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = false;
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-danger');
-                } else {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-success');
-                }
-            }
-        } else {
-            var botones = document.getElementsByClassName('botones');
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = true;
-                
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-danger');
-                    boton.classList.add('btn-secondary');
-                } else {
-                    boton.classList.remove('btn-success');
-                    boton.classList.add('btn-secondary');
-                }
-            }
-        }
-        
-    });
 }
 
 function SeleccionarPaciente(TablaId){
@@ -242,325 +218,515 @@ function SeleccionarPaciente(TablaId){
         console.log(filaSeleccionada.dataset.id)
         OrderData.patientId=filaSeleccionada.dataset.id
         var tds = filaSeleccionada.querySelectorAll('td');
-        li_dni.innerText = "Paciente seleccionado: " + tds[0].innerText + ", " + tds[1].innerText;
+        var nombreCompleto = tds[0].innerText + ", " + tds[1].innerText;
+        li_dni.innerText = "Paciente seleccionado: " + nombreCompleto;
         divPaciente.classList.add('bg-success'); // Agrega la clase de Bootstrap para fondo verde
         divPaciente.classList.remove('bg-danger'); // Agrega la clase de Bootstrap para fondo verde
+
+        // Actualizar resumen en prestación
+        var resumenPaciente = document.getElementById('resumen-paciente');
+        if (resumenPaciente) {
+            resumenPaciente.textContent = nombreCompleto;
+        }
+
+        // Ir automáticamente a la pestaña de Examen
+        var pillExamenButton = document.querySelector('[data-bs-target="#pills-examen"]');
+        if (pillExamenButton) {
+            var tab = new bootstrap.Tab(pillExamenButton);
+            tab.show();
+        }
     } else {
         li_dni.innerText = "No hay paciente seleccionado";
         divPaciente.classList.remove('bg-success'); // Remueve la clase de Bootstrap para fondo verde si no hay fila seleccionada
     }
 } 
 
-function ConfigTablaEstudios(Tabla1Id,Button1Id,Tabla2Id){
-    var tablaEstudios = document.getElementById(Tabla1Id);
+
+
+// NUEVA FUNCIÓN SIMPLIFICADA: Seleccionar un solo estudio y mostrar equipos
+function ConfigTablaEstudiosSimplificada(TablaId) {
+    var tablaEstudios = document.getElementById(TablaId);
     var tbodyest = tablaEstudios.querySelector('tbody');
 
-    var boton_sel = document.getElementById(Button1Id);
-    boton_sel.addEventListener('click', AgregarEstudio);
-    document.getElementById(Tabla1Id).addEventListener("dblclick",AgregarEstudio)
-
-    function AgregarEstudio() {
-        var filaSeleccionada = tbodyest.querySelector('.fila-seleccionada');
-        if (filaSeleccionada) {
-        // Clona la fila seleccionada
-        filaSeleccionada.classList.remove('fila-seleccionada');
-        var fullRowData = filaSeleccionada.innerHTML;
-
-        // Añade la fila clonada a la tabla de Estudios Seleccionados
-        var tablaEstudiosSelec = document.getElementById(Tabla2Id);
-        var tbodyEstudiosSelec = tablaEstudiosSelec.querySelector('tbody');
-        var columnas = filaSeleccionada.getElementsByTagName('td');
-        var contenidoColumna1 = columnas[0].textContent.trim(); // Contenido de la primera columna
-        var contenidoColumna2 = columnas[1].textContent.trim(); 
-        var nuevaFila = document.createElement('tr');
-        nuevaFila.innerHTML = `<td>${contenidoColumna1}</td><td>${contenidoColumna2}</td><td></td>`;
-        nuevaFila.setAttribute('data-full',fullRowData)
-
-        var idExam=filaSeleccionada.getAttribute('data-id');
-        nuevaFila.setAttribute('data-id',idExam)
-        tbodyEstudiosSelec.appendChild(nuevaFila);
-        
-        
-        // Restaura el estilo del botón
-        boton_sel.classList.remove('btn-success');
-        boton_sel.classList.add('btn-secondary');
-        boton_sel.disabled = true;
-        }
-
-        // Agrego la clase al pill para indicar que ya está en condiciones esta pestana. Ademas le saco el bg-danger.
-        //Aca en realidad no sería. Deberia ser al agregar una nueva máquina, a un estudio seleccionado, checkear si todos los estudios tienen maquina seleccionada. Y ahi si le mando el success
-        // var divExamen = document.getElementById('pills-examen-tab');
-        // divExamen.classList.add('bg-success');
-        // divExamen.classList.remove('bg-danger');
-        var columnas = filaSeleccionada.querySelectorAll('td');
-        var codigoEst = columnas[0].textContent.trim(); // Contenido de la primera columna
-        var descEst = columnas[1].textContent.trim();
-        
-        var examen = {
-            examId: idExam,
-            title:codigoEst + " - " + descEst
-        }
-        OrderData.exams.push(examen);
-
-
-        // Quito el success ya que hay un estudio agregado sin equipo asignado.
-        var divExamen = document.getElementById('pills-examen-tab');
-        divExamen.classList.remove('bg-success');
-        divExamen.classList.remove('bg-danger');
-        
-        // Ahora creo una card
-        fetch('/get_block_prestacion')
-        .then(response => response.text())
-        .then(data => {
-            var container = document.getElementById('conteiner_blocks_prest');
-            console.log("idprefix: ",examen)
-            var idPrefix = codigoEst
-            var uniqueIdMedicoSolicitante = `${idPrefix}_ms`;
-            var uniqueIdObraSocial = `${idPrefix}_os`;
-            var insertId=`id='${idExam}'`
-            console.log("dataid:",idExam)
-            var cardHtml = data
-                .replace('<!-- IdEstudio -->', examen.title)
-                .replace('id="cardId"', insertId)
-                .replace('class="form-control medico_solicitante"', `class="form-control medico_solicitante"" id="${uniqueIdMedicoSolicitante}" name="${uniqueIdMedicoSolicitante}"`)
-                .replace('class="form-control obra_social"', `class="form-control obra_social" id="${uniqueIdObraSocial}" name="${uniqueIdObraSocial}"`);
-                
-            container.insertAdjacentHTML('beforeend', cardHtml);
-
-            // Añadir event listeners a los selects creados
-            document.getElementById(uniqueIdMedicoSolicitante).addEventListener('change', function(event) {
-                console.log('Cambio en medico solicitante:', event.target.id);
-                codigo=event.target.id.substring(0, 3)
-                OrderData.exams.forEach(function(examen){
-                    var idPrefix = examen.title.substring(0, 3)
-                    console.log("idprefix:",idPrefix)
-                    if(idPrefix==codigo){
-                        examen.medico_solicitante=document.getElementById(event.target.id).value
-                    }
-                })
-            });
-            document.getElementById(uniqueIdObraSocial).addEventListener('change', function(event) {
-                console.log('Cambio en obra social:', event.target.id);
-                codigo=event.target.id.substring(0, 3)
-                OrderData.exams.forEach(function(examen){
-                    var idPrefix = examen.title.substring(0, 3)
-                    if(idPrefix==codigo){
-                        examen.obra_social=document.getElementById(event.target.id).value
-                    }
-                })
-            });
-            
-            RellenarSelectByClass("medico_solicitante","Description","public.isrequestingphysician")
-            RellenarSelectByClass("obra_social","Description","public.ispricelist")
-
-        })
-        .catch(error => {
-            console.error('Error al cargar el archivo block_prestacion.html:', error);
-        });
-
-
-        filaSeleccionada.remove();
-    }
-
+    // Al hacer click en un estudio
     tbodyest.addEventListener('click', function (event) {
-        var filas = tbodyest.querySelectorAll('tr');
-        for (var i = 0; i < filas.length; i++) {
-            filas[i].classList.remove('fila-seleccionada');
-        }
-
         var fila = event.target.closest('tr');
-        if (fila) {
-            fila.classList.add('fila-seleccionada');
+        if (!fila) return;
 
-            boton_sel.classList.remove('btn-secondary');
-            boton_sel.classList.add('btn-success');
-            boton_sel.disabled = false;
-            
-        } else {
-            boton_sel.classList.remove('btn-success');
-            boton_sel.classList.add('btn-secondary');
-            boton_sel.disabled = true;
-        }
+        // Remover selección previa
+        var filas = tbodyest.querySelectorAll('tr');
+        filas.forEach(f => f.classList.remove('fila-seleccionada'));
+
+        // Marcar la fila como seleccionada
+        fila.classList.add('fila-seleccionada');
+
+        // Obtener datos del estudio
+        var columnas = fila.querySelectorAll('td');
+        var codigoEst = columnas[0].textContent.trim();
+        var descEst = columnas[1].textContent.trim();
+        var idExam = fila.getAttribute('data-id');
+
+        // Guardar en OrderData
+        OrderData.exam = {
+            examId: idExam,
+            title: codigoEst + " - " + descEst
+        };
+
+        console.log('Estudio seleccionado:', OrderData.exam);
+
+        // Mostrar el estudio seleccionado en la UI
+        MostrarEstudioSeleccionado(codigoEst, descEst);
+
+        // Cargar equipos disponibles para este estudio
+        CargarEquiposParaEstudio(descEst);
     });
 
-}
-
-function ConfigTablaSeleccionados(Tabla1Id, Button1Id, Tabla2Id) {
-    var tbodyEquipos = document.getElementById('tbody-equipos');
-    var tablaSelec = document.getElementById(Tabla1Id);
-    var tbodySelec = tablaSelec.querySelector('tbody');
-    
-    var boton_quitar = document.getElementById(Button1Id);
-    boton_quitar.addEventListener('click', QuitarEstudio);
-
-    document.getElementById(Tabla1Id).addEventListener("dblclick", QuitarEstudio);
-
-    function QuitarEstudio() {
-        var filaSeleccionadaSelec = tbodySelec.querySelector('.fila-seleccionada');
-        console.log(filaSeleccionadaSelec.getAttribute('data-full'));
-
-        if (filaSeleccionadaSelec) {
-            // Obtener el id del examen a eliminar
-            var data2delete = filaSeleccionadaSelec.getAttribute('data-id');
-            filaSeleccionadaSelec.classList.remove('fila-seleccionada');
-
-            // Mover la fila de vuelta a la tabla de estudios disponibles
-            var tablaEstudios = document.getElementById(Tabla2Id);
-            var tbodyEstudios = tablaEstudios.querySelector('tbody');
-            var filaCompleta = document.createElement('tr');
-            filaCompleta.innerHTML = filaSeleccionadaSelec.getAttribute('data-full');
-            tbodyEstudios.appendChild(filaCompleta);
-
-            // Restaurar el estilo del botón
-            boton_quitar.classList.remove('btn-success');
-            boton_quitar.classList.add('btn-secondary');
-            boton_quitar.disabled = true;
-
-            // Eliminar de OrderData
-            console.log("data2delete:", data2delete);
-            OrderData.exams = OrderData.exams.filter(examen => examen.examId !== data2delete);
-
-            // Quitar la fila seleccionada
-            filaSeleccionadaSelec.remove();
-
-            // Verificar si no queda ningún tr en tbodySelec
-            console.log(tbodySelec.querySelectorAll('tr').length)
-            if (tbodySelec.querySelectorAll('tr').length == 0) {
-                var divExamen = document.getElementById('pills-examen-tab');
-                divExamen.classList.remove('bg-success');
-            }
-        }
-    }
-
-    tbodySelec.addEventListener('click', function (event) {
-        var filas = tbodySelec.querySelectorAll('tr');
-        for (var i = 0; i < filas.length; i++) {
-            filas[i].classList.remove('fila-seleccionada');
-        }
-
+    // Doble click también selecciona
+    document.getElementById(TablaId).addEventListener("dblclick", function(event) {
         var fila = event.target.closest('tr');
         if (fila) {
-            fila.classList.add('fila-seleccionada');
-            const columnas = fila.getElementsByTagName('td');
-            
-            var exam_orden = columnas[1].textContent.trim();
-
-            final_route = "/get_equip_for_exam?exam=" + exam_orden;
-            
-            fetch(final_route)
-                .then(response => response.json())
-                .then(data => {
-                    tbodyEquipos.innerHTML = '';
-                    // Llenar la tabla con los datos recibidos
-                    data.forEach(item => {
-                        const nuevaFila = document.createElement('tr');
-                        nuevaFila.setAttribute('data-id', item[0]); // Almacenar el primer valor como ID
-                        nuevaFila.innerHTML = `<td>${item[1]}</td>`; // Mostrar solo el segundo valor
-                        tbodyEquipos.appendChild(nuevaFila);
-                    });
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                });
-
-            boton_quitar.classList.remove('btn-secondary');
-            boton_quitar.classList.add('btn-success');
-            boton_quitar.disabled = false;
-            
-        } else {
-            boton_quitar.classList.remove('btn-success');
-            boton_quitar.classList.add('btn-secondary');
-            boton_quitar.disabled = true;
+            fila.click(); // Simular click simple
         }
+    });
+}
+
+// Mostrar el estudio seleccionado visualmente
+function MostrarEstudioSeleccionado(codigo, descripcion) {
+    var container = document.getElementById('estudio-seleccionado-container');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="card shadow-lg mb-3">
+            <div class="card-header bg-gradient-primary">
+                <h6 class="mb-0">
+                    <i class="fas fa-check-circle me-2"></i>Estudio Seleccionado
+                </h6>
+            </div>
+            <div class="card-body">
+                <p class="mb-1"><strong>Código:</strong> ${codigo}</p>
+                <p class="mb-0"><strong>Descripción:</strong> ${descripcion}</p>
+                <span id="equipo-seleccionado" class="badge bg-success mt-2 d-none"></span>
+            </div>
+        </div>
+    `;
+    container.classList.remove('d-none');
+
+    // Actualizar resumen en prestación
+    var resumenEstudio = document.getElementById('resumen-estudio');
+    if (resumenEstudio) {
+        resumenEstudio.textContent = `${codigo} - ${descripcion}`;
+    }
+}
+
+// Cargar equipos disponibles para el estudio seleccionado (filtrados por ubicación)
+function CargarEquiposParaEstudio(descripcionEstudio) {
+    var tbodyEquipos = document.getElementById('tbody-equipos');
+    
+    // Construir URL con location_id si está seleccionado
+    let final_route = "/get_equip_for_exam?exam=" + descripcionEstudio;
+    if (selectedLocationId) {
+        final_route += "&location_id=" + selectedLocationId;
+        console.log('[DEBUG CargarEquiposParaEstudio] Cargando equipos para estudio:', descripcionEstudio, 'location_id:', selectedLocationId);
+    } else {
+        console.log('[DEBUG CargarEquiposParaEstudio] Cargando equipos sin filtro de ubicación para estudio:', descripcionEstudio);
+    }
+    
+    fetch(final_route)
+        .then(response => response.json())
+        .then(data => {
+            tbodyEquipos.innerHTML = '';
+            // Llenar la tabla con los datos recibidos
+            data.forEach(item => {
+                const nuevaFila = document.createElement('tr');
+                nuevaFila.setAttribute('data-id', item[0]); // Almacenar el primer valor como ID
+                nuevaFila.innerHTML = `<td>${item[1]}</td>`; // Mostrar solo el segundo valor
+                tbodyEquipos.appendChild(nuevaFila);
+            });
+
+            // Mostrar mensaje si no hay equipos
+            if (data.length === 0) {
+                const mensajeUbicacion = selectedLocationId ? ' para esta ubicación' : '';
+                tbodyEquipos.innerHTML = `<tr><td class="text-center text-muted">No hay equipos disponibles${mensajeUbicacion}</td></tr>`;
+            }
+            
+            console.log('[DEBUG CargarEquiposParaEstudio] Equipos cargados:', data.length);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            tbodyEquipos.innerHTML = '<tr><td class="text-center text-danger">Error al cargar equipos</td></tr>';
+        });
+}
+
+// Función global para cargar médicos solicitantes por ubicación
+function cargarMedicosSolicitantesPorLocation(locationId) {
+    console.log('[DEBUG] Cargando médicos solicitantes para location_id:', locationId);
+    
+    fetch('/rellenar_select_cond_id', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            dNeeded: 'Description',
+            TableId: 'nextris.isrequestingphysician',
+            idCond: locationId,
+            colCond: 'location_id'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('[DEBUG] Médicos solicitantes recibidos:', data.data ? data.data.length : 0);
+        
+        // Actualizar el select de médico solicitante
+        const selectElement = document.getElementById('medico_solicitante');
+        if (!selectElement) return;
+        
+        // Guardar valor actual
+        const currentValue = selectElement.value;
+        
+        // Limpiar opciones
+        selectElement.innerHTML = '';
+        
+        // Agregar opción por defecto
+        var defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.text = 'Sin Asignar';
+        selectElement.appendChild(defaultOption);
+        
+        // Llenar con nuevos datos
+        if (data.data && data.data.length > 0) {
+            data.data.forEach(item => {
+                var option = document.createElement('option');
+                option.value = item[0]; // guid
+                option.text = item[1];  // description
+                selectElement.appendChild(option);
+            });
+        }
+        
+        // Restaurar valor si existe
+        if (currentValue) {
+            selectElement.value = currentValue;
+        }
+    })
+    .catch(error => {
+        console.error('Error al cargar médicos solicitantes:', error);
+    });
+}
+
+// Función global para cargar obras sociales por ubicación
+function cargarObrasSocialesPorLocation(locationId) {
+    console.log('[DEBUG] Cargando obras sociales para location_id:', locationId);
+    
+    fetch('/rellenar_select_cond_id', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            dNeeded: 'Description',
+            TableId: 'nextris.ispricelist',
+            idCond: locationId,
+            colCond: 'location_id'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('[DEBUG] Obras sociales recibidas:', data.data ? data.data.length : 0);
+        
+        // Actualizar el select de obra social
+        const selectElement = document.getElementById('obra_social');
+        if (!selectElement) return;
+        
+        // Guardar valor actual
+        const currentValue = selectElement.value;
+        
+        // Limpiar opciones
+        selectElement.innerHTML = '';
+        
+        // Agregar opción por defecto
+        var defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.text = 'Sin Asignar';
+        selectElement.appendChild(defaultOption);
+        
+        // Llenar con nuevos datos
+        if (data.data && data.data.length > 0) {
+            data.data.forEach(item => {
+                var option = document.createElement('option');
+                option.value = item[0]; // guid
+                option.text = item[1];  // description
+                selectElement.appendChild(option);
+            });
+        }
+        
+        // Restaurar valor si existe
+        if (currentValue) {
+            selectElement.value = currentValue;
+        }
+    })
+    .catch(error => {
+        console.error('Error al cargar obras sociales:', error);
+    });
+}
+
+// Función global para cargar pacientes por ubicación (con filtrado por patientdomain)
+function cargarPacientesPorLocation(locationId, searchTerm = '') {
+    console.log('[DEBUG] Cargando pacientes - locationId:', locationId, 'searchTerm:', searchTerm);
+    fetch('/get_patients_by_location', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            location_id: locationId,
+            search_term: searchTerm
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('[DEBUG] Pacientes recibidos:', data.length, 'pacientes');
+        const tabla = document.getElementById('tabla-paciente');
+        const tbody = tabla.querySelector('tbody');
+        tbody.innerHTML = '';
+        
+        if (data && data.length > 0) {
+            data.forEach(paciente => {
+                const tr = document.createElement('tr');
+                tr.classList.add('patient-row');
+                tr.dataset.id = paciente[0]; // guid
+                tr.innerHTML = `
+                    <td>${paciente[1] || ''}</td>
+                    <td>${paciente[2] || ''}</td>
+                    <td>${paciente[3] || ''}</td>
+                    <td>${paciente[4] || ''}</td>
+                    <td>${paciente[5] || ''}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">No se encontraron pacientes</td></tr>';
+        }
+    })
+    .catch(error => {
+        console.error('Error cargando pacientes:', error);
+        showToast('Error', 'No se pudieron cargar los pacientes.', '/static/templates/includes/toast/toast_alert.html');
     });
 }
 
 document.addEventListener("DOMContentLoaded", function() {
 
+    // --- Alta rápida de paciente ---
+    var formPacienteRapido = document.getElementById('form_paciente_rapido');
+    console.log('Buscando formulario de paciente rápido en admisión:', formPacienteRapido);
+    
+    if (formPacienteRapido) {
+        console.log('Formulario encontrado, agregando event listener');
+        formPacienteRapido.addEventListener('submit', function(e) {
+            e.preventDefault();
+            console.log('Formulario enviado, procesando datos...');
+            
+            const form = e.target;
+            
+            // Obtener valores de los campos
+            const nombre = form.querySelector('[name="nombre"]').value;
+            const apellido = form.querySelector('[name="apellido"]').value;
+            const dni = form.querySelector('[name="dni"]').value;
+            const fecha_nac = form.querySelector('[name="fecha_nac"]').value;
+            const sexo = form.querySelector('[name="sexo"]').value;
+            
+            const datos = {
+                nombre: nombre,
+                apellido: apellido,
+                dni: dni,
+                fecha_nac: fecha_nac,
+                sexo: sexo
+            };
+            
+            console.log('Datos a enviar:', datos);
+            
+            fetch('/agregar_paciente_rapido', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(datos)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.guid) {
+                    showToast('Paciente agregado', 'El paciente fue creado correctamente.', '/static/templates/includes/toast/toast_success.html');
+                    // Cerrar el modal
+                    var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('modal_np'));
+                    modal.hide();
+                    // Limpiar el formulario
+                    form.reset();
+
+                    // Refrescar la tabla de pacientes y seleccionar el nuevo
+                    if (selectedLocationId) {
+                        cargarPacientesPorLocation(selectedLocationId);
+                    }
+                    setTimeout(function() {
+                        var tabla = document.getElementById('tabla-paciente');
+                        var tbody_ = tabla.querySelector('tbody');
+                        var filas = tbody_.querySelectorAll('tr');
+                        let found = false;
+                        filas.forEach(function(fila) {
+                            if (fila.dataset.id === data.guid) {
+                                // Simular selección
+                                filas.forEach(f => f.classList.remove('fila-seleccionada'));
+                                fila.classList.add('fila-seleccionada');
+                                // Ejecutar SeleccionarPaciente
+                                SeleccionarPaciente('tabla-paciente');
+                                found = true;
+                            }
+                        });
+                        if (!found) {
+                            showToast('Advertencia', 'Paciente agregado pero no se pudo seleccionar automáticamente.', '/static/templates/includes/toast/toast_alert.html');
+                        }
+                    }, 600);
+                } else {
+                    showToast('Error', 'No se pudo agregar el paciente.', '/static/templates/includes/toast/toast_alert.html');
+                }
+            })
+            .catch(() => {
+                showToast('Error', 'No se pudo agregar el paciente.', '/static/templates/includes/toast/toast_alert.html');
+            });
+        });
+    } else {
+        console.error('No se encontró el formulario form_paciente_rapido en el DOM');
+    }
+
     var boton=document.getElementById("b_sel_pac_para_adm")
     boton.addEventListener("click",function(){SeleccionarPaciente('tabla-paciente')})
 
     RellenarTabla('tabla-estudios',`/get_exams_adm`)
-    RellenarTabla('tabla-paciente',`/get_patients_min`)
 
-    RellenarSelect("tipo_examen","Description","public.IsModality")
-    RellenarSelect("parte_cuerpo","Description","public.IsAnatomicalPart")
-    ConfigFiltrarSelect('tipo_examen', 'tabla-estudios',2)
-    ConfigFiltrarSelect('parte_cuerpo', 'tabla-estudios',3)
+    RellenarSelect("tipo_examen","externalcode","nextris.IsModality")
+    RellenarSelect("parte_cuerpo","Description","nextris.IsAnatomicalPart")
+    
+    // Configurar filtrado combinado de tipo_examen (columna 2) y parte_cuerpo (columna 3)
+    ConfigMultiSelect('tabla-estudios', 'tipo_examen', 2, 'parte_cuerpo', 3)
     ConfigFiltrarText('l_exam', 'tabla-estudios',1)
 
     ConfigurarTabla('tabla-paciente','botones_sp')
+    // Doble click en paciente selecciona igual que el botón
+    document.getElementById('tabla-paciente').addEventListener('dblclick', function(){SeleccionarPaciente('tabla-paciente')});
+
+    // =============================================
+    // CONFIGURACIÓN DE FILTRADO POR UBICACIÓN
+    // =============================================
+    const locationSelector = document.getElementById('location_selector');
+    const inputBusqueda = document.getElementById('busquedaSwitch');
+    const btnSearch = document.getElementById('b_search');
+    
+    // Cargar ubicaciones del usuario
+    fetch('/get_user_locations')
+        .then(response => response.json())
+        .then(locations => {
+            if (locations && locations.length > 0) {
+                locations.forEach(loc => {
+                    const option = document.createElement('option');
+                    option.value = loc[0]; // guid
+                    option.textContent = `${loc[1]} (${loc[2]})`; // name (code)
+                    if (loc[4]) { // is_default
+                        option.selected = true;
+                        selectedLocationId = loc[0];
+                    }
+                    locationSelector.appendChild(option);
+                });
+                
+                // Si hay una ubicación por defecto, cargar pacientes y listas
+                if (selectedLocationId) {
+                    cargarPacientesPorLocation(selectedLocationId);
+                    cargarMedicosSolicitantesPorLocation(selectedLocationId);
+                    cargarObrasSocialesPorLocation(selectedLocationId);
+                    inputBusqueda.disabled = false;
+                    btnSearch.disabled = false;
+                }
+            } else {
+                showToast('Advertencia', 'No tiene ubicaciones asignadas.', '/static/templates/includes/toast/toast_alert.html');
+            }
+        })
+        .catch(error => {
+            console.error('Error cargando ubicaciones:', error);
+            showToast('Error', 'No se pudieron cargar las ubicaciones.', '/static/templates/includes/toast/toast_alert.html');
+        });
+    
+    // Evento cambio de ubicación
+    locationSelector.addEventListener('change', function() {
+        selectedLocationId = this.value;
+        if (selectedLocationId) {
+            inputBusqueda.value = '';
+            cargarPacientesPorLocation(selectedLocationId);
+            cargarMedicosSolicitantesPorLocation(selectedLocationId);
+            cargarObrasSocialesPorLocation(selectedLocationId);
+            inputBusqueda.disabled = false;
+            btnSearch.disabled = false;
+            
+            // Si hay un estudio seleccionado, recargar equipos con el nuevo filtro de ubicación
+            if (OrderData.exam) {
+                // Obtener la descripción del estudio desde la tabla
+                const filaEstudio = document.querySelector('#tabla-estudios tr.fila-seleccionada');
+                if (filaEstudio) {
+                    const celdaDescripcion = filaEstudio.cells[0]; // Primera celda tiene la descripción
+                    if (celdaDescripcion) {
+                        const descripcionEstudio = celdaDescripcion.textContent.trim();
+                        console.log('[DEBUG] Recargando equipos por cambio de ubicación para estudio:', descripcionEstudio);
+                        CargarEquiposParaEstudio(descripcionEstudio);
+                    }
+                }
+            }
+        } else {
+            // Limpiar tabla si no hay ubicación seleccionada
+            const tabla = document.getElementById('tabla-paciente');
+            const tbody = tabla.querySelector('tbody');
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">Seleccione una ubicación</td></tr>';
+            inputBusqueda.disabled = true;
+            btnSearch.disabled = true;
+        }
+    });
+    
+    // Búsqueda con el botón
+    if (btnSearch) {
+        btnSearch.addEventListener('click', function() {
+            if (selectedLocationId) {
+                cargarPacientesPorLocation(selectedLocationId, inputBusqueda.value);
+            }
+        });
+    }
+    
+    // Buscar al presionar Enter en el input
+    if (inputBusqueda) {
+        inputBusqueda.addEventListener('keyup', function(e) {
+            if (e.key === 'Enter' && selectedLocationId) {
+                cargarPacientesPorLocation(selectedLocationId, inputBusqueda.value);
+            }
+        });
+    }
+
     ConfigurarTabla('tabla-equipos-p-exam','sel_equip')
 
     var boton=document.getElementById("sel-equip")
     boton.addEventListener("click",function(){AsignarEquipo('tabla-equipos-p-exam')})
     document.getElementById('tabla-equipos-p-exam').addEventListener("dblclick",function(){AsignarEquipo('tabla-equipos-p-exam')})
 
-    // Prestacion
+    // Prestacion - Los selects de médico y obra social se cargan por ubicación (ver más arriba)
+    // Ya no usamos RellenarSelect general, sino las funciones específicas por ubicación
 
-    // RellenarSelect("medico_solicitante","Description","public.isrequestingphysician")
-    // RellenarSelect("obra_social","Description","public.ispricelist")
+    // Event listeners para guardar datos en OrderData
+    document.getElementById('medico_solicitante').addEventListener('change', function(event) {
+        OrderData.medico_solicitante = event.target.value;
+        console.log('Médico solicitante:', OrderData.medico_solicitante);
+    });
+    
+    document.getElementById('obra_social').addEventListener('change', function(event) {
+        OrderData.obra_social = event.target.value;
+        console.log('Obra social:', OrderData.obra_social);
+    });
 
     var boton=document.getElementById("finalizar_orden")
     boton.addEventListener("click",function(){FinalizarOrden()})
 
-    //-------------
-
-
-    ConfigTablaEstudios('tabla-estudios','seleccionar-estudio','tabla-estudios-selec')
-    ConfigTablaSeleccionados('tabla-estudios-selec','quitar-estudio','tabla-estudios','tabla-estudios-agenda')
-
-    const cbSameInfo = document.getElementById('cb_same_info');
-    const cbIcon = document.getElementById('cb_icon');
-    const collapseTarget = document.getElementById('allin1');
-    var blPrestElements = document.querySelectorAll('.bl_prest');
-
-    cbIcon.addEventListener('click', function() {
-    cbSameInfo.checked = !cbSameInfo.checked;
-    cbIcon.classList.toggle('fa-toggle-on', cbSameInfo.checked);
-    cbIcon.classList.toggle('fa-toggle-off', !cbSameInfo.checked);
-
-    if (cbSameInfo.checked) {
-        $(collapseTarget).collapse('show');
-        blPrestElements = document.querySelectorAll('.bl_prest');
-        blPrestElements.forEach(function(element) {
-            element.classList.add('hidden');
-            element.classList.remove('visible');
-        });
-    } else {
-        $(collapseTarget).collapse('hide');
-        blPrestElements = document.querySelectorAll('.bl_prest');
-        blPrestElements.forEach(function(element) {
-            element.classList.add('visible');
-            element.classList.remove('hidden');
-        });
-    }
-    });
-
-    document.getElementById('general_ms').addEventListener('change', function(event) {
-        console.log('Cambio en medico solicitante:', event.target.id);
-        codigo=event.target.id.substring(0, 3)
-        OrderData.exams.forEach(function(examen){
-            examen.medico_solicitante=document.getElementById(event.target.id).value
-        })
-    });
-    document.getElementById('general_os').addEventListener('change', function(event) {
-        console.log('Cambio en obra social:', event.target.id);
-        codigo=event.target.id.substring(0, 3)
-        OrderData.exams.forEach(function(examen){
-            
-            examen.obra_social=document.getElementById(event.target.id).value
-        })
-    });
-
-
-    
-    
-
-
-    
-
-
-    
+    //------------- NUEVA LÓGICA SIMPLIFICADA -------------
+    // Configurar la tabla de estudios con la nueva función simplificada
+    ConfigTablaEstudiosSimplificada('tabla-estudios');
 
 })

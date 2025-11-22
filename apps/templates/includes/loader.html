@@ -1,0 +1,32 @@
+<!-- 
+  Loader Component - Template Reutilizable
+  
+  Uso básico:
+  {% include "includes/loader.html" %}
+  
+  Opciones de personalización:
+  - loader_id: ID personalizado (default: "loader-overlay")
+  - loader_text: Texto personalizado (default: "Cargando...")
+  - loader_class: Clases adicionales (ej: "loader-small", "loader-fullscreen", "loader-dark")
+  
+  Ejemplos:
+  {% set loader_id = "mi-loader" %}
+  {% set loader_text = "Procesando..." %}
+  {% include "includes/loader.html" %}
+  
+  {% set loader_class = "loader-small loader-dark" %}
+  {% include "includes/loader.html" %}
+-->
+
+{% if not loader_id %}
+  {% set loader_id = "loader-overlay" %}
+{% endif %}
+
+{% if not loader_text %}
+  {% set loader_text = "Cargando..." %}
+{% endif %}
+
+<div class="loader-overlay {{ loader_class }}" id="{{ loader_id }}">
+  <div class="loader-spinner"></div>
+  <div class="loader-text">{{ loader_text }}</div>
+</div>

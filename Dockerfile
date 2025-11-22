@@ -1,16 +1,23 @@
-FROM python:3.10
+FROM python:3.12-slim
 
-# set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+# Crear directorio de la app
+WORKDIR /app
 
+# Instalar dependencias del sistema para psycopg2/psycopg2-binary
+RUN apt-get update \
+    && apt-get install -y gcc libpq-dev build-essential \
+    && rm -rf /var/lib/apt/lists/*
+    
+# Copiar dependencias
 COPY requirements.txt .
 
-# install python dependencies
-RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copiar código de la aplicación
 COPY . .
 
-# gunicorn
-CMD ["gunicorn", "--config", "gunicorn-cfg.py", "run:app"]
+# Exponer el puerto Flask/Gunicorn
+EXPOSE 8000
+
+# Lanzar Gunicorn
+CMD ["gunicorn", "-c", "gunicorn-cfg.py", "run:app"]

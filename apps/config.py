@@ -13,20 +13,23 @@ class Config(object):
     ASSETS_ROOT = os.getenv('ASSETS_ROOT', '/static/assets')
 
     # Set up the App SECRET_KEY
-    SECRET_KEY  = os.getenv('SECRET_KEY', None)
+    SECRET_KEY  = os.getenv('SECRET_KEY', "nextris_123456789")
     if not SECRET_KEY:
         SECRET_KEY = ''.join(random.choice( string.ascii_lowercase  ) for i in range( 32 ))    
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    DB_ENGINE   = os.getenv('DB_ENGINE'   , None)
-    DB_USERNAME = os.getenv('DB_USERNAME' , None)
-    DB_PASS     = os.getenv('DB_PASS'     , None)
-    DB_HOST     = os.getenv('DB_HOST'     , None)
-    DB_PORT     = os.getenv('DB_PORT'     , None)
-    DB_NAME     = os.getenv('DB_NAME'     , None)
+    DB_ENGINE   = os.getenv('DB_ENGINE'   , 'postgresql')
+    DB_USERNAME = os.getenv('DB_USER' , 'pacs')
+    DB_PASS     = os.getenv('DB_PASS'     , 'pacs')
+    DB_HOST     = os.getenv('DB_HOST'     , '192.168.1.47')
+    DB_PORT     = os.getenv('DB_PORT'     , '5432')
+    DB_NAME     = os.getenv('DB_NAME'     , 'pacsdb')
+    
+    # DICOM Viewer URL
+    DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'http://192.168.1.42:8082/viewer.html')
 
-    USE_SQLITE  = True 
+    USE_SQLITE  = False
 
     # try to set up a Relational DBMS
     if DB_ENGINE and DB_NAME and DB_USERNAME:

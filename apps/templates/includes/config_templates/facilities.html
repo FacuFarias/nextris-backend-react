@@ -1,0 +1,75 @@
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_facility">
+                        Buscar Facility
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_facility" name="search_facility">
+                </div>
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_facility" class="btn btn-primary btn-success" data-bs-toggle="modal" data-bs-target="#modal_facility" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        <span>Nueva Facility</span>
+                    </button>
+                </div>         
+                
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Facilities</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+                    <button type="button" class="mx-2 btn btn-primary  botones_facility" id="b_editar_facility"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        <span> Editar</span>
+                      </button>
+
+                      <button type="button" class="mx-2 btn btn-primary  btn-danger botones_facility delete_b" id="b_eliminar_facility"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                        <span> Eliminar</span>
+                      </button>
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-facility">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Código</th>
+                        <th>Email</th>
+                        <th>Persona de Contacto</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>

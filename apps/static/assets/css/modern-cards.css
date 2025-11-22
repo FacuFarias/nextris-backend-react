@@ -1,0 +1,499 @@
+/* Estilos modernos para Cards y Tablas */
+
+/* Cards principales */
+.card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    position: relative;
+}
+
+.card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #667eea, #764ba2, #667eea);
+    background-size: 200% 100%;
+    animation: cardGradientMove 3s ease-in-out infinite;
+}
+
+@keyframes cardGradientMove {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+/* Hover effect para cards - iluminación externa sutil */
+.card:hover {
+    box-shadow: 0 12px 40px rgba(118, 75, 162, 0.3), 
+                0 0 40px rgba(118, 75, 162, 0.2),
+                0 0 80px rgba(102, 126, 234, 0.1);
+    border-color: rgba(118, 75, 162, 0.4);
+}
+
+/* Card Headers modernos */
+.card-header {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: 20px 20px 0 0 !important;
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.card-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    animation: headerShine 4s infinite;
+}
+
+@keyframes headerShine {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+.card-header h6 {
+    color: #2d3748;
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Card Body mejorado */
+.card-body {
+    padding: 1.5rem;
+    position: relative;
+}
+
+.card-body.card-tabla-paciente {
+    padding: 0;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* Tablas modernas */
+.table {
+    background: transparent;
+    margin-bottom: 0;
+    border-radius: 0 0 20px 20px;
+    overflow: hidden;
+}
+
+.table thead {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    position: relative;
+}
+
+.table thead th {
+    background: transparent;
+    color: #ffffff;
+    border: none;
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: relative;
+}
+
+.table thead::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.3));
+}
+
+.table tbody tr {
+    transition: all 0.3s ease;
+    cursor: pointer;
+    border: none;
+}
+
+.table tbody tr:nth-child(even) {
+    background: rgba(102, 126, 234, 0.03);
+}
+
+.table tbody tr:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+    transform: none !important;
+}
+
+.modern-card table tbody tr.fila-seleccionada,
+.table tbody tr.fila-seleccionada,
+tr.fila-seleccionada {
+    background: rgba(115, 102, 234, 0.144) !important;
+    color: #333 !important;
+    box-shadow: 0 2px 8px rgba(51, 19, 231, 0.411);
+    position: relative;
+    z-index: 2;
+    border-left: 4px solid #667eea !important;
+    transform: none !important;
+}
+
+.modern-card table tbody tr.fila-seleccionada td,
+.table tbody tr.fila-seleccionada td,
+tr.fila-seleccionada td {
+    color: #333 !important;
+}
+
+.modern-card table tbody tr.fila-seleccionada::before,
+.table tbody tr.fila-seleccionada::before,
+tr.fila-seleccionada::before {
+    display: none;
+}
+
+.table tbody td {
+    padding: 1rem 1.5rem;
+    border: none;
+    vertical-align: middle;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+/* Botones en cards mejorados */
+.card-header .btn {
+    background: #667eea;
+    border: none;
+    border-radius: 12px;
+    padding: 0.75rem;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    color: #ffffff;
+}
+
+/* Botones primarios generales */
+.btn-primary {
+    background: #667eea;
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background: #5a67d8;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4), 
+                0 0 25px rgba(102, 126, 234, 0.3),
+                0 0 50px rgba(102, 126, 234, 0.15);
+}
+
+.btn-primary:focus {
+    background: #5a67d8;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.card-header .btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.card-header .btn:hover {
+    background: #5a67d8;
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5), 
+                0 0 30px rgba(102, 126, 234, 0.4),
+                0 0 60px rgba(102, 126, 234, 0.2);
+}
+
+.card-header .btn:active::before {
+    width: 200px;
+    height: 200px;
+}
+
+.card-header .btn:disabled {
+    background: #a0aec0;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Formularios en cards */
+.card .form-control {
+    background: rgba(255, 255, 255, 0.9);
+    border: 2px solid rgba(102, 126, 234, 0.2);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.card .form-control:focus {
+    background: rgba(255, 255, 255, 1);
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25), 
+                0 0 20px rgba(102, 126, 234, 0.3);
+}
+
+.card .form-control:hover {
+    border-color: rgba(102, 126, 234, 0.4);
+    box-shadow: 0 0 15px rgba(102, 126, 234, 0.2);
+}
+
+/* Labels mejorados */
+.card label {
+    color: #2d3748;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Card footer */
+.card-footer {
+    background: rgba(102, 126, 234, 0.05);
+    border-top: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: 0 0 20px 20px;
+    padding: 1rem 1.5rem;
+}
+
+/* Efectos especiales para cards con sombra */
+.card.shadow {
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+}
+
+.card.shadow:hover {
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.18);
+}
+
+/* Cards específicas por tipo */
+.nr-card-1 {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 249, 250, 0.9) 100%);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .card {
+        border-radius: 15px;
+        margin-bottom: 1rem;
+    }
+    
+    .card-header {
+        padding: 1rem;
+        border-radius: 15px 15px 0 0 !important;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .table thead th,
+    .table tbody td {
+        padding: 0.75rem 1rem;
+        font-size: 0.85rem;
+    }
+    
+    .card-header h6 {
+        font-size: 1rem;
+    }
+}
+
+/* Animaciones de entrada */
+@keyframes cardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card {
+    animation: cardFadeIn 0.5s ease-out;
+}
+
+/* Estados de carga */
+.card.loading {
+    position: relative;
+    overflow: hidden;
+}
+
+.card.loading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+/* Mejoras para accesibilidad */
+.card:focus-within {
+    outline: 2px solid rgba(102, 126, 234, 0.5);
+    outline-offset: 2px;
+}
+
+/* Botones de acción mejorados */
+.botones_sp:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.botones_sp:not(:disabled):hover {
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5), 
+                0 0 35px rgba(102, 126, 234, 0.4),
+                0 0 70px rgba(102, 126, 234, 0.2);
+}
+
+/* Asegurar que las filas seleccionadas no se muevan */
+.fila-seleccionada {
+    transform: none !important;
+    transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+/* Prevenir cualquier transformación en elementos de tabla */
+table tr, 
+.table tr, 
+tbody tr {
+    transform: none !important;
+}
+/* ======================================== */
+/*     MODERN HEADER SHEET STYLES         */
+/* ======================================== */
+
+/* Card header principal con estilo similar a nav-pills */
+.modern-header-sheet {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%) !important;
+    border-radius: 20px !important;
+    padding: 20px !important;
+    box-shadow: 0 8px 32px rgba(118, 75, 162, 0.3) !important;
+    backdrop-filter: blur(4px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    position: relative !important;
+    overflow: visible !important;
+}
+
+/* Efecto de brillo animado */
+.modern-header-sheet::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: -100% !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent) !important;
+    animation: shineHeader 4s infinite !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+}
+
+@keyframes shineHeader {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+/* Card body dentro del header */
+.modern-header-sheet .card-body {
+    position: relative !important;
+    z-index: 1 !important;
+    background: transparent !important;
+    padding: 1rem !important;
+}
+
+/* T�tulo dentro del header */
+.modern-header-sheet h3 {
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    margin: 0 !important;
+}
+
+.modern-header-sheet h3 i {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Input group dentro del header */
+.modern-header-sheet .input-group {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+.modern-header-sheet .form-control {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border: none !important;
+    color: #344767 !important;
+    font-weight: 500 !important;
+}
+
+.modern-header-sheet .form-control::placeholder {
+    color: rgba(52, 71, 103, 0.6) !important;
+}
+
+.modern-header-sheet .form-control:focus {
+    background: rgba(255, 255, 255, 1) !important;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Bot�n de b�squeda */
+.modern-header-sheet .btn-nr-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.modern-header-sheet .btn-nr-primary:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(118, 75, 162, 0.4) !important;
+}
+
+/* Pills dentro del header */
+.modern-header-sheet .nav-pills .nav-link {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.modern-header-sheet .nav-pills .nav-link:hover {
+    background: rgba(255, 255, 255, 0.3) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+}
+
+.modern-header-sheet .nav-pills .nav-link.active {
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #764ba2 !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+}
+

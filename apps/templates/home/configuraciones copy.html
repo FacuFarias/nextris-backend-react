@@ -5,6 +5,8 @@
 <!-- Specific CSS goes HERE -->
 {% block stylesheets %}
 <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
 {% endblock stylesheets %}
 
 
@@ -98,7 +100,7 @@
                 </div>
 
                 <div class="tab-pane fade" id="pills-ministerial-codes" role="tabpanel" aria-labelledby="pills-ministerial-codes-tab">
-                    {% include "includes/config_templates/ministerial_codes.html" %}
+                    {% include "includes/config_templates/studytypes.html" %}
                 </div>
 
                 <div class="tab-pane fade" id="pills-methods" role="tabpanel" aria-labelledby="pills-methods-tab">

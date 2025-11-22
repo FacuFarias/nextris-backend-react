@@ -1,0 +1,72 @@
+/* Estilos específicos para la página de distribución */
+
+/* Estilos para estudios ya publicados/enviados */
+#tabla-pacientes tbody tr.estudio-publicado {
+    background: linear-gradient(135deg, rgba(45, 206, 137, 0.08) 0%, rgba(45, 206, 204, 0.08) 100%);
+    border-left: 3px solid #2dce89 !important;
+}
+
+#tabla-pacientes tbody tr.estudio-publicado td {
+    opacity: 0.85;
+    font-style: italic;
+}
+
+#tabla-pacientes tbody tr.estudio-publicado:hover {
+    background: linear-gradient(135deg, rgba(45, 206, 137, 0.15) 0%, rgba(45, 206, 204, 0.15) 100%) !important;
+}
+
+#tabla-pacientes tbody tr.estudio-publicado.fila-seleccionada {
+    background: linear-gradient(135deg, rgba(45, 206, 137, 0.25) 0%, rgba(45, 206, 204, 0.25) 100%) !important;
+    border-left: 4px solid #2dce89 !important;
+}
+
+.badge-enviado {
+    color: #2dce89;
+    font-size: 12px;
+    margin-right: 5px;
+    display: inline-block;
+}
+
+/* Mensaje de "No hay estudios" */
+#tabla-pacientes tbody tr.no-estudios-row {
+    background: linear-gradient(135deg, rgba(45, 206, 137, 0.05) 0%, rgba(45, 206, 204, 0.05) 100%);
+    border: none;
+    pointer-events: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+}
+
+#tabla-pacientes tbody tr.no-estudios-row:hover {
+    background: linear-gradient(135deg, rgba(45, 206, 137, 0.05) 0%, rgba(45, 206, 204, 0.05) 100%) !important;
+    cursor: default !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+#tabla-pacientes tbody tr.no-estudios-row td {
+    border: none;
+    vertical-align: middle;
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+/* Animación del icono de check */
+@keyframes checkSuccess {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+#tabla-pacientes tbody tr.no-estudios-row .fa-check-circle {
+    animation: checkSuccess 0.6s ease-in-out;
+}

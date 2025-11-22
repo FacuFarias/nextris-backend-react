@@ -17,11 +17,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-  <link rel="apple-touch-icon" sizes="76x76" href="{{ config.ASSETS_ROOT }}/img/apple-icon.png">
-  <link rel="icon" type="image/png" href="{{ config.ASSETS_ROOT }}/img/favicon.png">
+  <link rel="apple-touch-icon" sizes="76x76" href="{{ config.ASSETS_ROOT }}/img/logo/logo_micro.png">
+  <link rel="icon" type="image/png" href="{{ config.ASSETS_ROOT }}/img/logo/logo_micro.png">
 
   <title>
-    Flask Argon Dashboard - {% block title %}{% endblock %} | AppSeed
+    {% block title %}{% endblock %} | NextRIS
   </title>
 
   <!--     Fonts and icons     -->
@@ -30,10 +30,14 @@
   <link href="{{ config.ASSETS_ROOT }}/css/nucleo-icons.css" rel="stylesheet" />
   <link href="{{ config.ASSETS_ROOT }}/css/nucleo-svg.css" rel="stylesheet" />
   <!-- Font Awesome Icons -->
-  <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script>
+  <!-- <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script> -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link href="{{ config.ASSETS_ROOT }}/css/nucleo-svg.css" rel="stylesheet" />
   <!-- CSS Files -->
   <link id="pagestyle" href="{{ config.ASSETS_ROOT }}/css/argon-dashboard.css?v=2.0.4" rel="stylesheet" />
+  
+  <!-- Modern Design System -->
+  <link rel="stylesheet" href="{{ config.ASSETS_ROOT }}/css/modern-background.css" />
 
 </head>
 <body class="">
@@ -43,6 +47,33 @@
   {% block content %}{% endblock content %}
 
   {% include "includes/scripts.html" %}
+
+  <!-- Fix para PerfectScrollbar ANTES de cargar argon-dashboard -->
+  <script>
+    // Wrapper para PerfectScrollbar que maneja elementos nulos
+    (function() {
+      if (typeof PerfectScrollbar !== 'undefined') {
+        var OriginalPerfectScrollbar = PerfectScrollbar;
+        window.PerfectScrollbar = function(element, options) {
+          // Si el elemento no existe, no hacer nada en lugar de lanzar error
+          if (!element) {
+            console.warn('PerfectScrollbar: elemento no encontrado, inicialización omitida');
+            return {
+              update: function() {},
+              destroy: function() {}
+            };
+          }
+          return new OriginalPerfectScrollbar(element, options);
+        };
+        // Copiar propiedades estáticas
+        for (var prop in OriginalPerfectScrollbar) {
+          if (OriginalPerfectScrollbar.hasOwnProperty(prop)) {
+            window.PerfectScrollbar[prop] = OriginalPerfectScrollbar[prop];
+          }
+        }
+      }
+    })();
+  </script>
 
   <!-- Specific JS goes HERE --> 
   {% block javascripts %}{% endblock javascripts %}

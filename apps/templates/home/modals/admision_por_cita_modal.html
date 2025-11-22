@@ -1,0 +1,47 @@
+<!-- Modal Admisión por Cita -->
+<div class="modal fade" id="modal_adm_cita" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content shadow-xl">
+
+      <div class="modal-header bg-gradient-primary">
+        <h5 class="modal-title text-white" id="t_mod_ec">
+          <i class="fas fa-cogs me-2"></i>Seleccione Equipo
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert alert-info mb-3">
+          <i class="fas fa-info-circle me-2"></i>
+          <small>El equipo marcado con <span class="badge bg-success"><i class="fas fa-check me-1"></i>Asignado</span> es el equipo originalmente programado para esta cita. Puede seleccionar otro equipo compatible si lo desea.</small>
+        </div>
+        <form method="POST" action="/api/admisionar_cita" id="Form_adm_cita">
+          <input type="hidden" name="idevent" id="idevent">
+          <input type="hidden" name="idequip" id="idequip">
+          <div class="form-group row card-tabla-equipos">
+            <table class="tabla-paciente table table-hover" id="tabla-equipo-modal">
+              <thead>
+                <tr>
+                  <th>AETitle</th>
+                  <th>Equipo</th>
+                </tr>
+              </thead>
+              <tbody>
+              </tbody>
+            </table>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-footer">
+        <button type="submit" class="btn bg-gradient-success save-changes" form="Form_adm_cita">
+          <i class="fas fa-check me-2"></i>Asignar
+        </button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">
+          <i class="fas fa-times me-2"></i>Cancelar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- FIN MODAL Admisión por Cita -->

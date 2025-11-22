@@ -1,0 +1,47 @@
+<!-- Modal para confirmar firma con contraseña -->
+<div class="modal fade" id="modal_firmar_informe" tabindex="-1" aria-labelledby="modalFirmarLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header text-white">
+        <h5 class="modal-title" id="modalFirmarLabel">
+          <i class="fas fa-signature me-2"></i>Firmar Informe
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+          <i class="fas fa-info-circle me-2"></i>
+          <div>
+            <strong>Atención:</strong> Para firmar este informe necesita confirmar su identidad ingresando su contraseña.
+          </div>
+        </div>
+        <form id="form_firmar_informe">
+          <div class="mb-3">
+            <label for="password_firma" class="form-label">
+              <i class="fas fa-lock me-1"></i>Contraseña
+            </label>
+            <input type="password" 
+                   class="form-control" 
+                   id="password_firma" 
+                   name="password_firma" 
+                   placeholder="Ingrese su contraseña"
+                   autocomplete="current-password"
+                   required>
+            <div class="invalid-feedback">
+              Por favor ingrese su contraseña.
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          <i class="fas fa-times me-1"></i>Cancelar
+        </button>
+        <button type="button" class="btn btn-success" id="btn_confirmar_firma">
+          <i class="fas fa-signature me-1"></i>Confirmar y Firmar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- FIN Modal para confirmar firma -->

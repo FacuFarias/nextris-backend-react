@@ -1,0 +1,27 @@
+<!-- Modal Partes Anatómicas -->
+<div class="modal fade custom-modal" id="modal_ap" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Parte Anatomica</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_ap" method="POST" action="/agregar_ap">
+                    <input type="hidden" name="id_ap" id="id_ap">
+
+                    <div class="form-group row">
+                        <div class="col-md-12">
+                            <label for="Description_ap">Descripción</label>
+                            <input type="text" class="form-control" id="Description_ap" name="Description_ap" required>
+                        </div>                   
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" id="b_save">Guardar Parte</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal" >Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>

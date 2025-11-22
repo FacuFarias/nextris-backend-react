@@ -5606,32 +5606,32 @@ textarea.form-control-lg {
   word-wrap: break-word;
 }
 
-.modal {
-  --bs-modal-zindex: 1050;
+body .modal {
+  --bs-modal-zindex: 10050;
   --bs-modal-width: 500px;
-  --bs-modal-padding: 1rem;
+  --bs-modal-padding: 1.5rem;
   --bs-modal-margin: 0.5rem;
-  --bs-modal-color: ;
+  --bs-modal-color: #344767;
   --bs-modal-bg: #fff;
-  --bs-modal-border-color: rgba(0, 0, 0, 0.2);
-  --bs-modal-border-width: 1px;
-  --bs-modal-border-radius: 0.75rem;
-  --bs-modal-box-shadow: 0 0.3125rem 0.625rem 0 rgba(0, 0, 0, 0.12);
-  --bs-modal-inner-border-radius: calc(0.75rem - 1px);
-  --bs-modal-header-padding-x: 1rem;
-  --bs-modal-header-padding-y: 1rem;
-  --bs-modal-header-padding: 1rem 1rem;
-  --bs-modal-header-border-color: #dee2e6;
+  --bs-modal-border-color: rgba(102, 126, 234, 0.2);
+  --bs-modal-border-width: 0;
+  --bs-modal-border-radius: 1rem;
+  --bs-modal-box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3), 0 10px 40px rgba(118, 75, 162, 0.2);
+  --bs-modal-inner-border-radius: calc(1rem - 1px);
+  --bs-modal-header-padding-x: 1.5rem;
+  --bs-modal-header-padding-y: 1.25rem;
+  --bs-modal-header-padding: 1.25rem 1.5rem;
+  --bs-modal-header-border-color: rgba(102, 126, 234, 0.1);
   --bs-modal-header-border-width: 1px;
   --bs-modal-title-line-height: 1.5;
-  --bs-modal-footer-gap: 0.5rem;
-  --bs-modal-footer-bg: ;
-  --bs-modal-footer-border-color: #dee2e6;
+  --bs-modal-footer-gap: 0.75rem;
+  --bs-modal-footer-bg: rgba(102, 126, 234, 0.02);
+  --bs-modal-footer-border-color: rgba(102, 126, 234, 0.1);
   --bs-modal-footer-border-width: 1px;
   position: fixed;
   top: 0;
   left: 0;
-  z-index: var(--bs-modal-zindex);
+  z-index: var(--bs-modal-zindex) !important;
   display: none;
   width: 100%;
   height: 100%;
@@ -5640,11 +5640,18 @@ textarea.form-control-lg {
   outline: 0;
 }
 
-.modal-dialog {
+body .modal.show {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+body .modal-dialog {
   position: relative;
   width: auto;
   margin: var(--bs-modal-margin);
-  pointer-events: none;
+  pointer-events: auto !important;
+  z-index: 10051 !important;
 }
 .modal.fade .modal-dialog {
   transition: transform 0.3s ease-out;
@@ -5679,31 +5686,37 @@ textarea.form-control-lg {
   min-height: calc(100% - var(--bs-modal-margin) * 2);
 }
 
-.modal-content {
+body .modal-content {
   position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   color: var(--bs-modal-color);
-  pointer-events: auto;
-  background-color: var(--bs-modal-bg);
+  pointer-events: auto !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 1) 100%);
   background-clip: padding-box;
   border: var(--bs-modal-border-width) solid var(--bs-modal-border-color);
   border-radius: var(--bs-modal-border-radius);
+  box-shadow: var(--bs-modal-box-shadow);
   outline: 0;
+  overflow: hidden;
+  z-index: 10052 !important;
 }
 
-.modal-backdrop {
-  --bs-backdrop-zindex: 1040;
-  --bs-backdrop-bg: #000;
-  --bs-backdrop-opacity: 0.5;
+body .modal-backdrop {
+  --bs-backdrop-zindex: 10040;
+  --bs-backdrop-bg: #0c042e;
+  --bs-backdrop-opacity: 0.6;
   position: fixed;
   top: 0;
   left: 0;
-  z-index: var(--bs-backdrop-zindex);
+  z-index: var(--bs-backdrop-zindex) !important;
   width: 100vw;
   height: 100vh;
   background-color: var(--bs-backdrop-bg);
+  backdrop-filter: blur(80px);
+  -webkit-backdrop-filter: blur(100px);
+
 }
 .modal-backdrop.fade {
   opacity: 0;
@@ -5718,6 +5731,7 @@ textarea.form-control-lg {
   align-items: center;
   justify-content: space-between;
   padding: var(--bs-modal-header-padding);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
   border-bottom: var(--bs-modal-header-border-width) solid var(--bs-modal-header-border-color);
   border-top-left-radius: var(--bs-modal-inner-border-radius);
   border-top-right-radius: var(--bs-modal-inner-border-radius);
@@ -5730,12 +5744,18 @@ textarea.form-control-lg {
 .modal-title {
   margin-bottom: 0;
   line-height: var(--bs-modal-title-line-height);
+  font-weight: 600;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .modal-body {
   position: relative;
   flex: 1 1 auto;
   padding: var(--bs-modal-padding);
+  color: #67748e;
 }
 
 .modal-footer {
@@ -5752,6 +5772,16 @@ textarea.form-control-lg {
 }
 .modal-footer > * {
   margin: calc(var(--bs-modal-footer-gap) * 0.5);
+}
+
+/* Animación suave para modal */
+.modal.fade .modal-dialog {
+  transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease;
+  opacity: 0;
+}
+
+.modal.show .modal-dialog {
+  opacity: 1;
 }
 
 @media (min-width: 576px) {
@@ -5899,7 +5929,7 @@ textarea.form-control-lg {
   }
 }
 .tooltip {
-  --bs-tooltip-zindex: 1070;
+  --bs-tooltip-zindex: 910;
   --bs-tooltip-max-width: 200px;
   --bs-tooltip-padding-x: 0.5rem;
   --bs-tooltip-padding-y: 0.25rem;
@@ -6002,7 +6032,7 @@ textarea.form-control-lg {
 }
 
 .popover {
-  --bs-popover-zindex: 1060;
+  --bs-popover-zindex: 900;
   --bs-popover-max-width: 276px;
   --bs-popover-font-size: 0.75rem;
   --bs-popover-bg: #fff;
@@ -9636,8 +9666,8 @@ textarea.form-control-lg {
 }
 
 .bg-bck-degradade {
-  background: linear-gradient(to top right, #eee 0%, #eee 70%, #AFA3BF 100%) !important;
-  /* background: linear-gradient(90deg, rgba(76,131,80,1) 0%, rgba(47,98,32,1) 100%); */
+  background: linear-gradient(135deg, #764ba2 0%, #d4d9f7 50%, #ffffff 100%) !important;
+  background-attachment: fixed !important;
 }
 
 
@@ -17669,9 +17699,119 @@ textarea.form-control-lg {
   padding: 1.5rem;
 }
 .card.card-plain {
-  background-color: transparent;
-  box-shadow: none !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15),
+              0 0 40px rgba(118, 75, 162, 0.1) !important;
+  overflow: hidden !important;
+  position: relative !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
+
+/* Barra superior animada en card-plain */
+.card.card-plain::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #667eea, #764ba2, #667eea);
+  background-size: 200% 100%;
+  animation: cardGradientMove 3s ease-in-out infinite;
+  z-index: 1;
+}
+
+@keyframes cardGradientMove {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* Efecto hover para card-plain */
+.card.card-plain:hover {
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.2),
+              0 0 50px rgba(118, 75, 162, 0.15) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* Header del card-plain */
+.card.card-plain .card-header {
+  background: transparent !important;
+  border: none !important;
+  padding: 2rem 2rem 1rem 2rem !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+.card.card-plain .card-header h4 {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  font-weight: 800 !important;
+  display: inline-block !important;
+}
+
+/* Body del card-plain */
+.card.card-plain .card-body {
+  position: relative !important;
+  z-index: 2 !important;
+  padding: 1.5rem 2rem 2rem 2rem !important;
+}
+
+/* Inputs dentro de card-plain */
+.card.card-plain .form-control {
+  background: rgba(102, 126, 234, 0.05) !important;
+  border: 2px solid rgba(102, 126, 234, 0.2) !important;
+  border-radius: 12px !important;
+  padding: 0.875rem 1rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.card.card-plain .form-control:focus {
+  background: rgba(102, 126, 234, 0.08) !important;
+  border-color: #667eea !important;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15) !important;
+}
+
+.card.card-plain .form-control::placeholder {
+  color: rgba(45, 55, 72, 0.5) !important;
+}
+
+/* Checkbox dentro de card-plain */
+.card.card-plain .form-check-input {
+  border: 2px solid rgba(102, 126, 234, 0.3) !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+}
+
+.card.card-plain .form-check-input:checked {
+  background-color: #667eea !important;
+  border-color: #667eea !important;
+}
+
+.card.card-plain .form-check-label {
+  color: #4a5568 !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  user-select: none !important;
+}
+
+/* Texto de error dentro de card-plain */
+.card.card-plain .text-danger {
+  color: #e53e3e !important;
+  font-weight: 600 !important;
+  background: rgba(229, 62, 62, 0.1) !important;
+  padding: 0.75rem !important;
+  border-radius: 8px !important;
+  border-left: 4px solid #e53e3e !important;
+  display: block !important;
+  margin-top: 0.5rem !important;
+}
+
 .card .card-footer {
   padding: 1.5rem;
   background-color: transparent;
@@ -22906,4 +23046,538 @@ pre[class*=language-] {
     overflow: auto !important;
   }
 }
+
+/**
+ * MODAL Z-INDEX FIX - NextRIS Custom
+ * 
+ * Solución global para conflictos de z-index entre Bootstrap modals
+ * 
+ * Problema resuelto:
+ * - modal-backdrop aparecía por delante del modal-content
+ * - z-index inconsistentes entre componentes del modal
+ * - Modals no eran interactivos debido a pointer-events
+ * - Estilos de argon-dashboard eran sobrescritos por otros CSS
+ * - navbar-vertical (z-index: 9999) cubría los modales
+ * - dropdowns (z-index: 9999) cubrían los modales
+ * 
+ * Solución implementada:
+ * - Uso del selector "body .modal" para mayor especificidad CSS
+ * - Esto asegura que estos estilos tengan prioridad sobre otros archivos CSS
+ * - Z-index MUY ALTO (10040-10052) para estar por encima de TODO
+ * 
+ * Jerarquía de z-index completa del sistema:
+ * 1. Sidenav: 999 (navegación lateral)
+ * 2. Navbar vertical: 9999 (barra de navegación)
+ * 3. Dropdowns: 9999 (menús desplegables)
+ * 4. Backdrop: 10040 (fondo oscuro semitransparente del modal)
+ * 5. Modal: 10050 (contenedor principal del modal)
+ * 6. Dialog: 10051 (diálogo centrado)
+ * 7. Content: 10052 (contenido interactivo - AL TOPE DE TODO)
+ * 
+ * Características adicionales:
+ * - pointer-events: auto en dialog y content para asegurar interactividad
+ * - Separación de 10 unidades entre backdrop y modal
+ * - display: flex en .modal.show para centrado perfecto
+ * 
+ * Basado en la configuración de distribucion.html que funciona correctamente.
+ * 
+ * Uso: Se aplica automáticamente a todos los modals Bootstrap
+ */
+
+
+/* Secciones del modal - header, body, footer */
+body .modal-header,
+body .modal-body,
+body .modal-footer {
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 1 !important;
+  opacity: 1 !important; /* Asegurar que las secciones se vean completamente claras */
+  background-color: inherit !important; /* Heredar el fondo del modal-content */
+}
+
+/* Fix para botones y inputs dentro de modals */
+body .modal-content input,
+body .modal-content button,
+body .modal-content select,
+body .modal-content textarea,
+body .modal-content a {
+  pointer-events: auto !important;
+}
+
+/* Asegurar que elementos con data-bs-dismiss funcionen */
+body .modal [data-bs-dismiss],
+body .modal [data-dismiss] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* ========================================================================
+   OVERRIDE: .btn-primary con estilos modernos de .btn-header
+   ======================================================================== */
+
+.btn-primary {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 10px 18px !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 0.85rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  backdrop-filter: blur(10px) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 1) 0%, rgba(118, 75, 162, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5),
+              0 0 25px rgba(118, 75, 162, 0.4) !important;
+  transform: translateY(-2px) !important;
+  color: #ffffff !important;
+  border-color: rgba(102, 126, 234, 0.8) !important;
+}
+
+.btn-primary:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-primary:focus,
+.btn-primary.focus {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 1) 0%, rgba(118, 75, 162, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5),
+              0 0 25px rgba(118, 75, 162, 0.4) !important;
+  border-color: rgba(102, 126, 234, 0.8) !important;
+  color: #ffffff !important;
+}
+
+.btn-primary i {
+  font-size: 1rem !important;
+  position: relative !important;
+  z-index: 1 !important;
+  color: #fff !important;
+}
+
+.btn-primary:disabled,
+.btn-primary.disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+.btn-lg.btn-primary {
+  padding: 1rem 2rem !important;
+  font-size: 1rem !important;
+}
+
+/* ========================================================================
+   MAIN-CONTENT-INDEX - Fondo degradado azul-morado para páginas
+   ======================================================================== */
+
+.main-content-index {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  min-height: 100vh !important;
+  position: relative !important;
+  overflow-x: hidden !important;
+}
+
+/* Efectos de fondo animados para main-content-index */
+.main-content-index::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background-image: 
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 25%),
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.08) 0%, transparent 30%),
+    radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.06) 0%, transparent 28%),
+    radial-gradient(circle at 90% 40%, rgba(255, 255, 255, 0.05) 0%, transparent 25%);
+  pointer-events: none;
+  z-index: 0;
+  animation: slowRotate 60s linear infinite;
+}
+
+@keyframes slowRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Grid moderno animado */
+.main-content-index::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.03;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.3) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Asegurar que el contenido esté por encima de los efectos */
+.main-content-index > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Variantes de intensidad del degradado */
+.main-content-index.gradient-light {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6) 0%, rgba(118, 75, 162, 0.7) 100%) !important;
+}
+
+.main-content-index.gradient-dark {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 1) 100%) !important;
+}
+
+/* Efecto de brillo sutil en hover (opcional para secciones interactivas) */
+.main-content-index .card,
+.main-content-index .modern-card {
+  transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.main-content-index .card:hover,
+.main-content-index .modern-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2),
+              0 0 40px rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Asegurar que el sidenav y navbar queden por encima */
+.g-sidenav-show .main-content-index {
+  margin-left: 17.125rem;
+}
+
+@media (max-width: 1199.98px) {
+  .g-sidenav-show .main-content-index {
+    margin-left: 0;
+  }
+}
+
+/* Footer en páginas con main-content-index */
+.main-content-index footer {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+.main-content-index footer * {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Títulos y texto sobre el degradado */
+.main-content-index h1,
+.main-content-index h2,
+.main-content-index h3,
+.main-content-index h4,
+.main-content-index h5,
+.main-content-index h6 {
+  color: #ffffff !important;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Breadcrumbs sobre el degradado */
+.main-content-index .breadcrumb-item,
+.main-content-index .breadcrumb-item a {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.main-content-index .breadcrumb-item.active {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* ========================================
+   FIX: Dropdowns con z-index alto
+   Migrado desde dropdown-fix.css
+   ======================================== */
+.nav-pills .dropdown-menu {
+    /* Sobrescribir variables CSS de Bootstrap */
+    --bs-dropdown-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(250, 248, 255, 0.98) 100%);
+    --bs-dropdown-link-color: #344767;
+    --bs-dropdown-link-hover-color: #ffffff;
+    --bs-dropdown-link-hover-bg: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    --bs-dropdown-border-color: rgba(118, 75, 162, 0.3);
+    --bs-dropdown-box-shadow: 0 8px 32px rgba(118, 75, 162, 0.35);
+    
+    z-index: 9999 !important;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(250, 248, 255, 0.98) 100%) !important;
+    backdrop-filter: blur(10px) !important;
+    border: 2px solid rgba(118, 75, 162, 0.3) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px rgba(118, 75, 162, 0.35) !important;
+    padding: 8px !important;
+    margin-top: 8px !important;
+    min-width: 200px !important;
+}
+
+.nav-pills .dropdown-menu .nav-link,
+.nav-pills .dropdown-menu li button.nav-link,
+.nav-pills .dropdown-menu .dropdown-item {
+    background: transparent !important;
+    color: #344767 !important;
+    border-radius: 8px !important;
+    padding: 12px 20px !important;
+    margin: 2px 0 !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    font-weight: 500 !important;
+    border: 1px solid transparent !important;
+    display: block !important;
+    width: 100% !important;
+    text-align: left !important;
+}
+
+.nav-pills .dropdown-menu .nav-link:hover,
+.nav-pills .dropdown-menu li button.nav-link:hover,
+.nav-pills .dropdown-menu .dropdown-item:hover,
+.nav-pills .dropdown-menu .nav-link:focus,
+.nav-pills .dropdown-menu li button.nav-link:focus,
+.nav-pills .dropdown-menu .dropdown-item:focus {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%) !important;
+    color: #ffffff !important;
+    transform: translateX(5px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    box-shadow: 0 4px 12px rgba(118, 75, 162, 0.3) !important;
+}
+
+/* Asegurar que el dropdown-toggle también tenga z-index */
+.nav-pills .nav-item.dropdown {
+    position: relative;
+    z-index: 1000;
+}
+
+.nav-pills .dropdown-toggle {
+    position: relative;
+    z-index: 1001;
+}
+
+/* El nav-pills debe estar en un nivel superior */
+#pills-tab, .nav-pills {
+    position: relative;
+    z-index: 100;
+    overflow: visible !important; /* CRÍTICO: Permitir que los dropdowns se vean */
+}
+
+/* Cuando un dropdown está abierto, el padre debe permitir overflow */
+.nav-pills.show,
+.nav-pills:has(.dropdown-menu.show) {
+    overflow: visible !important;
+}
+
+/* ========================================
+   MODERN BUTTONS SYSTEM
+   Migrado desde modern-btn.css
+   ======================================== */
+
+/* Botón DCM (Ver imágenes DICOM) - Base azul-morado, hover azul */
+.btn-dcm {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-dcm:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95) 0%, rgba(37, 99, 235, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.6),
+              0 0 25px rgba(59, 130, 246, 0.4) !important;
+  border-color: rgba(59, 130, 246, 0.9) !important;
+}
+
+/* Botón Guardar - Base azul-morado, hover verde */
+.btn-save {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-save:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.95) 0%, rgba(22, 163, 74, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(34, 197, 94, 0.6),
+              0 0 25px rgba(34, 197, 94, 0.4) !important;
+  border-color: rgba(34, 197, 94, 0.9) !important;
+}
+
+/* Botón Firmar - Base azul-morado, hover púrpura intenso */
+.btn-sign {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-sign:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.95) 0%, rgba(147, 51, 234, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(168, 85, 247, 0.6),
+              0 0 25px rgba(168, 85, 247, 0.4) !important;
+  border-color: rgba(168, 85, 247, 0.9) !important;
+}
+
+/* Botón PDF - Base azul-morado, hover rojo */
+.btn-pdf {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-pdf:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.6),
+              0 0 25px rgba(239, 68, 68, 0.4) !important;
+  border-color: rgba(239, 68, 68, 0.9) !important;
+}
+
+/* Botón especial de volver (estilo diferente) - Rojo intenso */
+.btn-back {
+  background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%) !important;
+  color: white !important;
+  box-shadow: 0 6px 20px rgba(245, 101, 101, 0.5) !important;
+  border: 2px solid rgba(239, 68, 68, 0.7) !important;
+}
+
+.btn-back:hover {
+  background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%) !important;
+  box-shadow: 0 8px 25px rgba(245, 101, 101, 0.7),
+              0 0 25px rgba(245, 101, 101, 0.5) !important;
+  transform: translateY(-2px) translateX(-2px) !important;
+  color: white !important;
+  border-color: rgba(239, 68, 68, 1) !important;
+}
+
+.btn-back i,
+.btn-back .btn-text {
+  color: white !important;
+}
+
+/* ========== GRUPOS DE BOTONES ========== */
+
+/* Container para grupo de botones */
+.btn-group-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* Separador visual entre grupos de botones */
+.btn-separator {
+  width: 1px !important;
+  height: 32px !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  margin: 0 8px !important;
+}
+
+/* Botón Email - Base azul-morado, hover amarillo */
+.btn-email {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-email:hover {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.95) 0%, rgba(202, 138, 4, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(234, 179, 8, 0.6),
+              0 0 25px rgba(234, 179, 8, 0.4) !important;
+  border-color: rgba(234, 179, 8, 0.9) !important;
+}
+
+/* Botón Imprimir - Base azul-morado, hover gris */
+.btn-print {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-print:hover {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.95) 0%, rgba(71, 85, 105, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(100, 116, 139, 0.6),
+              0 0 25px rgba(100, 116, 139, 0.4) !important;
+  border-color: rgba(100, 116, 139, 0.9) !important;
+}
+
+/* Botón Compartir - Base azul-morado, hover azul cielo */
+.btn-share {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-share:hover {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.95) 0%, rgba(2, 132, 199, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(14, 165, 233, 0.6),
+              0 0 25px rgba(14, 165, 233, 0.4) !important;
+  border-color: rgba(14, 165, 233, 0.9) !important;
+}
+
+/* Botón Editar - Base azul-morado, hover naranja */
+.btn-edit {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-edit:hover {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.95) 0%, rgba(234, 88, 12, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(249, 115, 22, 0.6),
+              0 0 25px rgba(249, 115, 22, 0.4) !important;
+  border-color: rgba(249, 115, 22, 0.9) !important;
+}
+
+/* Botón Eliminar/Danger - Base azul-morado, hover rojo */
+.btn-danger {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-danger:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.6),
+              0 0 25px rgba(239, 68, 68, 0.4) !important;
+  border-color: rgba(239, 68, 68, 0.9) !important;
+}
+
+/* Botón Success/Confirmar - Base azul-morado, hover verde */
+.btn-success {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.9) 100%) !important;
+  border: 2px solid rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+}
+
+.btn-success:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.95) 0%, rgba(22, 163, 74, 1) 100%) !important;
+  box-shadow: 0 8px 25px rgba(34, 197, 94, 0.6),
+              0 0 25px rgba(34, 197, 94, 0.4) !important;
+  border-color: rgba(34, 197, 94, 0.9) !important;
+}
+
+/* Custom Modal Animations - Smooth Fade Out From Current Position */
+/* Override only the problematic translate animation, keep Bootstrap's centering */
+.modal.fade .modal-dialog {
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out !important;
+  transform: none !important; /* Remove the translate(-50px) that causes movement */
+}
+
+.modal.fade:not(.show) .modal-dialog {
+  opacity: 0 !important;
+  transform: scale(0.95) !important; /* Only scale down, no translation */
+}
+
+.modal.fade.show .modal-dialog {
+  opacity: 1 !important;
+  transform: none !important; /* Let Bootstrap handle positioning naturally */
+}
+
 /*# sourceMappingURL=argon-dashboard.css.map */

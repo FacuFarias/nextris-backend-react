@@ -1,104 +1,48 @@
-<div class="row">
-    <div class="col-12">
-      <div class="card mb-4 nr-card-1">
-        <div class="card-header pb-0 d-flex justify-content-between align-items-center">
-          <h6>Buscar Paciente</h6>
-          <div class="d-flex ms-auto">
-            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2" id="b_search">
-              <i class="fa fa-search" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2" data-bs-toggle="modal" id="b_abrir_modal" data-bs-target="#modal_np">
-              <i class="fa fa-user-plus" aria-hidden="true"></i>
-            </button>
-            <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
-              <i class="fa fa-filter" aria-hidden="true"></i> 
-            </button>
-          </div>
-        </div>
-        
-        
-        <div id="collapseCardBody" class="collapse">
-          <hr class="horizontal dark mt-0">
-          <div class="card-body px-0 pt-0 pb-2">
-            <input type="hidden" name="url" id="url" value="buscar_paciente.html">
-            <div class="container-fluid">
-              <div class="row datos-paciente align-items-center">    
-                <div class="col-md-5">
-                  <div class="row">
-                    <div class="row justify-content-center align-items-center">
-                      <div class="col-md-4">
-                        <label for="name">Nombre</label>
-                      </div>
-                      <div class="col-md-4">
-                        <input class="form-control" id="l_name" name="l_name">
-                      </div>
-                      <div class="col-md-4">
-                        <input class="form-control" id="l_surname" name="l_surname">
-                      </div>
-                    </div>
-    
-                    <div class="row justify-content-center align-items-center">
-                      <div class="col-md-4">
-                        <label for="documento">DNI</label>
-                      </div>
-                      <div class="col-md-8">
-                        <input class="form-control" id="documento" name="documento">
-                      </div>
-                    </div>
-        
-                  </div>
-                </div>
-                <div class="col-md-5">
-                  <div class="row justify-content-center align-items-center">
-                    <div class="col-md-4">
-                      <label for="l_sex">Sexo</label>
-                    </div>
-                    <div class="col-md-8">
-                      <select id="l_sex" name="l_sex" class="form-control">
-                        <option value="M">M</option>
-                        <option value="F">F</option>
-                        <option value="I">Indefinido</option>
-                      </select>
-                    </div>
-                  </div>
-    
-                  <div class="row justify-content-center align-items-center">
-                    <div class="col-md-4">
-                      <label for="fecha_nac">Fecha</label>
-                    </div>
-                    <div class="col-md-8">
-                      <input type="date" class="form-control" id="fecha_nac" name="fecha_nac">
-                    </div>
-                  </div>
-    
-                </div>
-                <div class="col-md-2 d-flex justify-content-center align-items-center">
-                  
-                </div>
-              </div>
-            </div>
-          </div>
+<div class="card shadow-lg mx-2 mx-md-4 mb-4 modern-header-sheet">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
+
+      <div class="col-lg-3 col-md-12 col-12 d-flex align-items-center justify-content-center justify-content-md-start mb-2 mb-lg-0">
+        <h6 class="mb-0 d-flex align-items-center text-white">
+          <i class="fa fa-search me-2"></i> Buscar Paciente
+        </h6>
+      </div>
+
+      <!-- Selector de ubicación -->
+      <div class="col-lg-2 col-md-4 col-12">
+        <select class="form-select form-select-lg" id="location_selector" style="background-color: rgba(255,255,255,0.95); border: 2px solid rgba(102, 126, 234, 0.3);">
+          <option value="">Seleccione ubicación...</option>
+        </select>
+      </div>
+
+      <div class="col-lg-4 col-md-8 col-12 d-flex align-items-center search-wrapper">
+        <div class="input-group input-group-lg nr-input-group w-100 my-0">
+          <input type="text" class="form-control" id="busquedaSwitch" placeholder="Buscar paciente..." disabled>
+          <button class="btn-primary btn-primary-icon" type="button" id="b_search" title="Buscar" disabled>
+            <i class="fa fa-search"></i>
+          </button>
         </div>
       </div>
+
+      <div class="col-lg-3 col-md-4 col-12 d-flex justify-content-center justify-content-lg-end align-items-center">
+        <div class="btn-group-header">
+          <button type="button" class="btn-primary btn-save" id="b_abrir_modal" data-bs-target="#modal_np" data-bs-toggle="modal" title="Agregar paciente rápido">
+            <i class="fa fa-user-plus" aria-hidden="true"></i> Nuevo
+          </button>
+          <button type="button" id="b_sel_pac_para_adm" class="btn-primary btn-save botones_sp" disabled patient-id="" title="Seleccionar paciente">
+              <i class="fa fa-check-circle" aria-hidden="true"></i> Seleccionar
+          </button>
+        </div>
+      </div>
+
     </div>
+  </div>
 </div>
 
 <div class="row">
     <div class="col-12">
         <div class="card mb-4 shadow">
-        <div class="card-header pb-0">
-            <div class="row">
-                <div class="col-md-4">
-                    <h6>Resultados</h6>
-                </div>
-                <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="b_sel_pac_para_adm" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp" disabled patient-id="">
-                        <i class="fa fa-check-circle" aria-hidden="true" style="font-size: 25px;"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+        <div class="card-body px-0 pt-0 pb-2" style="max-height: 65vh; overflow-y: auto; overflow-x: hidden; display: block;">
             <table class="tabla-primary table" id="tabla-paciente">
                 <thead>
                     <tr>

@@ -1,0 +1,80 @@
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+        <div class="card-header pb-0">
+        </div>
+        
+        <div class="card-body px-0 pt-0 pb-2">
+            
+            <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="search_ministerial_code">
+                        Buscar tipo de estudio
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <input class="form-control" id="search_ministerial_code" name="search_ministerial_code">
+                </div>
+                
+                <div class="col-md-3 d-flex ms-auto justify-content-end ">
+                    <button type="button" id="b_nuevo_codigo" class="btn btn-primary btn-success"data-bs-toggle="modal" data-bs-target="#modal_code" style="font-size: 25px;">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
+                        <span>Nuevo Estudio</span>
+                    </button>
+                </div>                   
+            </div>
+        </div>
+        </div>
+        
+        </div>
+    </div>
+    </div>
+    <div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow">
+        <div class="card-header pb-0">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6>Tipos de estudios</h6>
+                </div>
+                <div class="col-md-8 d-flex justify-content-end">
+
+                    <button type="button" class="btn btn-primary botones_code" id="b_editar_codigo"  disabled>
+                        <i class="fas fa-pencil-alt" aria-hidden="true"></i>
+                        <span>Editar</span>
+                      </button>
+
+                      <button type="button" class="btn btn-primary botones_code delete_b" id="b_eliminar_codigo"  disabled>
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                        <span>Eliminar</span>
+                      </button>
+                    <!-- <button type="button" id="b_editar_codigo" class="btn btn-secondary botones_code" disabled patient-id="">Editar Codigo</button>
+                    <button type="button" id="b_eliminar_codigo" class="btn btn-secondary botones_code delete_b" disabled patient-id="">Eliminar Codigo</button> -->
+                </div>
+                
+            </div>
+            
+            
+        </div>
+        <div class="card-body card-tabla-quasi-full px-0 pt-0 pb-2">
+            <table class="tabla-paciente table" id="tabla-codigos">
+                <thead>
+                    <tr>
+                        <th>Codigo</th>
+                        <th>Descripcion</th>
+                        <th>Grupo</th>
+                        <th>Partes del cuerpo</th>
+                        <th>Modalidad</th>
+                        <th>RVU</th>
+                        <th>Numero de vistas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    </div>
+    </div>

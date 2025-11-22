@@ -1,0 +1,61 @@
+<!-- Modal Unificar Pacientes -->
+<div class="modal fade custom-modal" id="modal_ptd" tabindex="-1" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+  <div class="modal-dialog" z-index="-2">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h1 class="modal-title fs-5" id="exampleModalLabel">Unificación de pacientes.</h1><br>
+        <!-- <h3 class="modal-title fs-5" id="exampleModalLabel">Una vez que se aplique el cambio, no hay forma de retroceder. Asegúrese que la acción es la correcta.</h3> -->
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <form method="POST" action="/unificar_paciente" id="Form_ag">
+          <div class="row"><h2>Paciente que se mantendrá</h2></div>
+          <div class="form-group row">
+            <div class="col-md-4">
+              <label for="p_name">Nombre</label>
+              <input type="text" class="form-control" id="p_name" name="p_name" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="p_surname">Apellido</label>
+              <input type="text" class="form-control" id="p_surname" name="p_surname" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="p_dni">DNI</label>
+              <input type="text" class="form-control" id="p_dni" name="p_dni" required disabled>
+            </div>
+          </div>
+          <div class="row"><h2>Paciente que se unificará</h2></div>
+          <div class="form-group row">
+            <div class="col-md-4">
+              <label for="p_name_td">Nombre</label>
+              <input type="text" class="form-control" id="p_name_td" name="p_name_td" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="p_surname_td">Apellido</label>
+              <input type="text" class="form-control" id="p_surname_td" name="p_surname_td" required disabled>
+            </div>
+            <div class="col-md-4">
+              <label for="p_dni_td">DNI</label>
+              <input type="text" class="form-control" id="p_dni_td" name="p_dni_td" required disabled>
+            </div>
+            <input type="hidden" id="p_id" name="p_id">
+            <input type="hidden" id="p_id_td" name="p_id_td">
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn-primary btn-save">
+              <i class="fas fa-check"></i>
+              <span class="btn-text">Confirmar</span>
+            </button>
+            <button type="button" class="btn-primary btn-back" data-bs-dismiss="modal">
+              <i class="fas fa-times"></i>
+              <span class="btn-text">Cancelar</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- FIN MODAL Unificar Pacientes -->

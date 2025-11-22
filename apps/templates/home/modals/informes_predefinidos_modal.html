@@ -1,0 +1,51 @@
+<!-- Modal de Informes Predefinidos - Generación de Informe -->
+<div class="modal fade custom-modal" id="predefinedReportsModal" tabindex="-1" aria-labelledby="predefinedReportsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title" id="predefinedReportsLabel">Seleccionar informe predefinido</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- Filtros -->
+        <div class="mb-3 d-flex justify-content-between align-items-center">
+          <div class="flex-grow-1 me-3">
+            <input type="text" id="filtroMedico" class="form-control" placeholder="Buscar por tipo de estudio...">
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="checkMyStudyType">
+            <label class="form-check-label" for="checkMyStudyType">Mi tipo de estudio</label>
+          </div>
+        </div>
+
+        <!-- Contenedor con scroll para la tabla -->
+        <div style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px;">
+          <!-- Tabla de informes -->
+          <table class="tabla-primary table mb-0" id="tabla_inf_predef">
+            <thead style="position: sticky; top: 0; z-index: 10; background: white;">
+              <tr>
+                <th>Plantilla</th>
+                <th>Tipo de estudio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Cargado dinámicamente desde JS -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+      <!-- Footer con botones -->
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary boton_modal" id="btnAceptarInforme" disabled>Aceptar</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+<!-- FIN Modal de Informes Predefinidos -->

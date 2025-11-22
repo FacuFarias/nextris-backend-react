@@ -1,0 +1,45 @@
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-10 col-lg-8">
+            <div class="card">
+                <div class="card-header bg-gradient-primary text-white">
+                    <h4 class="mb-0">Configuración Backend</h4>
+                </div>
+                <div class="card-body">
+                    <form id="backendConfigForm">
+                        <div class="mb-3">
+                            <label for="db_user" class="form-label">Usuario DB</label>
+                            <input type="text" class="form-control" id="db_user" name="db_user" autocomplete="username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="db_password" class="form-label">Contraseña DB</label>
+                            <input type="password" class="form-control" id="db_password" name="db_password" autocomplete="current-password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="db_host" class="form-label">Host DB</label>
+                            <input type="text" class="form-control" id="db_host" name="db_host" autocomplete="url" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="db_port" class="form-label">Puerto DB</label>
+                            <input type="text" class="form-control" id="db_port" name="db_port" autocomplete="off" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="db_name" class="form-label">Nombre DB</label>
+                            <input type="text" class="form-control" id="db_name" name="db_name" autocomplete="off" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="base_folder" class="form-label">BASE_FOLDER</label>
+                            <input type="text" class="form-control" id="base_folder" name="base_folder" autocomplete="off" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="ip_server" class="form-label">IPSERVER</label>
+                            <input type="text" class="form-control" id="ip_server" name="ip_server" autocomplete="off" required>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Guardar Configuración</button>
+                    </form>
+                    <div id="configResult" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

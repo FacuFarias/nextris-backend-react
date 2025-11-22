@@ -2,234 +2,542 @@
 
 {% block title %} Pagina Principal {% endblock title %}
 
-<!-- Specific CSS goes HERE -->
-{% block stylesheets %}{% endblock stylesheets %}
+{% block stylesheets %}
+<style>
+/* Background que ocupa toda la pantalla */
+.position-absolute.min-height-300 {
+    min-height: 100vh !important;
+    height: 100vh !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 0 !important;
+}
+
+.position-absolute.min-height-300 .mask {
+    height: 100%;
+    width: 100%;
+}
+
+/* Control de overflow */
+body, html {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-height: 100vh;
+    overflow-y: auto;
+}
+
+.main-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.main-content .container-fluid {
+    flex: 1;
+}
+
+/* Footer pegado al borde inferior */
+.main-content footer {
+    margin-top: auto;
+    margin-left: -24px;
+    margin-right: -24px;
+    margin-bottom: -24px;
+    width: calc(100% + 48px);
+}
+
+/* Ocultar scrollbars de PerfectScrollbar */
+.ps__rail-y,
+.ps__rail-x {
+    display: none !important;
+}
+
+.ps {
+    overflow: visible !important;
+}
+
+/* Contenedor central */
+.menu-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+    padding: 40px 0;
+    justify-items: start; /* alineación a la izquierda */
+}
+
+/* Botones grandes */
+.menu-button {
+    width: 250px;
+    height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    border-radius: 15px;
+    text-decoration: none;
+    color: #333;
+    background: rgba(248, 249, 250, 0.95);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    transition: all 0.2s ease-in-out;
+    backdrop-filter: blur(10px);
+}
+
+.menu-button i {
+    font-size: 2rem;
+    margin-bottom: 8px;
+    color: #6f42c1;
+}
+
+.menu-button:hover {
+    background: rgba(155, 81, 224, 0.25);
+    transform: translateY(-3px);
+    box-shadow: 0 6px 15px rgba(0,0,0,0.15);
+    color: #fff;
+}
+
+.menu-button:hover i {
+    color: #fff;
+}
+
+/* Estilos especiales para pacientes */
+.menu-button.patient-primary {
+    background: linear-gradient(310deg, #2152ff 0%, #21d4fd 100%);
+    color: white;
+}
+
+.menu-button.patient-primary i {
+    color: white;
+}
+
+.menu-button.patient-primary:hover {
+    background: linear-gradient(310deg, #1a41cc 0%, #1aacca 100%);
+    color: white;
+}
+
+.menu-button.patient-info {
+    background: linear-gradient(310deg, #17ad37 0%, #10cfbd 100%);
+    color: white;
+}
+
+.menu-button.patient-info i {
+    color: white;
+}
+
+.menu-button.patient-info:hover {
+    background: linear-gradient(310deg, #128a2c 0%, #0da596 100%);
+    color: white;
+}
+
+.menu-button.logout-button {
+    background: linear-gradient(310deg, #ff6b6b 0%, #ee5a6f 100%);
+    color: white;
+}
+
+.menu-button.logout-button i {
+    color: white;
+}
+
+.menu-button.logout-button:hover {
+    background: linear-gradient(310deg, #cc5555 0%, #be4858 100%);
+    color: white;
+}
+
+/* Encabezado */
+.header-section {
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: start; /* alineado a la izquierda */
+    padding-left: 5px;
+}
+
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-brand img {
+    height: 50px;
+}
+
+.welcome-text {
+    font-size: 1.1rem;
+    margin-top: 10px;
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.header-section h3 {
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+</style>
+{% endblock stylesheets %}
 
 {% block content %}
 
+<!-- Background con imagen -->
 <div class="position-absolute w-100 min-height-300 top-0" 
-style="background-image: url('{{ config.ASSETS_ROOT }}/img/mediCAD.jpg'); background-position-y: 70%;">
-<span class="mask bg-primary opacity-6"></span>
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/carousel-3.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center; background-attachment: fixed;">
+<span class="mask" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.7) 0%, rgba(118, 75, 162, 0.7) 100%);"></span>
 </div>
-    
-  {% include "includes/sidenav.html" %}
- 
-  <main class="main-content position-relative border-radius-lg  pt-4">
 
-    <div class="container-fluid py-4 ">
+{% include "includes/sidenav.html" %}
 
-      <div class="row">
-        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4">
-          <div class="card">
-            <div class="card-body p-3">
-              <div class="row">
-                <div class="col-8">
-                  <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Ingresos generados hoy</p>
-                    <h5 class="font-weight-bolder">
-                      $<!-- ingresos -->
-                    </h5>
-                    <p class="mb-0">
-                      <span class="text-success text-sm font-weight-bolder">
-                        <!-- deltaingresos -->
-                        %</span>
-                      desde ayer.
-                    </p>
-                  </div>
-                </div>
-                <div class="col-4 text-end">
-                  <div class="icon icon-shape bg-gradient-primary shadow-primary text-center rounded-circle">
-                    <i class="ni ni-money-coins text-lg opacity-10" aria-hidden="true"></i>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4">
-          <div class="card">
-            <div class="card-body p-3">
-              <div class="row">
-                <div class="col-8">
-                  <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Estudios realizadas</p>
-                    <h5 class="font-weight-bolder">
-                      <!-- estudiosrealizados -->
-                        estudios
-                    </h5>
-                    <p class="mb-0">
-                      <span class="text-success text-sm font-weight-bolder">
-                        <!-- deltaestudios -->
-                        %</span>
-                      desde ayer
-                    </p>
-                  </div>
-                </div>
-                <div class="col-4 text-end">
-                  <div class="icon icon-shape bg-gradient-danger shadow-danger text-center rounded-circle">
-                    <i class="ni ni-world text-lg opacity-10" aria-hidden="true"></i>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4">
-          <div class="card">
-            <div class="card-body p-3">
-              <div class="row">
-                <div class="col-8">
-                  <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Medico de mayor produccion</p>
-                    <h5 class="font-weight-bolder">
-                      <!-- cantestudiosmed --> Estudios este mes
-                    </h5>
-                    <p class="mb-0">
-                      <span class="text-success text-sm font-weight-bolder">+2%</span>
-                      desde ayer
-                    </p>
-                  </div>
-                </div>
-                <div class="col-4 text-end">
-                  <div class="icon icon-shape bg-gradient-success shadow-success text-center rounded-circle">
-                    <i class="ni ni-paper-diploma text-lg opacity-10" aria-hidden="true"></i>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="col-xl-3 col-sm-6">
-          <div class="card">
-            <div class="card-body p-3">
-              <div class="row">
-                <div class="col-8">
-                  <div class="numbers">
-                    <p class="text-sm mb-0 text-uppercase font-weight-bold">Mejores obras sociales</p>
-                    <h5 class="font-weight-bolder">
-                      $ <!-- montoOs --> Generado por: <!-- bestOs -->
+<main class="main-content position-relative border-radius-lg pt-4">
+  <div class="container-fluid py-4">
 
-                    </h5>
-                    <p class="mb-0">
-                      <span class="text-danger text-sm font-weight-bolder">+5%</span> desde ayer
-                    </p>
-                  </div>
-                </div>
-                <div class="col-4 text-end">
-                  <div class="icon icon-shape bg-gradient-warning shadow-warning text-center rounded-circle">
-                    <i class="ni ni-cart text-lg opacity-10" aria-hidden="true"></i>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <!-- Encabezado con logo, nombre del sistema y bienvenida -->
+    <div class="header-section">
+      <div class="header-brand">
+        <img src="{{ config.ASSETS_ROOT }}/img/logo/logo5.png" alt="NextRIS Logo">
+        <h3 class="mb-0">NextRIS</h3>
       </div>
+      <p class="welcome-text">Bienvenido: {{ session['username'] }}</p>
+    </div>
 
-      <div class="row mt-4">
-        <div class="col-lg-7 mb-lg-0 mb-4">
-          <div class="card z-index-2 h-100">
-            <div class="card-header pb-0 pt-3 bg-transparent">
-              <h6 class="text-capitalize">Historial de ingresos</h6>
-              <p class="text-sm mb-0">
-              </p>
-            </div>
-            <div class="card-body" id="card_chart_ingreso">
-              <div class="chart-conteiner">
-                <canvas id="chart-line" class="chart-canvas" height="300"></canvas>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="col-lg-5">
-          <div class="card mb-4 shadow">
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2 border-top-10">
-                <table class="tabla-primary table border-top" id="tabla-ordenes">
-                    <thead>
-                        <tr>
-                            <th>Fecha</th>
-                            <th>Tipo</th>
-                            <th>Descripcion</th>
-                            <th>Profesional</th>
-                            <th>OS</th>
-                            <th>Monto</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    </tbody>
-                </table>
-            </div> 
-        </div>
-        </div>
-      </div>
+    <!-- Menú central con botones grandes -->
+    <div class="menu-container">
+      
+      {% if session.get('is_patient') %}
+      <!-- MENÚ PARA PACIENTES -->
+      <a href="/mis_estudios" class="menu-button patient-primary">
+        <i class="ni ni-books"></i>
+        Mis Estudios
+      </a>
 
-      <div class="row mt-4">
-        <div class="col-lg-7 mb-lg-0 mb-4">
-          <div class="card ">
-            <div class="card-header pb-0 d-flex align-items-center justify-content-center">
-          
-              <h6>Estudios realizados por doctor</h6>
-              <div class="d-flex ms-auto">
-                <button class="btn btn-nr-primary botones_med" type="button" disabled>
-                  <i class="fa fa-filter" aria-hidden="true"></i>
-                </button>
-              </div>
-            </div>
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-              <table class="tabla-primary table" id="tabla-medicos">
-                  <thead>
-                      <tr>
-                          <th>Doctor</th>
-                          <th>Estudios</th>
-                          <th>Monto</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                  </tbody>
-              </table>
-          </div> 
-          </div>
-        </div>
-        <div class="col-lg-5">
-          <div class="card ">
-            <div class="card-header pb-0 d-flex align-items-center justify-content-center">
-          
-              <h6>Estudios realizados por Obra Social</h6>
-              <div class="d-flex ms-auto">
-                <button class="btn btn-nr-primary botones_os" type="button" disabled>
-                  <i class="fa fa-filter" aria-hidden="true"></i>
-                </button>
-              </div>
-            </div>
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-              <table class="tabla-primary table" id="tabla-os">
-                  <thead>
-                      <tr>
-                          <th>Obra social</th>
-                          <th>Estudios</th>
-                          <th>Monto</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                  </tbody>
-              </table>
-          </div> 
-          </div>
-        </div>
-      </div>
+      <a href="/mis_datos" class="menu-button patient-info">
+        <i class="ni ni-badge"></i>
+        Mis Datos
+      </a>
 
-      {% include "includes/footer.html" %}
+      <a href="/logout" class="menu-button logout-button">
+        <i class="ni ni-button-power"></i>
+        Desconectarse
+      </a>
+
+      {% else %}
+      <!-- MENÚ PARA PERSONAL (STAFF) -->
+      
+      <!-- PACIENTES - Todos los roles pueden acceder -->
+      <a href="/historial_paciente.html" class="menu-button">
+        <i class="ni ni-single-02"></i>
+        Buscar Pacientes
+      </a>
+
+      <!-- Unificación y Reasignación solo para Administrativo, Tecnico y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Tecnico', 'Sysadmin'] %}
+      <a href="/unificar_paciente.html" class="menu-button">
+        <i class="ni ni-single-02"></i>
+        Unificación de Paciente
+      </a>
+
+      <a href="/reasignar_examenes.html" class="menu-button">
+        <i class="ni ni-single-02"></i>
+        Reasignación de Exámenes
+      </a>
+      {% endif %}
+
+      <!-- CITAS - Solo Administrativo y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Sysadmin'] %}
+      <a href="/nueva_cita" class="menu-button">
+        <i class="ni ni-badge"></i>
+        Nueva Cita
+      </a>
+
+      <a href="/cita_editar" class="menu-button">
+        <i class="ni ni-badge"></i>
+        Editar Cita
+      </a>
+      {% endif %}
+
+      <!-- ADMISION - Solo Administrativo y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Sysadmin'] %}
+      <a href="/admision_por_cita" class="menu-button">
+        <i class="ni ni-circle-08"></i>
+        Adm. por Cita
+      </a>
+
+      <a href="/admision_espontanea" class="menu-button">
+        <i class="ni ni-circle-08"></i>
+        Admisión Espontánea
+      </a>
+
+      <a href="/historico_visitas" class="menu-button">
+        <i class="ni ni-circle-08"></i>
+        Histórico de Visitas
+      </a>
+      {% endif %}
+
+      <!-- EJECUCION - Solo Tecnico y Sysadmin -->
+      {% if session.get('user_type') in ['Tecnico', 'Sysadmin'] %}
+      <a href="/ejecucion.html" class="menu-button">
+        <i class="ni ni-active-40"></i>
+        Ejecución
+      </a>
+      {% endif %}
+
+      <!-- REDACCION - Solo Medico y Sysadmin -->
+      {% if session.get('user_type') in ['Medico', 'Sysadmin'] %}
+      <a href="/redaccion_informe" class="menu-button">
+        <i class="ni ni-align-center"></i>
+        Redacción Radiología
+      </a>
+
+      <a href="/informes_predef" class="menu-button">
+        <i class="ni ni-align-center"></i>
+        Inf. Predef
+      </a>
+      {% endif %}
+
+      <!-- DISTRIBUCION - Solo Administrativo, Medico y Sysadmin -->
+      {% if session.get('user_type') in ['Administrativo', 'Medico', 'Sysadmin'] %}
+      <a href="/distribucion.html" class="menu-button">
+        <i class="ni ni-send"></i>
+        Distribución
+      </a>
+      {% endif %}
+
+      <!-- FACTURACION - Solo Administrativo y Sysadmin (asumiendo que es parte de funciones administrativas) -->
+      {% if session.get('user_type') in ['Administrativo', 'Sysadmin'] %}
+      <a href="/facturar_orden" class="menu-button">
+        <i class="fa fa-calculator"></i>
+        Facturar Orden
+      </a>
+
+      <a href="/historial_facturacion" class="menu-button">
+        <i class="fa fa-calculator"></i>
+        Historial Facturación
+      </a>
+
+      <a href="/analisis_facturacion" class="menu-button">
+        <i class="fa fa-calculator"></i>
+        Análisis Facturación
+      </a>
+      {% endif %}
+
+      <!-- CONFIGURACIONES Y PREFERENCIAS - Solo Sysadmin -->
+      {% if session.get('user_type') == 'Sysadmin' %}
+      <a href="/configuraciones.html" class="menu-button">
+        <i class="ni ni-settings"></i>
+        Configuraciones
+      </a>
+
+      <a href="/preferencias.html" class="menu-button">
+        <i class="ni ni-settings"></i>
+        Preferencias
+      </a>
+      {% endif %}
+
+      <!-- DESCONECTARSE - Todos los usuarios del staff -->
+      <a href="/logout" class="menu-button">
+        <i class="ni ni-button-power text-danger"></i>
+        Desconectarse
+      </a>
+
+      {% endif %} <!-- Fin del if is_patient -->
 
     </div>
-    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
-    <script src="{{ config.ASSETS_ROOT }}/js/facturacion_analisis.js"></script>
-  </main>  
+  </div>
+  {% include "includes/footer.html" %}
+</main>
+
+<!-- Modal para cambio de contraseña -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" data-requires-change="{{ 'true' if session.get('requires_password_change') else 'false' }}">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-gradient-primary">
+        <h5 class="modal-title text-white" id="changePasswordModalLabel">
+          <i class="ni ni-lock-circle-open me-2"></i>
+          Cambio de Contraseña Requerido
+        </h5>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info" role="alert">
+          <i class="ni ni-notification-70 me-2"></i>
+          <strong>Bienvenido al sistema!</strong><br>
+          Por seguridad, debes cambiar tu contraseña temporal antes de continuar.
+        </div>
+        
+        <form id="changePasswordForm">
+          <div class="mb-3">
+            <label for="newPassword" class="form-label">Nueva Contraseña</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="newPassword" required minlength="4">
+              <button class="btn btn-outline-secondary" type="button" id="toggleNewPassword">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <div class="form-text">Mínimo 4 caracteres. No uses "1234".</div>
+          </div>
+          
+          <div class="mb-3">
+            <label for="confirmPassword" class="form-label">Confirmar Contraseña</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="confirmPassword" required minlength="4">
+              <button class="btn btn-outline-secondary" type="button" id="toggleConfirmPassword">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          
+          <div id="passwordAlert" class="alert d-none" role="alert"></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="savePasswordBtn">
+          <i class="ni ni-check-bold me-1"></i>
+          Cambiar Contraseña
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 {% endblock content %}
 
-<!-- Specific JS goes HERE --> 
 {% block javascripts %}
-  
-  <script src="{{ config.ASSETS_ROOT }}/js/plugins/chartjs.min.js"></script>
-
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Verificar si se requiere cambio de contraseña
+    const modalElement = document.getElementById('changePasswordModal');
+    const requiresPasswordChange = modalElement.getAttribute('data-requires-change') === 'true';
+    
+    console.log('[PASSWORD MODAL] data-requires-change:', modalElement.getAttribute('data-requires-change'));
+    console.log('[PASSWORD MODAL] requiresPasswordChange:', requiresPasswordChange);
+    
+    if (requiresPasswordChange) {
+        console.log('[PASSWORD MODAL] Mostrando modal automáticamente');
+        // Mostrar modal automáticamente
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+    } else {
+        console.log('[PASSWORD MODAL] No se requiere cambio de contraseña');
+    }
+    
+    // Toggle para mostrar/ocultar contraseñas
+    document.getElementById('toggleNewPassword').addEventListener('click', function() {
+        const input = document.getElementById('newPassword');
+        const icon = this.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        } else {
+            input.type = 'password';
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+        }
+    });
+    
+    document.getElementById('toggleConfirmPassword').addEventListener('click', function() {
+        const input = document.getElementById('confirmPassword');
+        const icon = this.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        } else {
+            input.type = 'password';
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+        }
+    });
+    
+    // Manejar envío del formulario
+    document.getElementById('savePasswordBtn').addEventListener('click', function() {
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        const alertDiv = document.getElementById('passwordAlert');
+        
+        // Limpiar alertas previas
+        alertDiv.className = 'alert d-none';
+        alertDiv.innerHTML = '';
+        
+        // Validaciones
+        if (!newPassword || !confirmPassword) {
+            showAlert('Todos los campos son requeridos', 'danger');
+            return;
+        }
+        
+        if (newPassword.length < 4) {
+            showAlert('La contraseña debe tener al menos 4 caracteres', 'danger');
+            return;
+        }
+        
+        if (newPassword === '1234') {
+            showAlert('No puedes usar la contraseña temporal "1234"', 'danger');
+            return;
+        }
+        
+        if (newPassword !== confirmPassword) {
+            showAlert('Las contraseñas no coinciden', 'danger');
+            return;
+        }
+        
+        // Deshabilitar botón durante el envío
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Cambiando...';
+        
+        // Enviar solicitud
+        fetch('/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                new_password: newPassword,
+                confirm_password: confirmPassword
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
+                setTimeout(() => {
+                    // Cerrar modal y recargar página
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'));
+                    modal.hide();
+                    location.reload();
+                }, 2000);
+            } else {
+                showAlert(data.message, 'danger');
+                // Rehabilitar botón
+                this.disabled = false;
+                this.innerHTML = '<i class="ni ni-check-bold me-1"></i>Cambiar Contraseña';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error de conexión. Intenta nuevamente.', 'danger');
+            // Rehabilitar botón
+            this.disabled = false;
+            this.innerHTML = '<i class="ni ni-check-bold me-1"></i>Cambiar Contraseña';
+        });
+    });
+    
+    function showAlert(message, type) {
+        const alertDiv = document.getElementById('passwordAlert');
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.innerHTML = `<i class="ni ni-notification-70 me-2"></i>${message}`;
+        alertDiv.classList.remove('d-none');
+    }
+});
+</script>
 {% endblock javascripts %}

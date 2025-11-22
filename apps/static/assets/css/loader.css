@@ -1,0 +1,101 @@
+/* 
+ * Loader Component - Reutilizable
+ * Uso: 
+ * 1. Incluir este CSS en tu página
+ * 2. Incluir el template loader.html donde lo necesites
+ * 3. Usar showLoader() y hideLoader() desde JavaScript
+ */
+
+/* Loader overlay */
+.loader-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 50%, rgba(255, 255, 255, 0.75) 100%);
+  backdrop-filter: blur(10px);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  flex-direction: column;
+  transition: opacity 0.3s ease;
+}
+
+.loader-overlay.active {
+  display: flex;
+  animation: fadeIn 0.3s ease;
+}
+
+/* Loader spinner */
+.loader-spinner {
+  width: 80px;
+  height: 80px;
+  border: 8px solid rgba(255, 255, 255, 0.2);
+  border-top: 8px solid #ffffff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Loader text */
+.loader-text {
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 20px;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Animación de rotación */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Animación de fade in */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Variante para loader de pantalla completa (fixed) */
+.loader-overlay.loader-fullscreen {
+  position: fixed;
+}
+
+/* Variante con contenedor que necesita position relative */
+.loader-container {
+  position: relative;
+}
+
+/* Loader pequeño (para áreas más pequeñas) */
+.loader-overlay.loader-small .loader-spinner {
+  width: 50px;
+  height: 50px;
+  border-width: 5px;
+}
+
+.loader-overlay.loader-small .loader-text {
+  font-size: 0.9rem;
+  margin-top: 15px;
+}
+
+/* Variantes de color */
+.loader-overlay.loader-dark {
+  background: linear-gradient(135deg, rgba(32, 42, 68, 0.9) 0%, rgba(44, 56, 85, 0.9) 100%);
+}
+
+.loader-overlay.loader-light {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 242, 245, 0.95) 100%);
+}
+
+.loader-overlay.loader-light .loader-spinner {
+  border: 8px solid rgba(102, 126, 234, 0.2);
+  border-top: 8px solid #667eea;
+}
+
+.loader-overlay.loader-light .loader-text {
+  color: #344767;
+}

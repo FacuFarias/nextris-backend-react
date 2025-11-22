@@ -1,0 +1,144 @@
+/* ============================================ */
+/* ESTILOS ESPECÍFICOS PARA EJECUCION */
+/* ============================================ */
+
+/* Fijar altura del nav-pills */
+#pills-tab {
+  min-height: auto !important;
+  max-height: 100px !important;
+  flex-wrap: nowrap !important;
+}
+
+/* Fijar footer al fondo */
+.main-content {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container-fluid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.container-fluid > .row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+}
+
+footer {
+  margin-top: auto;
+}
+
+/* Estilos para botones dentro del modern-header-sheet */
+.modern-header-sheet .btn-header {
+  background: rgba(255, 255, 255, 0.25) !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(10px) !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+}
+
+.modern-header-sheet .btn-header:hover {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: 0 8px 25px rgba(255, 255, 255, 0.3),
+              0 0 25px rgba(255, 255, 255, 0.2) !important;
+  transform: translateY(-2px) !important;
+}
+
+.modern-header-sheet .btn-header i {
+  color: #ffffff !important;
+}
+
+/* Altura controlada para tab-panes */
+#pills-tabContent {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+#pills-tabContent .tab-pane {
+  align-self: flex-start !important;
+  max-height: calc(100vh - 250px) !important;
+  overflow-y: auto !important;
+}
+
+/* Estilos para card de detalles de orden */
+#card_detalles_orden .card {
+  max-height: calc(100vh - 300px) !important;
+  display: flex;
+  flex-direction: column;
+}
+
+#card_detalles_orden .card-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  flex: 1;
+  min-height: auto !important;
+  max-height: calc(100vh - 400px) !important;
+}
+
+/* Scrollbar personalizado para card de detalles */
+#card_detalles_orden .card-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+#card_detalles_orden .card-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+#card_detalles_orden .card-body::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+}
+
+#card_detalles_orden .card-body::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Asegurar que los textareas no excedan su contenedor */
+#form_detalles_orden textarea {
+  max-width: 100%;
+}
+
+/* Eliminar margen del row que contiene los pills */
+.container-fluid > .row.mb-4 {
+  margin-bottom: 0 !important;
+}
+
+/* Scrollbar para tab-panes */
+#pills-tabContent .tab-pane::-webkit-scrollbar {
+  width: 8px;
+}
+
+#pills-tabContent .tab-pane::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+#pills-tabContent .tab-pane::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+}
+
+#pills-tabContent .tab-pane::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Asegurar que el contenido no exceda la pantalla */
+#pills-detalles {
+  max-height: calc(100vh - 250px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+#pills-lista {
+  max-height: calc(100vh - 250px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}

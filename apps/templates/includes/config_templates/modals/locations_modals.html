@@ -1,0 +1,69 @@
+<!-- Modal Locations -->
+<div class="modal fade custom-modal" id="modal_location" data-bs-keyboard="true" aria-labelledby="modalLocationLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="modalLocationLabel">Nueva Location</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_location" method="POST" action="/agregar_location">
+                    <input type="hidden" name="id_location" id="id_location">
+
+                    <div class="form-group row">
+                        <div class="col-md-6">
+                            <label for="name_location">Nombre <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name_location" name="name_location" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="code_location">Código <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="code_location" name="code_location" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-6">
+                            <label for="facility_location">Facility <span class="text-danger">*</span></label>
+                            <select class="form-control" id="facility_location" name="facility_location" required>
+                                <option value="">Seleccione una facility...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="patientdomain_location">PatientDomain <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="patientdomain_location" name="patientdomain_location" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-6">
+                            <label for="email_location">Email</label>
+                            <input type="email" class="form-control" id="email_location" name="email_location">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="address_location">Dirección</label>
+                            <input type="text" class="form-control" id="address_location" name="address_location">
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-6">
+                            <label for="phone_location">Teléfono</label>
+                            <input type="text" class="form-control" id="phone_location" name="phone_location">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="status_location">Estado</label>
+                            <select class="form-control" id="status_location" name="status_location">
+                                <option value="Active">Activo</option>
+                                <option value="Inactive">Inactivo</option>
+                            </select>
+                        </div>
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes">Guardar</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>

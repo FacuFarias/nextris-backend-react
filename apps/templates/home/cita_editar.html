@@ -4,13 +4,87 @@
 
 <!-- Specific CSS goes HERE -->
 {% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-header-sheet.css">
 <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
+<style>
+  /* Estructura para scroll en tablas */
+  .main-content {
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-content > div:first-child {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Card de citas con altura adaptativa */
+  #card_citas {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+
+  #card_citas .card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Tabla con scroll */
+  .table-responsive-custom {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    min-height: 0;
+  }
+
+  /* Header sticky */
+  .tabla-primary thead {
+    position: sticky;
+    top: 0;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .tabla-primary thead th {
+    color: white !important;
+    font-weight: 600;
+    padding: 12px 16px;
+    border-bottom: none !important;
+  }
+
+  /* Card de búsqueda fijo */
+  #card_buscar {
+    flex-shrink: 0;
+  }
+
+  /* Ajustes responsive */
+  @media (max-width: 768px) {
+    .table-responsive-custom {
+      font-size: 0.875rem;
+    }
+  }
+</style>
 {% endblock stylesheets %} 
 
 {% block content %}
-<div class="position-absolute w-100 min-height-300 top-0" 
-style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); background-size: cover; background-repeat: no-repeat; background-position: top;">
-<span class="mask bg-primary opacity-6"></span>
+<div class="position-fixed w-100 h-100 top-0 start-0" style="z-index: -1;">
+  <img src="{{ config.ASSETS_ROOT }}/img/calendar.jpg" 
+       style="width: 100%; height: 100%; object-fit: cover; object-position: top;">
+  <div class="position-absolute top-0 start-0 w-100 h-100" 
+       style="background: linear-gradient(135deg, #764ba2 0%, #d4d9f7 50%, #ffffff 100%); opacity: 0.85;"></div>
 </div>
 
 
@@ -23,7 +97,7 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
             
             <h1 class="modal-title fs-5" id="t_mod_ec"><!-- Nombre paciente --></h1>
             <form method="POST" action="/editar_cita" id="Form_ec">
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
 
           <div class="modal-body">
@@ -47,25 +121,34 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
 
               <div class="form-group row">
                 <label for="ex_old">Estudio asignado</label>
-                <input type="text" class="form-control" id="ex_old" name="ex_old">
+                <input type="text" class="form-control" id="ex_old" name="ex_old" readonly>
               </div>
-              <div class="form-group row card-tabla-paciente">
-                <table class="tabla-primary table" id="tabla-exam-modal">
-                  <thead>
-                      <tr>
-                          <th>Codigo</th>
-                          <th>Examen</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                  </tbody>
-              </table>
+              <div class="form-group row">
+                <label>Seleccionar nuevo examen</label>
+                <div class="table-responsive-custom" style="max-height: 300px;">
+                  <table class="tabla-primary table" id="tabla-exam-modal">
+                    <thead>
+                        <tr>
+                            <th>Codigo</th>
+                            <th>Examen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                  </table>
+                </div>
               </div>
           </div>
           <div class="modal-footer">
-            <button type="submit" class="btn bg-gradient-success save-changes">Editar cita</button>
+            <button type="button" class="btn-primary btn-back" data-bs-dismiss="modal">
+              <i class="fas fa-times"></i>
+              <span class="btn-text">Cancelar</span>
+            </button>
+            <button type="submit" class="btn-primary btn-save">
+              <i class="fas fa-check"></i>
+              <span class="btn-text">Editar cita</span>
+            </button>
           </form>
-            <button class="btn btn-primary btn-danger" data-bs-dismiss="modal">Cancelar</button>
         </div>
         </div>
     </div>
@@ -75,140 +158,97 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
       
   {% include "includes/sidenav.html" %}
 
-  <main class="main-content position-relative border-radius-lg ">
+  <main class="main-content position-relative border-radius-lg d-flex flex-column min-vh-100">
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
 
     
 
 <!-- card de busqueda -->
-      <div class="row mx-10 pt-2">
+      <div class="row mx-2 pt-2">
         <div class="col-12">
-          <div class="card mb-2 nr-card-1" id="card_buscar">
+          <div class="card mb-2 nr-card-1 modern-header-sheet" id="card_buscar">
             <div class="card-header pb-0 d-flex justify-content-between align-items-center">
-              <h3><i class="fas fa-calendar"></i></i> Buscar Cita</h3>
-              <div class="d-flex ms-auto">
-                <button class="btn btn-nr-primary rounded-circle shadow-primary mx-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCardBody" aria-expanded="false" aria-controls="collapseCardBody">
-                  <i class="fa fa-filter" aria-hidden="true"></i>
-                </button>
+              <h3><i class="fas fa-calendar me-2"></i> Buscar Cita</h3>
+            </div>
+            <div class="card-body px-3 pt-2 pb-2">
+              <input type="hidden" name="url" id="url">
+              <div class="row g-2">
+                <div class="col-md-2">
+                  <label for="nombre_pat" class="form-label">Nombre Paciente</label>
+                  <input type="text" class="form-control" id="nombre_pat" name="nombre_pat" placeholder="Buscar por nombre">
+                </div>
+                <div class="col-md-2">
+                  <label for="medico_referente" class="form-label">Médico Referente</label>
+                  <input type="text" class="form-control" id="medico_referente" name="medico_referente" placeholder="Buscar por referente">
+                </div>
+                <div class="col-md-2">
+                  <label for="medico_solicitante" class="form-label">Médico Solicitante</label>
+                  <input type="text" class="form-control" id="medico_solicitante" name="medico_solicitante" placeholder="Buscar por solicitante">
+                </div>
+                <div class="col-md-2">
+                  <label for="equipo" class="form-label">Equipo</label>
+                  <input type="text" class="form-control" id="equipo" name="equipo" placeholder="Buscar por equipo">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Rango de Fecha</label>
+                  <div class="d-flex gap-1">
+                    <input type="date" class="form-control" id="fecha_desde" name="fecha_desde" placeholder="Desde">
+                    <input type="date" class="form-control" id="fecha_hasta" name="fecha_hasta" placeholder="Hasta">
+                  </div>
+                </div>
               </div>
             </div>
-            
-            <div id="collapseCardBody" class="collapse">
-            <div class="card-body px-0 pt-0 pb-2">
-                <input type="hidden" name="url" id="url">
-              <div class="container-fluid">
-                <div class="row datos-paciente">    
-                  <div class="col-md-5">
-                    <div class="row">
-                      <div class="col-md-4">
-                        <label for="nombre_pat">Nombre Paciente</label>
-                    </div>
-                    <div class="col-md-8">
-                      <input type="text" class="form-control" id="nombre_pat" name="nombre_pat">
-                  </div>
-                   
-                  </div>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <label for="fecha_cita">
-                                Fecha de la cita
-                            </label>
-                        </div>
-                        <div class="col-md-8">
-                            <input type="date" class='dp form-control' id="fecha_cita" name="fecha_nac">
-                        </div>
-                    </div>
-                    
-    
-                </div>
-                    <div class="col-md-5">
-                        <div class="row">
-                            
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="medico_referente">
-                                        Medico referente
-                                    </label>
-                                </div>
-                                <div class="col-md-8">
-                                  <label for="medico_referente">
-                                    <select id="medico_referente" class="form-control"></select>
-                                  </label>
-                              </div>
-                            </div>
-                            <div class="row">
-                              <div class="col-md-4">
-                                  <label for="medico_solicitante">
-                                      Medico Solicitante
-                                  </label>
-                              </div>
-                              <div class="col-md-8">
-                                <label for="medico_solicitante">
-                                  <select id="medico_solicitante" class="form-control"></select>
-                                </label>
-                            </div>
-                          </div>
-                        </div>
-                    </div>
-                    
-                    <div class="col-md-2 d-flex justify-content-end">
-                      <button type="button" id="limpiar_filtros" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp btn-danger">
-                          <i class="fa fa-eraser" aria-hidden="true" style="font-size: 25px;"></i>
-                      </button>
-                  </div>            
-                </div>
-              
-            </div>
-           
-
-            </div>
-          </div>
-          
-            
           </div>
         </div>
       </div>
 <!-- FIN card de busqueda -->
-      <div class="row">
+      <div class="row mx-2">
         <div class="col-12">
           <div class="card mb-4 shadow" id="card_citas">
             <div class="card-header pb-0">
-                <div class="row">
+                <div class="row align-items-center">
                     <div class="col-md-4">
-                      <h5><i class="fas fa-calendar"></i>   Citas</h5>
+                      <h5><i class="fas fa-calendar me-2"></i>Citas</h5>
                     </div>
-                    <div class="col-md-8 d-flex justify-content-end">
+                    <div class="col-md-8 d-flex justify-content-end gap-2">
+                      <div class="btn-group-header">
+                        <button type="button" class="btn-primary btn-edit botones_ec" disabled patient-id="" id="editar_cita" title="Editar cita">
+                          <i class="fa fa-align-left" aria-hidden="true"></i>
+                          <span class="btn-text">Editar cita</span>
+                        </button>
 
-                      <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_ec" disabled patient-id="" id="editar_cita" >
-                        <i class="fa fa-align-left" aria-hidden="true"></i>
-                    </button>
+                        <button type="button" class="btn-primary btn-edit botones_ec" disabled patient-id="" id="b_editar_fecha" title="Editar fecha">
+                          <i class="fa fa-calendar" aria-hidden="true"></i>
+                          <span class="btn-text">Editar fecha</span>
+                        </button>
 
-                    <button type="button"  class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_ec" disabled patient-id="" id="b_editar_fecha">
-                        <i class="fa fa-calendar" aria-hidden="true"></i>
-                    </button>
-
-                    <button type="button" id="eliminar_cita" class="btn btn-nr-primary botones_ec delete_b" disabled patient-id="">
-                        <i class="fa fa-trash" aria-hidden="true"></i>
-                    </button>
+                        <button type="button" id="eliminar_cita" class="btn-primary btn-danger botones_ec delete_b" disabled patient-id="" title="Eliminar cita">
+                          <i class="fa fa-trash" aria-hidden="true"></i>
+                          <span class="btn-text">Eliminar cita</span>
+                        </button>
+                      </div>
                     </div>
                 </div>
                 
                 
             </div>
             <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-                <table class="tabla-primary table" id="tabla-citas">
-                    <thead>
-                        <tr>
-                            <th>Paciente</th>
-                            <th>Turno</th>
-                            <th>Medico Referente</th>
-                            <th>Examen</th>
-                            <th>medico solicitante</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    </tbody>
-                </table>
+                <div class="table-responsive-custom">
+                    <table class="tabla-primary table" id="tabla-citas">
+                        <thead>
+                            <tr>
+                                <th>Paciente</th>
+                                <th>Turno</th>
+                                <th>Medico Referente</th>
+                                <th>Examen</th>
+                                <th>Equipo</th>
+                                <th>medico solicitante</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
             </div> 
         </div>
       </div>
@@ -218,13 +258,14 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
         <div id="calendario-content" class="mt-4" data-id=""></div>
       </div>
 
-      {% include "includes/footer.html" %}
+      <div class="mt-auto">
+        {% include "includes/footer.html" %}
+      </div>
 
     </div>
     <!-- <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script> -->
     
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js'></script>
-    <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
     <script src="{{ config.ASSETS_ROOT }}/js/editarCita.js"></script>
   </main>
 

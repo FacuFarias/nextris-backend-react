@@ -8,6 +8,11 @@ from   flask_migrate import Migrate
 from   flask_minify  import Minify
 from   sys import exit
 import mysql.connector
+from dotenv import load_dotenv
+
+# Cargar las variables de entorno desde .env ANTES de importar la configuración
+load_dotenv()
+
 from apps.config import config_dict
 from apps import create_app, db
 
@@ -38,4 +43,4 @@ if DEBUG:
     app.logger.info('ASSETS_ROOT      = ' + app_config.ASSETS_ROOT )
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host="127.0.0.1", port=5000)

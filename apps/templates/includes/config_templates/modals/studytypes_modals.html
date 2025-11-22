@@ -1,0 +1,63 @@
+<!-- Modal para Tipos de Estudio -->
+<div class="modal fade custom-modal" id="modal_code" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog modal-lg" z-index="-2">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nuevo Tipo de Estudio</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_code" method="POST" action="/agregar_studytype">
+                    <input type="hidden" name="id_code" id="id_code">
+
+                    <div class="form-group row">
+                        <div class="col-md-4">
+                            <label for="ministerial_code">Código <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="ministerial_code" name="ministerial_code" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label for="Description_code">Descripción <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="Description_code" name="Description_code" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-4">
+                            <label for="group_code">Grupo <span class="text-danger">*</span></label>
+                            <select class="form-control" id="group_code" name="group_code" required>
+                                <option value="">Seleccione un grupo...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bodypart_code">Parte del Cuerpo <span class="text-danger">*</span></label>
+                            <select class="form-control" id="bodypart_code" name="bodypart_code" required>
+                                <option value="">Seleccione una parte...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="modality_code">Modalidad <span class="text-danger">*</span></label>
+                            <select class="form-control" id="modality_code" name="modality_code" required>
+                                <option value="">Seleccione una modalidad...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-md-6">
+                            <label for="rvu_code">RVU</label>
+                            <input type="number" step="0.01" class="form-control" id="rvu_code" name="rvu_code">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="nofviews_code">Número de Vistas</label>
+                            <input type="number" class="form-control" id="nofviews_code" name="nofviews_code">
+                        </div>
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn bg-gradient-success save-changes">Guardar Tipo de Estudio</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

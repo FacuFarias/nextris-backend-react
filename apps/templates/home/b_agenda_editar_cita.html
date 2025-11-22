@@ -1,73 +1,62 @@
-<div class="row">
-    <div class="col-4">
-        <div class="card mb-4 shadow">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-12">
-                        <h6><!--Nombre del paciente--></h6>
-                    </div>
-                </div>   
-            </div>
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-                <div class="row">
-                    <div class="col-md-12">
-                        <h6><!--examen--></h6>
-                    </div>
-                </div> 
 
-                <div id='external-events' class="row">
-                    
-                </div>
-            </div> 
-        </div>   
-    </div>
+<link rel="stylesheet" href="/static/assets/css/generacion_informe.css">
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
 
-    <div class="col-4">
-        <div class="card mb-4 shadow">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-12">
-                        <h6>Fecha deseada</h6>
+<main class="position-relative generacion-informe-layout">
+    <div class="row px-2 align-items-start g-3">
+        <div class="col-lg-4 col-md-6 col-12">
+            <section class="generacion-informe-scroll">
+                <details class="panel card shadow-lg" open>
+                    <summary class="panel-header card-header"><span class="panel-title"><i class="fa fa-user me-2"></i>Paciente y Examen</span></summary>
+                    <div class="panel-body card-body">
+                        <h6 id="nombre_paciente" class="text-dark fw-bold"><!--Nombre del paciente--></h6>
+                        <h6 id="examen_paciente" class="text-secondary"><!--examen--></h6>
+                        <div id='external-events' class="mt-3"></div>
                     </div>
-                </div>   
-            </div>
-            <div class="card-body card-tabla-paciente">
-                <input type="date" id="wish_date" name="wish_date" min="2023-01-01" max="2024-12-31" class="form-control"/>
-            </div> 
-        </div>   
-    </div>
-    <div class="col-4">
-        <div class="card mb-4 shadow">
-            <div class="card-header pb-0">
-                 
-            </div>
-            <div class="card-body card-tabla-paciente">
-                <div class="row">
-                    <button type="button" class="btn btn-nr-primary rounded-circle mx-2" id="editar_fecha_cita" >
-                        <i class="fa fa-check-circle" aria-hidden="true"></i>
-                    </button>
-
-                    <button type="button" class="btn btn-nr-primary btn-danger" id="volver">
-                        <i class="fa fa-undo" aria-hidden="true"></i>
-                    </button>
-                </div>
-            </div> 
-        </div>   
-    </div>
-    <div class="row" id="agenda-section">
-    <div class="row" id="card-agenda" hidden>
-        <div class="card mb-12 shadow">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Arrastra el evento donde lo requieras>></h6>
+                </details>
+            </section>
+        </div>
+        <div class="col-lg-4 col-md-6 col-12">
+            <section class="generacion-informe-scroll">
+                <details class="panel card shadow-lg" open>
+                    <summary class="panel-header card-header"><span class="panel-title"><i class="fa fa-calendar me-2"></i>Fecha deseada</span></summary>
+                    <div class="panel-body card-body">
+                        <input type="date" id="wish_date" name="wish_date" min="2023-01-01" max="2024-12-31" class="form-control"/>
                     </div>
-                </div>   
-            </div>
-            <div class="card-agenda-general px-0 pt-0 pb-2">
-                <div id="calendario" class="calendarioo"></div>
-            </div> 
+                </details>
+            </section>
+        </div>
+        <div class="col-lg-4 col-md-12 col-12">
+            <section class="generacion-informe-scroll">
+                <details class="panel card shadow-lg" open>
+                    <summary class="panel-header card-header"><span class="panel-title"><i class="fa fa-cog me-2"></i>Acciones</span></summary>
+                    <div class="panel-body card-body d-flex flex-wrap gap-2 justify-content-center">
+                        <button type="button" class="btn btn-success botones_sp" id="editar_fecha_cita">
+                            <i class="fa fa-check me-2"></i>Aplicar cambios
+                        </button>
+                        <button type="button" class="btn btn-danger botones_sp" id="volver">
+                            <i class="fa fa-arrow-left me-2"></i>Regresar
+                        </button>
+                    </div>
+                </details>
+            </section>
         </div>
     </div>
-</div>
-</div>
+
+    <!-- Calendario/Agenda -->
+    <div class="row mt-4 px-2" id="agenda-section">
+        <div class="col-12" id="card-agenda" hidden>
+            <section class="generacion-informe-scroll row-expandible">
+                <details class="panel card shadow-lg" open>
+                    <summary class="panel-header card-header"><span class="panel-title"><i class="fa fa-calendar-alt me-2"></i>Arrastra el evento donde lo requieras</span></summary>
+                    <div class="panel-body card-body">
+                        <div class="card-agenda-general px-0 pt-0 pb-2">
+                            <div id="calendario" class="calendarioo"></div>
+                        </div>
+                    </div>
+                </details>
+            </section>
+        </div>
+    </div>
+</main>

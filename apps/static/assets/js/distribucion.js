@@ -1,3 +1,69 @@
+// Este archivo contiene funciones JavaScript para la gestión de la distribución de informes en la aplicación NextRIS.
+// Muchas funciones que se utilizan en esta sección están definidas en otros archivos JS, como loader.js y toast.js, principalmente nrframework.js.
+// No se deberán crear funciones duplicadas aquí si ya existen en esos archivos.
+
+
+function RellenarTablaDistribucion(TablaId, route) {
+    var tabla = document.getElementById(TablaId);
+    var tbody_ = tabla.querySelector('tbody');
+    fetch(route)
+        .then(response => response.json())
+        .then(data => {
+            tbody_.innerHTML = '';
+            // Iterar sobre los datos y agregar filas a la tabla
+            data.forEach(function (item) {
+                var row = document.createElement('tr');
+                row.dataset.id = item[0];
+                
+                // Verificar si el estudio está publicado (último elemento del array)
+                var isPublicado = item[item.length - 1] === 1;
+                
+                // Agregar clase especial si está publicado
+                if (isPublicado) {
+                    row.classList.add('estudio-publicado');
+                }
+
+                // Iterar sobre los elementos de item (omitir el primer elemento y el último que es ispublicated)
+                for (var i = 1; i < item.length - 1; i++) {
+                    var cell = document.createElement('td');
+                    if ((item[i]===0)||(item[i]===1)){             
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.classList.add('form-check-input')
+                        
+                        checkbox.checked = item[i]
+                        checkbox.style.opacity = 2;
+                        checkbox.disabled = true;
+                        
+                        cell.appendChild(checkbox);
+                    
+                    } else {
+                        // Para otras columnas, simplemente agrega el texto
+                        cell.textContent = item[i];
+                    }
+
+                    row.appendChild(cell);
+                }
+                
+                // Agregar indicador visual si está publicado
+                if (isPublicado) {
+                    var firstCell = row.querySelector('td');
+                    if (firstCell) {
+                        var badge = document.createElement('span');
+                        badge.innerHTML = '<i class="fas fa-check-circle me-1"></i>';
+                        badge.className = 'badge-enviado';
+                        firstCell.prepend(badge);
+                    }
+                }
+
+                tbody_.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('Error:', error);
+        });
+}
+
 function Modaledit() {
     var tabla = document.getElementById('tabla-pacientes');
     var tbody_ = tabla.querySelector('tbody');
@@ -17,7 +83,8 @@ function Modaledit() {
                 ${data} <!-- Contenido del archivo generacion_informe.html -->
             </div>
         `;
-        $('#modal_content').html(modalContent);
+        // Usar el contenedor global (definido en base.html)
+        $('#global_modal_container').html(modalContent);
 
         if (filaSeleccionada) {
             document.getElementById('name').value = name;
@@ -57,281 +124,193 @@ function Modaledit() {
     });
 }
 
-
-
-
 function VolverAtras() {
     $('#card_ordenes').show();
     $('#card_buscar').show();
     $('#data').remove(); // Eliminar el elemento #data
 }
 
-function VerImagenes(){
-    var tabla = document.getElementById('tabla-pacientes');
-    var tbody_ = tabla.querySelector('tbody');
-    var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
-    if (filaSeleccionada) {
-        var dataId = filaSeleccionada.getAttribute('data-id');}
-    $.ajax({
-        url: '/get_image_link', // URL de tu API
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({ id: dataId }),
-        success: function(response) {
-            console.log(response)
-            if (response[1]==1) {
-                console.log(response[0]);
-                var link = 'http://192.168.31.56/viewer.html?studyUID=' + response[0];
-                
-                window.open(link, '_blank');
-            } else {
-                alert('No hay imágenes disponibles para este ID.');
-            }
-        },
-        error: function() {
-            alert('Hubo un error al comunicarse con el servidor.');
-        }
-    });
-}
-
-function VerPDF() {
-    var tabla = document.getElementById('tabla-pacientes');
-    var tbody_ = tabla.querySelector('tbody');
-    var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
-    if (filaSeleccionada) {
-        var dataId = filaSeleccionada.getAttribute('data-id');}
-
-    var url = `/verpdf/${dataId}`;
-
-    fetch(url)
-        .then(response => {
-            if (response.ok) {
-                return response.blob();
-            } else {
-                throw new Error('No se pudo obtener el PDF');
-            }
-        })
-        .then(blob => {
-            var url = window.URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.target = '_blank';
-            a.click();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-}
 
 function EnviarInforme() {
     var tabla = document.getElementById('tabla-pacientes');
     var tbody_ = tabla.querySelector('tbody');
     var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+    
+    if (!filaSeleccionada) {
+        showToast('Error', 'Debe seleccionar una fila primero.', '/templates/includes/toast/toast_error.html');
+        return;
+    }
+    
     var mail = filaSeleccionada.children[3].textContent.trim(); // Obtener el contenido del cuarto td
-    if (filaSeleccionada) {
-        var dataId = filaSeleccionada.getAttribute('data-id');
+    var dataId = filaSeleccionada.getAttribute('data-id');
+    
+    if (!mail || mail === '') {
+        showToast('Error', 'No hay email asociado al paciente.', '/templates/includes/toast/toast_error.html');
+        return;
     }
 
     var url = `/send_mail/${dataId}?mail=${encodeURIComponent(mail)}`;
 
+    // Mostrar notificación de procesando
+    showToast('Enviando...', 'Enviando informe por email, por favor espere...', '/templates/includes/toast/toast_alert.html');
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
-            console.log('Resultado:', data.message || 'Correo enviado exitosamente');
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-}
-
-
-
-//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
-function ConfigurarTabla(TablaId,botonesClass){
-    
-    var tabla = document.getElementById(TablaId);
-    var tbody_g= tabla.querySelector('tbody');
-    tbody_g.addEventListener('click', function (event) {
-        var filas = tbody_g.querySelectorAll('tr');
-        for (var i = 0; i < filas.length; i++) {
-            filas[i].classList.remove('fila-seleccionada');
-        }
-        
-        var fila = event.target.closest('tr');
-        if (fila) {
-            fila.classList.add('fila-seleccionada');            
-            var botones = document.getElementsByClassName(botonesClass);
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = false;
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-danger');
-                } else {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-success');
-                }
-            }
-        } else {
-            var botones = document.getElementsByClassName('botones');
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = true;
+            if (data.message) {
+                showToast('Éxito', data.message, '/templates/includes/toast/toast_success.html');
+                console.log('Resultado:', data.message);
                 
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-danger');
-                    boton.classList.add('btn-secondary');
-                } else {
-                    boton.classList.remove('btn-success');
-                    boton.classList.add('btn-secondary');
-                }
+                // Eliminar la fila después de enviar exitosamente
+                filaSeleccionada.remove();
+                
+                // Verificar si quedan estudios
+                verificarEstudiosVacios();
+            } else if (data.error) {
+                showToast('Error', data.error, '/templates/includes/toast/toast_error.html');
+                console.error('Error:', data.error);
+            } else {
+                showToast('Éxito', 'Correo enviado exitosamente', '/templates/includes/toast/toast_success.html');
+                console.log('Resultado: Correo enviado exitosamente');
+                
+                // Eliminar la fila después de enviar exitosamente
+                filaSeleccionada.remove();
+                
+                // Verificar si quedan estudios
+                verificarEstudiosVacios();
             }
-        }
-        
-    });
-}
-
-function RellenarTabla(TablaId, route) {
-    var tabla = document.getElementById(TablaId);
-    var tbody_ = tabla.querySelector('tbody');
-    fetch(route)
-        .then(response => response.json())
-        .then(data => {
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
-
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
         })
         .catch(error => {
+            showToast('Error', 'Error al enviar el correo: ' + error.message, '/templates/includes/toast/toast_error.html');
             console.error('Error:', error);
         });
 }
 
-function RellenarSelect(SelectId,dNeeded,TableId){
-    fetch('/rellenar_select', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dNeeded: dNeeded, TableId:TableId }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        var selectElement = document.getElementById(SelectId);
 
-    // Limpiar cualquier opción existente en el <select>
-        selectElement.innerHTML = '';
-        for (var i = 0; i < data.data.length; i++) {
-            var option = document.createElement('option');
-            option.value= data.data[i][0]
-            option.text= data.data[i][1]
-            selectElement.appendChild(option);
+function verificarEstudiosVacios() {
+    var tabla = document.getElementById('tabla-pacientes');
+    var tbody = tabla.querySelector('tbody');
+    var filas = tbody.querySelectorAll('tr:not(.no-estudios-row)');
+    
+    // Si no hay filas o todas son filas de "no estudios"
+    if (filas.length === 0) {
+        // Verificar si ya existe la fila de mensaje
+        var existeFilaMensaje = tbody.querySelector('.no-estudios-row');
+        
+        if (!existeFilaMensaje) {
+            // Crear la fila de mensaje
+            var row = document.createElement('tr');
+            row.classList.add('no-estudios-row');
+            
+            // Crear la celda que ocupará todas las columnas
+            var cell = document.createElement('td');
+            
+            // Obtener el número de columnas de la tabla
+            var thead = tabla.querySelector('thead');
+            var numColumnas = thead ? thead.querySelectorAll('th').length : 4;
+            cell.setAttribute('colspan', numColumnas);
+            
+            // Agregar el contenido con el icono y el mensaje
+            cell.innerHTML = '<i class="fas fa-check-circle" style="color: #2dce89; font-size: 24px; margin-right: 10px;"></i>' +
+                           '<span style="color: #2dce89; font-size: 16px; font-weight: 500;">No hay más estudios para distribuir</span>';
+            cell.style.textAlign = 'center';
+            cell.style.padding = '30px';
+            
+            row.appendChild(cell);
+            tbody.appendChild(row);
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
+    }
 }
 
-function RellenarSelectCondicional(SelectId,dNeeded,TableId,dCond,IdCond){
-    fetch('/rellenar_select', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dNeeded: dNeeded, TableId:TableId }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        var selectElement = document.getElementById(SelectId);
-
-    // Limpiar cualquier opción existente en el <select>
-        selectElement.innerHTML = '';
-        for (var i = 0; i < data.data.length; i++) {
-            var option = document.createElement('option');
-            option.value= data.data[i][0]
-            option.text= data.data[i][1]
-            selectElement.appendChild(option);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
+function cargarOrdenes() {
+    var checkboxYaEnviados = document.getElementById('checkbox_ya_enviados');
+    var incluirEnviados = checkboxYaEnviados ? checkboxYaEnviados.checked : false;
+    
+    var url = `/get_orders_to_distribution?incluir_enviados=${incluirEnviados}`;
+    
+    RellenarTablaDistribucion('tabla-pacientes', url);
+    
+    // Esperar un momento para que la tabla se llene y luego verificar
+    setTimeout(verificarEstudiosVacios, 500);
 }
-
-// IdCond sería el dato que quiero para filtrar en la columna colCond
-function RellenarSelectCondicionalId(SelectId,dNeeded,TableId,idCond,colCond){
-    fetch('/rellenar_select_cond_id', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dNeeded: dNeeded, TableId:TableId, idCond:idCond,colCond:colCond }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        var selectElement = document.getElementById(SelectId);
-
-    // Limpiar cualquier opción existente en el <select>
-        selectElement.innerHTML = '';
-        for (var i = 0; i < data.data.length; i++) {
-            var option = document.createElement('option');
-            option.value= data.data[i][0]
-            option.text= data.data[i][1]
-            selectElement.appendChild(option);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
-}
-
 
 document.addEventListener("DOMContentLoaded", function() {
-    // configuracion de busqueda y llenado de tabla
-    RellenarTabla('tabla-pacientes',`/get_orders_to_distribution`)
-
-    var boton_vi=document.getElementById("b_ver_info")
-    boton_vi.addEventListener("click",function(){VerPDF()})
-
-    var boton_ver_ima=document.getElementById("b_ver_dicom")
-    boton_ver_ima.addEventListener("click",function(){VerImagenes()})
-
-    var b_enviar_inf=document.getElementById("b_enviar_inf")
-    b_enviar_inf.addEventListener("click",function(){EnviarInforme()})
-
-    ConfigurarTabla('tabla-pacientes','botones_sp')
-
-   
+    console.log('DOM Loaded - Iniciando distribucion.js');
     
+    // configuracion de busqueda y llenado de tabla
+    cargarOrdenes();
+
+    var boton_vi = document.getElementById("b_ver_info");
+    if (boton_vi) {
+        console.log('Botón b_ver_info encontrado');
+        boton_vi.addEventListener("click", function() {
+            var tabla = document.getElementById('tabla-pacientes');
+            var tbody_ = tabla.querySelector('tbody');
+            var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+            if (filaSeleccionada) {
+                var dataId = filaSeleccionada.getAttribute('data-id');
+                VerPDF(dataId);
+            }
+        });
+    } else {
+        console.error('Botón b_ver_info NO encontrado');
+    }
+
+    var boton_ver_ima = document.getElementById("b_ver_dicom");
+    if (boton_ver_ima) {
+        console.log('Botón b_ver_dicom encontrado');
+        boton_ver_ima.addEventListener("click", function() {
+            console.log('Click en b_ver_dicom detectado');
+            
+            // Obtener la fila seleccionada
+            var tabla = document.getElementById('tabla-pacientes');
+            var tbody_ = tabla.querySelector('tbody');
+            var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+            
+            if (!filaSeleccionada) {
+                showToast('Error', 'Debe seleccionar una fila primero.', '/templates/includes/toast/toast_error.html');
+                return;
+            }
+            
+            // Obtener el ID del estudio
+            var dataId = filaSeleccionada.getAttribute('data-id');
+            
+            if (!dataId) {
+                showToast('Error', 'No se pudo obtener el ID del estudio.', '/templates/includes/toast/toast_error.html');
+                return;
+            }
+            
+            console.log('ID del estudio seleccionado: ' + dataId);
+            
+            // Llamar a la función de nrframework.js con el ID
+            VerImagenes(dataId);
+        });
+    } else {
+        console.error('Botón b_ver_dicom NO encontrado');
+    }
+
+    var b_enviar_inf = document.getElementById("b_enviar_inf");
+    if (b_enviar_inf) {
+        console.log('Botón b_enviar_inf encontrado');
+        b_enviar_inf.addEventListener("click", function() {
+            EnviarInforme();
+        });
+    } else {
+        console.error('Botón b_enviar_inf NO encontrado');
+    }
+
+    ConfigurarTabla('tabla-pacientes','botones_sp');
+    
+    // Agregar evento al checkbox de "Ya enviados"
+    var checkboxYaEnviados = document.getElementById('checkbox_ya_enviados');
+    if (checkboxYaEnviados) {
+        console.log('Checkbox checkbox_ya_enviados encontrado');
+        checkboxYaEnviados.addEventListener('change', function() {
+            cargarOrdenes();
+        });
+    } else {
+        console.log('Checkbox checkbox_ya_enviados NO encontrado');
+    }
+    
+    console.log('distribucion.js - Inicialización completada');
 });

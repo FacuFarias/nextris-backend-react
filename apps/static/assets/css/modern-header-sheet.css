@@ -1,0 +1,99 @@
+/* ======================================== */
+/*     MODERN HEADER SHEET STYLES         */
+/* ======================================== */
+
+/* Card header principal con estilo similar a nav-pills */
+.modern-header-sheet {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%) !important;
+    border-radius: 20px !important;
+    padding: 20px !important;
+    box-shadow: 0 8px 32px rgba(118, 75, 162, 0.3) !important;
+    backdrop-filter: blur(4px) !important;
+    border: none !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+/* Card body dentro del header */
+.modern-header-sheet .card-body {
+    position: relative !important;
+    background: transparent !important;
+    padding: 0.5rem !important;
+    overflow: hidden !important;
+}
+
+/* Título dentro del header */
+.modern-header-sheet h3 {
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    margin: 0 !important;
+}
+
+.modern-header-sheet h3 i {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Input group dentro del header */
+.modern-header-sheet .input-group {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+.modern-header-sheet .form-control {
+    background: rgba(255, 255, 255, 0.25) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    color: #ffffff !important;
+    font-weight: 500 !important;
+}
+
+.modern-header-sheet .form-control::placeholder {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.modern-header-sheet .form-control:focus {
+    background: rgba(255, 255, 255, 0.35) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+}
+
+/* Botón de búsqueda */
+.modern-header-sheet .btn-nr-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.modern-header-sheet .btn-nr-primary:hover {
+    box-shadow: 0 6px 20px rgba(118, 75, 162, 0.4),
+                0 0 25px rgba(118, 75, 162, 0.3),
+                0 0 50px rgba(102, 126, 234, 0.2) !important;
+}
+
+/* Pills dentro del header */
+.modern-header-sheet .nav-pills .nav-link {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.modern-header-sheet .nav-pills .nav-link:hover {
+    background: rgba(255, 255, 255, 0.35) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25),
+                0 0 20px rgba(255, 255, 255, 0.3),
+                0 0 40px rgba(118, 75, 162, 0.2) !important;
+}
+
+.modern-header-sheet .nav-pills .nav-link.active {
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #764ba2 !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+}

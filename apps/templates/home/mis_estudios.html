@@ -1,0 +1,165 @@
+{% extends 'layouts/base.html' %}
+
+{% block title %} Mis Estudios {% endblock title %}
+
+<!-- Specific CSS goes HERE -->
+{% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-header-sheet.css">
+<link rel="stylesheet" href="/static/assets/css/mis_estudios.css">
+{% endblock stylesheets %}
+
+{% block content %}
+
+<div class="position-fixed w-100 h-100 top-0 start-0" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/hospital.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center; z-index: -1;">
+<span class="mask" style="background: linear-gradient(135deg, rgba(118, 75, 162, 0.85) 0%, rgba(212, 217, 247, 0.7) 50%, rgba(255, 255, 255, 0.6) 100%); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></span>
+</div>
+
+  {% include "includes/sidenav.html" %}
+
+  <main class="main-content position-relative">
+    <div class="content-wrapper">
+
+      <!-- card header -->
+      <div class="card shadow-lg mx-2 mx-md-4 mt-5 modern-header-sheet">
+        <div class="card-body py-3">
+          <div class="row g-3 align-items-center">
+            <div class="col-lg-12 col-md-12 col-12 d-flex align-items-center justify-content-center">
+              <h3 class="mb-0 d-flex align-items-center">
+                <i class="ni ni-books me-2"></i> Mis Estudios Médicos
+              </h3>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fin card header -->
+
+      <!-- Tabla de estudios -->
+      <div class="row mx-2 mx-md-4 mt-3">
+        <div class="col-12">
+          <div class="card shadow">
+            <div class="card-header pb-0">
+              <div class="row">
+                <div class="col-md-4 col-12 mb-2 mb-md-0">
+                  <h6>Historial de Estudios</h6>
+                </div>
+                
+                <div class="col-md-8 col-12 d-flex justify-content-center justify-content-md-end">
+                  <div class="btn-group-header">
+                    <button type="button" class="btn-primary btn-pdf botones_hp" disabled id="ver-informe" title="Ver Informe">
+                      <i class="fa fa-file" aria-hidden="true"></i>
+                      <span class="btn-text">Ver Informe</span>
+                    </button>
+                    <button type="button" class="btn-primary btn-dcm botones_hp" disabled id="ver-imagen" title="Ver Imágenes">
+                      <i class="fas fa-file-image" aria-hidden="true"></i>
+                      <span class="btn-text">Ver Imágenes</span>
+                    </button>
+                    <button type="button" class="btn-primary btn-email botones_hp" disabled id="enviar-medico" title="Enviar a Médico Referente">
+                      <i class="fa fa-share" aria-hidden="true"></i>
+                      <span class="btn-text">Enviar a Médico</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <hr class="horizontal dark mt-0">
+            </div>
+            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+              <div class="table-responsive-custom">
+                <table class="tabla-primary table" id="tabla-estudios">
+                  <thead>
+                    <tr>
+                      <th>Estudio</th>
+                      <th class="d-none d-md-table-cell">Médico Autor</th>
+                      <th class="d-none d-lg-table-cell">Médico Referente</th>
+                      <th>Fecha</th>
+                      <th class="d-none d-md-table-cell">Modalidad</th>
+                      <th class="d-none d-lg-table-cell">Estado</th>
+                      <th class="d-none d-lg-table-cell">Con Informe</th>
+                      <th class="d-none d-lg-table-cell">Con Imagen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td colspan="8" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                          <span class="visually-hidden">Cargando...</span>
+                        </div>
+                        <p class="mt-2">Cargando tus estudios...</p>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div> 
+          </div>
+        </div>
+      </div>
+
+      {% include "includes/footer.html" %}
+
+    </div>
+    <div id="toastContainer"></div>
+  </main>
+
+<!-- Modal de Cambio de Contraseña -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" data-requires-change="{{ 'true' if session.get('requires_password_change') else 'false' }}">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-gradient-primary">
+        <h5 class="modal-title text-white" id="changePasswordModalLabel">
+          <i class="ni ni-lock-circle-open me-2"></i>
+          Cambio de Contraseña Requerido
+        </h5>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info" role="alert">
+          <i class="ni ni-notification-70 me-2"></i>
+          <strong>Bienvenido al sistema!</strong><br>
+          Por seguridad, debes cambiar tu contraseña temporal antes de continuar.
+        </div>
+        
+        <form id="changePasswordForm">
+          <div class="mb-3">
+            <label for="newPassword" class="form-label">Nueva Contraseña</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="newPassword" required minlength="4">
+              <button class="btn btn-outline-secondary" type="button" id="toggleNewPassword">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <div class="form-text">Mínimo 4 caracteres. No uses "1234".</div>
+          </div>
+          
+          <div class="mb-3">
+            <label for="confirmPassword" class="form-label">Confirmar Contraseña</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="confirmPassword" required minlength="4">
+              <button class="btn btn-outline-secondary" type="button" id="toggleConfirmPassword">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          
+          <div id="passwordAlert" class="alert d-none" role="alert"></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="savePasswordBtn">
+          <i class="ni ni-check-bold me-1"></i>
+          Cambiar Contraseña
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock content %}
+
+<!-- Specific JS goes HERE --> 
+{% block javascripts %}
+<script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
+<script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+<script src="{{ config.ASSETS_ROOT }}/js/mis_estudios.js"></script>
+{% endblock javascripts %}

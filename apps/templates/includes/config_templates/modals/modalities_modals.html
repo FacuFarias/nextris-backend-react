@@ -1,0 +1,37 @@
+<!-- Modal Modalidades -->
+<div class="modal fade custom-modal" id="modal_mod" data-bs-keyboard="true" aria-labelledby="exampleModalLabel" aria-hidden="false" data-bs-backdrop="true">
+    <div class="modal-dialog" z-index="-2">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="exampleModalLabel">Nueva Modalidad</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">Cerrar</button>
+            </div>
+            <div class="modal-body">
+                <form id="Form_mod" method="POST" action="/agregar_mod">
+                    <input type="hidden" name="id_mod" id="id_mod">
+
+                    <div class="form-group row">
+                        
+                        <div class="col-md-8">
+                            <label for="Description_mod">Descripción</label>
+                            <input type="text" class="form-control" id="Description_mod" name="Description_mod" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="ext_code_mod">Codigo Ex</label>
+                            <input type="text" class="form-control" id="ext_code_mod" name="ext_code_mod">
+                        </div>
+                        
+                    </div>
+
+                    <div class="form-group">
+                        <input type="checkbox" id="IsMandatoryEquipmentChange" name="IsMandatoryEquipmentChange"><label for="IsMandatoryEquipmentChange">Cambio de equipo obligatorio</label><br>
+                    </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes">Guardar codigo</button>
+                </form>
+                <button class="btn btn-primary" data-bs-dismiss="modal" >Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>

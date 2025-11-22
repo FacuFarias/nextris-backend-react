@@ -1,47 +1,54 @@
-function ConfigDefaultModal(FormId, route_action, ModalId) {
-    var form_modal_p = document.getElementById(FormId);
-    form_modal_p.action = route_action;
-    console.log("hola", form_modal_p.action);
-    
-    form_modal_p.addEventListener('submit', function(event) {
-        // Evitar el envío predeterminado del formulario
-        event.preventDefault();
-        var executionNotes = document.getElementById('execution_notes').value;
-        var hiddenInput = document.getElementById('id_np');
-        var dataId = hiddenInput.value;
-        console.log("Event prevented", executionNotes, dataId);
-
-        fetch(form_modal_p.action, {
+// Función global para mostrar los detalles de la orden
+function MostrarDetallesOrden(fila) {
+    if (fila) {
+        var id = fila.dataset.id;
+        fetch('/get_examination_details', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                execution_notes: executionNotes,
-                data_id: dataId
-            }),
+            body: JSON.stringify({ guid: id })
         })
-        .then(response => response.json())
-        .then(data => {
-            console.log(data);
-            // Usar Bootstrap 5 modal hide method
-            var modalElement = document.getElementById(ModalId.substring(1));
-            var modal = bootstrap.Modal.getInstance(modalElement);
-            modal.hide();
-            // Remover manualmente el backdrop
-            removeModalBackdrop();
-        }) 
-        .catch(error => {
-            console.error('Error:', error);
-            var modalElement = document.getElementById(ModalId.substring(1));
-            var modal = bootstrap.Modal.getInstance(modalElement);
-            modal.hide();
-            // Remover manualmente el backdrop
-            removeModalBackdrop();
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            var historiaElem = document.getElementById('historia_clinica');
+            if (historiaElem) historiaElem.value = data.history || '';
+            var preguntaElem = document.getElementById('pregunta_clinica');
+            if (preguntaElem) preguntaElem.value = data.clinicalquestion || '';
+            var lateralidadElem = document.getElementById('s_lateralidad');
+            if (lateralidadElem) lateralidadElem.value = data.laterality_id || '';
+            var statElem = document.getElementById('stat');
+            if (statElem) statElem.value = data.stat ? 'Sí' : 'No';
+            var numVistasElem = document.getElementById('num_vistas');
+            if (numVistasElem) numVistasElem.value = data.numberofviews || '';
+            var detalleElem = document.getElementById('detalle_tecnico');
+            if (detalleElem) detalleElem.value = data.othersdetails || '';
+            var detallesTab = document.getElementById('pills-detalles-tab');
+            if (detallesTab) {
+                detallesTab.removeAttribute('disabled');
+                detallesTab.click();
+                var listaPane = document.getElementById('pills-lista');
+                var detallesPane = document.getElementById('pills-detalles');
+                if (listaPane && detallesPane) {
+                    listaPane.classList.remove('active', 'show');
+                    detallesPane.classList.add('active', 'show');
+                }
+            }
+            var accNumber = '';
+            if (fila && fila.cells && fila.cells.length > 7) {
+                accNumber = fila.cells[7].textContent.trim();
+            }
+            var detallesPane = document.getElementById('pills-detalles');
+            var detallesTitulo = detallesPane ? detallesPane.querySelector('h6') : null;
+            if (detallesTitulo) {
+                detallesTitulo.textContent = 'Detalles de la orden: ' + accNumber;
+            }
+        })
+        .catch(function(error) {
+            console.error('Error al obtener detalles de la orden:', error);
         });
-    });
+    }
 }
-
 function removeModalBackdrop() {
     var backdrop = document.querySelector('.modal-backdrop');
     if (backdrop) {
@@ -99,26 +106,65 @@ function CancelarOrden(TablaId) {
         console.log('No hay fila seleccionada.');
     }
 }
+
 function EjecutarOrden(TablaId) {
     var tabla = document.getElementById(TablaId);
     var tbody_ = tabla.querySelector('tbody');
     var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
     if (filaSeleccionada) {
         var dataId = filaSeleccionada.getAttribute('data-id');
+        // Obtener los datos de los campos de detalles de la orden
+    var historia = document.getElementById('historia_clinica')?.value.trim() || '';
+    var pregunta = document.getElementById('pregunta_clinica')?.value.trim() || '';
+    var lateralidad = document.getElementById('s_lateralidad')?.value.trim() || '';
+    var statValue = document.getElementById('stat')?.value || '';
+    var stat = (statValue === 'Sí') ? 1 : 0;
+    var numVistas = document.getElementById('num_vistas')?.value.trim() || '';
+    var detalleTecnico = document.getElementById('detalle_tecnico')?.value.trim() || '';
 
-        // Enviar el data-id al backend
+    // Si algún campo está vacío, enviar 'no clasifica'
+    historia = historia === '' ? 'no clasifica' : historia;
+    pregunta = pregunta === '' ? 'no clasifica' : pregunta;
+    lateralidad = lateralidad === '' ? 'no clasifica' : lateralidad;
+    numVistas = numVistas === '' ? 'no clasifica' : numVistas;
+    detalleTecnico = detalleTecnico === '' ? 'no clasifica' : detalleTecnico;
+
+        // Enviar el data-id y los datos al backend
         fetch('/ejecutar_orden', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ id: dataId }),
+            body: JSON.stringify({
+                id: dataId,
+                historia: historia,
+                pregunta: pregunta,
+                lateralidad: lateralidad,
+                stat: stat,
+                num_vistas: numVistas,
+                detalle_tecnico: detalleTecnico
+            }),
         })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 // Eliminar la fila si la respuesta es exitosa
                 filaSeleccionada.remove();
+                // Volver a la pestaña de lista
+                var listaTab = document.getElementById('pills-lista-tab');
+                var listaPane = document.getElementById('pills-lista');
+                var detallesPane = document.getElementById('pills-detalles');
+                if (listaTab) {
+                    listaTab.click();
+                }
+                if (listaPane && detallesPane) {
+                    listaPane.classList.add('active', 'show');
+                    detallesPane.classList.remove('active', 'show');
+                }
+                // Mostrar un mensaje de éxito
+                showToast('Felicitaciones', 'Ejecutaste la orden con Exito', "/templates/includes/toast/toast_success.html")
+                console.log('Orden ejecutada con éxito');
+                
             } else {
                 console.error('Error en la respuesta del servidor:', data.error);
             }
@@ -131,202 +177,88 @@ function EjecutarOrden(TablaId) {
     }
 }
 
-function RellenarTabla(TablaId, route) {
+
+
+function VerDetalles(TablaId){
+        
+    // Obtener la fila seleccionada
     var tabla = document.getElementById(TablaId);
     var tbody_ = tabla.querySelector('tbody');
-    fetch(route)
-        .then(response => response.json())
-        .then(data => {
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
+    var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+    if (filaSeleccionada) {
+        MostrarDetallesOrden(filaSeleccionada);
+    } else {
+        console.warn('No hay fila seleccionada.');
+    }
 
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-}
-//Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
-
-function ConfigurarTabla(TablaId,botonesClass){
-    
-    var tabla = document.getElementById(TablaId);
-    var tbody_g= tabla.querySelector('tbody');
-    tbody_g.addEventListener('click', function (event) {
-        var filas = tbody_g.querySelectorAll('tr');
-        for (var i = 0; i < filas.length; i++) {
-            filas[i].classList.remove('fila-seleccionada');
-        }
-        
-        var fila = event.target.closest('tr');
-        if (fila) {
-            fila.classList.add('fila-seleccionada');            
-            var botones = document.getElementsByClassName(botonesClass);
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = false;
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-danger');
-                } else {
-                    boton.classList.remove('btn-secondary');
-                    boton.classList.add('btn-success');
-                }
-            }
-        } else {
-            var botones = document.getElementsByClassName('botones');
-            for (var i = 0; i < botones.length; i++) {
-                var boton = botones[i];
-                boton.disabled = true;
-                
-        
-                // Verificar si el botón tiene la clase 'delete_b'
-                if (boton.classList.contains('delete_b')) {
-                    boton.classList.remove('btn-danger');
-                    boton.classList.add('btn-secondary');
-                } else {
-                    boton.classList.remove('btn-success');
-                    boton.classList.add('btn-secondary');
-                }
-            }
-        }
-        
-    });
-}
-
-
-
-function RellenarSelect(SelectId, dNeeded, TableId) {
-    fetch('/rellenar_select', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dNeeded: dNeeded, TableId: TableId }),
-    })
-        .then(response => response.json())
-        .then(data => {
-            var selectElement = document.getElementById(SelectId);
-
-            // Limpiar cualquier opción existente en el <select>
-            selectElement.innerHTML = '';
-
-            // Agregar la opción "Todas" al principio
-            var todasOption = document.createElement('option');
-            todasOption.value = 'Todas';
-            todasOption.text = 'Todas';
-            selectElement.appendChild(todasOption);
-
-            // Llenar el <select> con las opciones de los datos
-            for (var i = 0; i < data.data.length; i++) {
-                var option = document.createElement('option');
-                option.value = data.data[i][0];
-                option.text = data.data[i][1];
-                selectElement.appendChild(option);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-}
-
-
-function configSearchForm(FormId,action,TableId){
-    var FormPacientes = document.getElementById(FormId);
-
-    FormPacientes.addEventListener('submit', function(event) {
-        // Evitar el envío predeterminado del formulario
-        event.preventDefault();
-        // Realizar la solicitud HTTP usando fetch
-        fetch(action, {
-            method: 'POST',  // Puedes cambiarlo a 'POST' si prefieres enviar datos en el cuerpo
-            body: new FormData(FormPacientes)
-        })
-        .then(response => response.json())
-        .then(data => {
-            var tablaPacientes = document.getElementById(TableId);
-            var tbody_ = tablaPacientes.querySelector('tbody');
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
-
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
-    });
 }
 
 document.addEventListener("DOMContentLoaded", function() {
 
-    ConfigDefaultModal('Form_notas','/agregar_notas','#modal_notas_ex',"tabla_ordenes")
+    // ConfigDefaultModal('Form_notas','/agregar_notas','#modal_notas_ex',"tabla_ordenes")
 
     var boton=document.getElementById("b_ejecutar_orden")
     boton.addEventListener("click",function(){EjecutarOrden('tabla_ordenes')})
 
-    var boton=document.getElementById("b_cancelar_orden")
-    boton.addEventListener("click",function(){CancelarOrden('tabla_ordenes')})
+    var boton_ver_detalles=document.getElementById("b_ver_detalles")
+    boton_ver_detalles.addEventListener("click",function(){
+        var tabla = document.getElementById('tabla_ordenes');
+        var tbody_ = tabla.querySelector('tbody');
+        var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+        if (filaSeleccionada) {
+            MostrarDetallesOrden(filaSeleccionada);
+            
 
-    var boton=document.getElementById("b_agregar_notas")
-    boton.addEventListener("click",function(){AgregarNotas('tabla_ordenes')})
+        } else {
+            console.warn('No hay fila seleccionada.');
+        }
+
+    })
 
     RellenarTabla('tabla_ordenes',`/get_orders_ex`)
     RellenarSelect("s_modalidad","Description","public.IsModality")
+    RellenarSelect("s_lateralidad","description","public.islaterality",'No Clasifica',false)
     ConfigurarTabla('tabla_ordenes','botones_sp')
-    configSearchForm('search_patient','/buscar_pacientes2',"tabla_ordenes")
+
+    // Deshabilitar la pestaña de detalles al cargar
+    var detallesTab = document.getElementById('pills-detalles-tab');
+    if (detallesTab) {
+        detallesTab.setAttribute('disabled', 'disabled');
+    }
+
+    // Listener para habilitar botón ejecutar orden cuando se selecciona una fila
+    var tabla = document.getElementById('tabla_ordenes');
+    var tbody = tabla.querySelector('tbody');
+    
+    tbody.addEventListener('click', function (event) {
+        var fila = event.target.closest('tr');
+        if (fila && fila.parentElement.tagName === 'TBODY') {
+            // Obtener todos los botones que deben habilitarse
+            var btnEjecutar = document.getElementById('b_ejecutar_orden');
+            
+            // Verificar si hay una fila seleccionada
+            var filaSeleccionada = tbody.querySelector('.fila-seleccionada');
+            
+            if (filaSeleccionada) {
+                // Habilitar botón ejecutar orden
+                if (btnEjecutar) {
+                    btnEjecutar.disabled = false;
+                }
+            } else {
+                // Deshabilitar botón ejecutar orden
+                if (btnEjecutar) {
+                    btnEjecutar.disabled = true;
+                }
+            }
+        }
+    });
+
+    // Listener para rellenar detalles al hacer doble clic en una fila
+    tbody.addEventListener('dblclick', function (event) {
+        var fila = event.target.closest('tr');
+        if (fila) {
+            MostrarDetallesOrden(fila);
+        }
+    });
     
 })

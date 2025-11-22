@@ -1,4 +1,6 @@
-
+// Este archivo contiene funciones JavaScript para la gestión de la distribución de informes en la aplicación NextRIS.
+// Muchas funciones que se utilizan en esta sección están definidas en otros archivos JS, como loader.js y toast.js, principalmente nrframework.js.
+// No se deberán crear funciones duplicadas aquí si ya existen en esos archivos.
 
 //Objeto con datos de la orden
 let OrderData = {
@@ -18,28 +20,34 @@ function AdmisionarCita(TablaId) {
     if (filaSeleccionada) {
         var dataId = filaSeleccionada.getAttribute('data-id');
         console.log(dataId)
-        fetch('/admisionar_cita', {
+    fetch('/api/admisionar_cita', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             
-            body: JSON.stringify({ dataId: dataId })
+            body: JSON.stringify({ cita_id: dataId })
         })
         .then(response => response.json())
         .then(data => {
             // Manejar la respuesta del servidor
             if (data.success) {
-                alert("La cita se ha editado correctamente.");
-                window.location.reload();
-                // Aquí puedes limpiar OrderData o realizar cualquier otra acción necesaria
+                // Eliminar la fila visualmente
+                filaSeleccionada.remove();
+                
+                // Verificar si la tabla quedó vacía después de eliminar
+                verificarYMostrarMensajeTablaVacia(TablaId);
+                
+                // Mostrar notificación toast de éxito
+                showToast('Éxito', `Cita admisionada correctamente. Admisión: ${data.admision || 'N/A'}`, '/templates/includes/toast/toast_success.html');
             } else {
-                alert("Hubo un problema al insertar las citas: " + data.message);
+                // Mostrar error con toast
+                showToast('Error', `Hubo un problema al admisionar la cita: ${data.error || data.message}`, '/templates/includes/toast/toast_alert.html');
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert("Hubo un error al insertar las citas.");
+            showToast('Error', 'Hubo un error al admisionar la cita.', '/templates/includes/toast/toast_alert.html');
         });
     }
 
@@ -55,10 +63,11 @@ function AbrirCalendarioParaEditar(TablaId) {
         
         // Extraer el nombre del paciente de la segunda columna
         var OrderId = filaSeleccionada.getAttribute('data-id');
-        var nombrePaciente = filaSeleccionada.querySelectorAll('td')[0].textContent.trim();
-        var fecha = filaSeleccionada.querySelectorAll('td')[1].textContent.trim();
-        var mref = filaSeleccionada.querySelectorAll('td')[2].textContent.trim();
-        var examen = filaSeleccionada.querySelectorAll('td')[3].textContent.trim();
+        var celdas = filaSeleccionada.querySelectorAll('td');
+        var nombrePaciente = celdas[0] ? celdas[0].textContent.trim() : '';
+        var fecha = celdas[1] ? celdas[1].textContent.trim() : '';
+        var mref = celdas[2] ? celdas[2].textContent.trim() : '';
+        var examen = celdas[3] ? celdas[3].textContent.trim() : '';
         // Cargar el contenido HTML del archivo y establecer el data-id
         $.get('/b_agenda_editar_cita.html', function(data) {
             // Reemplazar los marcadores en el contenido HTML
@@ -217,93 +226,82 @@ function SetDeleteButton(buttonId,TablaId,routeDelete){
     });
 }
 
-
-function RellenarTabla(TablaId, route) {
-    var tabla = document.getElementById(TablaId);
-    var tbody_ = tabla.querySelector('tbody');
-    fetch(route)
-        .then(response => response.json())
-        .then(data => {
-            tbody_.innerHTML = '';
-            // Iterar sobre los datos y agregar filas a la tabla
-            data.forEach(function (item) {
-                var row = document.createElement('tr');
-                row.dataset.id = item[0];
-
-                // Iterar sobre los elementos de item (omitir el primer elemento) y agregar un <td> por cada uno
-                for (var i = 1; i < item.length; i++) {
-                    var cell = document.createElement('td');
-                    if ((item[i]===0)||(item[i]===1)){             
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.classList.add('form-check-input')
-                        
-                        checkbox.checked = item[i]
-                        checkbox.style.opacity = 2;
-                        checkbox.disabled = true;
-                        
-                        cell.appendChild(checkbox);
-                    
-                    } else {
-                        // Para otras columnas, simplemente agrega el texto
-                        cell.textContent = item[i];
-                    }
-
-                    row.appendChild(cell);
-                }
-
-                tbody_.appendChild(row);
-            });
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
+/**
+ * Muestra el mensaje de tabla vacía
+ */
+function mostrarMensajeTablaVacia(tabla, tbody_) {
+    // Obtener número de columnas
+    var numCols = tabla.querySelectorAll('thead th').length;
+    console.log('[mostrarMensajeTablaVacia] Número de columnas:', numCols);
+    
+    // Limpiar por si acaso
+    tbody_.innerHTML = '';
+    
+    // Crear mensaje
+    var row = document.createElement('tr');
+    row.className = 'mensaje-tabla-vacia fila-blocked'; // Clase para identificar y bloquear
+    row.style.pointerEvents = 'none'; // No clickeable
+    row.style.cursor = 'default'; // Cursor normal
+    var cell = document.createElement('td');
+    cell.colSpan = numCols;
+    cell.className = 'text-center text-muted py-5';
+    cell.style.fontSize = '1.1rem';
+    cell.style.backgroundColor = '#f8f9fa';
+    cell.innerHTML = `
+        <div class="d-flex flex-column align-items-center justify-content-center py-3">
+            <i class="fas fa-check-circle text-success mb-3" style="font-size: 3rem;"></i>
+            <strong class="mb-2">¡Todo al día!</strong>
+            <p class="text-muted mb-0">No hay citas pendientes de admisión</p>
+        </div>
+    `;
+    row.appendChild(cell);
+    tbody_.appendChild(row);
+    
+    console.log('[mostrarMensajeTablaVacia] Fila de mensaje creada y agregada');
+    console.log('[mostrarMensajeTablaVacia] Contenido del tbody:', tbody_.innerHTML.substring(0, 100) + '...');
+    console.log('[mostrarMensajeTablaVacia] Número de filas en tbody:', tbody_.children.length);
+    
+    // Deshabilitar todos los botones de acción
+    var botones = document.getElementsByClassName('botones_ec');
+    console.log('[mostrarMensajeTablaVacia] Deshabilitando', botones.length, 'botones');
+    for (var i = 0; i < botones.length; i++) {
+        botones[i].disabled = true;
+        botones[i].classList.remove('btn-success', 'btn-danger');
+        botones[i].classList.add('btn-secondary');
+    }
 }
 
-
-function RellenarSelect(SelectId, dNeeded, TableId, selectedValue = null) {
-    fetch('/rellenar_select', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dNeeded: dNeeded, TableId: TableId }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        var selectElement = document.getElementById(SelectId);
-
-        // Limpiar cualquier opción existente en el <select>
-        selectElement.innerHTML = '';
-
-        // Agregar la opción "Todas" al principio
-        var todasOption = document.createElement('option');
-        todasOption.value = 'Todas';
-        todasOption.text = 'Todas';
-        selectElement.appendChild(todasOption);
-
-        // Llenar el <select> con las opciones de los datos
-        for (var i = 0; i < data.data.length; i++) {
-            var option = document.createElement('option');
-            option.value = data.data[i][0];
-            option.text = data.data[i][1];
-            selectElement.appendChild(option);
-        }
-
-        // Seleccionar la opción con el texto específico si está presente
-        if (selectedValue) {
-            for (var i = 0; i < selectElement.options.length; i++) {
-                if (selectElement.options[i].text === selectedValue) {
-                    selectElement.selectedIndex = i;
-                    break;
-                }
-            }
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
+/**
+ * Verifica si el tbody de una tabla está vacío y muestra mensaje si es necesario
+ */
+function verificarYMostrarMensajeTablaVacia(tablaId) {
+    console.log('[verificarYMostrarMensajeTablaVacia] Verificando tabla:', tablaId);
+    
+    var tabla = document.getElementById(tablaId);
+    if (!tabla) {
+        console.error('[verificarYMostrarMensajeTablaVacia] No se encontró la tabla con ID:', tablaId);
+        return;
+    }
+    
+    var tbody = tabla.querySelector('tbody');
+    if (!tbody) {
+        console.error('[verificarYMostrarMensajeTablaVacia] No se encontró tbody en la tabla');
+        return;
+    }
+    
+    // Contar filas (tr) dentro del tbody, excluyendo el mensaje si ya existe
+    var filas = tbody.querySelectorAll('tr:not(.mensaje-tabla-vacia)');
+    console.log('[verificarYMostrarMensajeTablaVacia] Cantidad de filas encontradas:', filas.length);
+    
+    // Si no hay filas de datos, mostrar mensaje
+    if (filas.length === 0) {
+        console.log('[verificarYMostrarMensajeTablaVacia] ✓ Tbody vacío - Mostrando mensaje');
+        mostrarMensajeTablaVacia(tabla, tbody);
+    } else {
+        console.log('[verificarYMostrarMensajeTablaVacia] ✓ Hay', filas.length, 'filas con datos');
+    }
 }
+
 
 
 //Esta funcion selecciona o deselecciona la fila, y agrega clickeable o ono a los botones)
@@ -421,37 +419,151 @@ function FiltrarSelect(labelId, tablaId,column) {
     }
 }
 
+// Configuración de filtros sumatorios
+function FiltroSumatorioCitasAdmision() {
+    console.log("FiltroSumatorioCitasAdmision called");
+    FiltroSumatorioTabla(
+        'tabla-citas',
+        [
+            {inputId: 'nombre_pat', colIdx: 0},
+            {inputId: 'medico_referente', colIdx: 2},
+            {inputId: 'medico_solicitante', colIdx: 4},
+            {inputId: 'equipo', colIdx: 3}
+        ],
+        null // No hay fechas
+    );
+}
 
 document.addEventListener("DOMContentLoaded", function() {
+    // Imprimir lista en PDF
+    document.getElementById('imprimir_lista').addEventListener('click', function() {
+        var tabla = document.getElementById('tabla-citas');
+        var filas = tabla.querySelectorAll('tbody tr');
+        var columnas = Array.from(tabla.querySelectorAll('thead th')).map(th => th.textContent.trim());
+        var datos = [];
+        filas.forEach(function(fila) {
+            if (fila.style.display !== 'none') {
+                var celdas = fila.querySelectorAll('td');
+                var filaDatos = [];
+                celdas.forEach(function(celda) {
+                    filaDatos.push(celda.textContent.trim());
+                });
+                datos.push(filaDatos);
+            }
+        });
+
+        // Generar PDF usando jsPDF y autoTable
+        var doc = new window.jspdf.jsPDF();
+        doc.autoTable({
+            head: [columnas],
+            body: datos,
+            styles: { fontSize: 10 },
+            margin: { top: 20 }
+        });
+        doc.save('citas_admisionar.pdf');
+    });
  
     RellenarTabla('tabla-citas', '/get_citas_for_today')
     ConfigurarTabla('tabla-citas','botones_ec')
-    RellenarSelect('medico_solicitante', 'description', 'public.isrequestingphysician')
-    RellenarSelectCondicionalId('medico_referente','username','public.tbuser','88e340f5-6fa5-4df1-aef6-c911625a4427','idrole')
-    SetDeleteButton('eliminar_cita','tabla-citas','/eliminar_cita')
-
-    // Configuración de filtros
-    document.getElementById("nombre_pat").addEventListener("change",function(){
-        FiltrarText('nombre_pat', 'tabla-citas',0)
-    })
-    document.getElementById("medico_referente").addEventListener("change",function(){
-        FiltrarSelect('medico_referente', 'tabla-citas',2)
-    })
-    document.getElementById("medico_solicitante").addEventListener("change",function(){
-        FiltrarSelect('medico_solicitante', 'tabla-citas',4)
-    })
-    //---------------------------
-
-    document.getElementById('b_editar_fecha').addEventListener('click', function(){
-
-        AbrirCalendarioParaEditar('tabla-citas')
-    })
     
+    // Verificar si la tabla está vacía después de cargar los datos
+    // Usar setTimeout para esperar a que termine el fetch
+    setTimeout(function() {
+        verificarYMostrarMensajeTablaVacia('tabla-citas');
+    }, 1000); // Esperar 1 segundo para que termine de cargar
+    
+    RellenarSelect('medico_solicitante', 'description', 'nextris.isrequestingphysician')
+    RellenarSelectCondicionalId('medico_referente','username','nextris.tbuser','88e340f5-6fa5-4df1-aef6-c911625a4427','idrole')
+    // Modal de confirmación para eliminar cita
+    document.getElementById('eliminar_cita').addEventListener('click', function() {
+        var tabla = document.getElementById('tabla-citas');
+        var tbody_ = tabla.querySelector('tbody');
+        var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
+        if (filaSeleccionada) {
+            var celdas = filaSeleccionada.querySelectorAll('td');
+            var paciente = celdas[0] ? celdas[0].textContent : '';
+            var fecha = celdas[1] ? celdas[1].textContent : '';
+            var med_ref = celdas[2] ? celdas[2].textContent : '';
+            var examen = celdas[3] ? celdas[3].textContent : '';
+            var med_sol = celdas[4] ? celdas[4].textContent : '';
+            var dataId = filaSeleccionada.getAttribute('data-id') || '';
+
+            // Construyo el contenido del modal
+            var modalHtml = `
+                <div class="modal fade" id="modalEliminarCita" tabindex="-1" aria-labelledby="modalEliminarCitaLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="modalEliminarCitaLabel">Confirmar eliminación de cita</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p>¿Está seguro que desea eliminar la siguiente cita?</p>
+                                <ul>
+                                    <li><strong>Paciente:</strong> ${paciente}</li>
+                                    <li><strong>Fecha:</strong> ${fecha}</li>
+                                    <li><strong>Médico referente:</strong> ${med_ref}</li>
+                                    <li><strong>Examen:</strong> ${examen}</li>
+                                    <li><strong>Médico solicitante:</strong> ${med_sol}</li>
+                                </ul>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                <button type="button" class="btn btn-danger" id="confirmarEliminarCita">Eliminar</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+
+            // Agrego el modal al body si no existe
+            if (!document.getElementById('modalEliminarCita')) {
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+            }
+
+            var modal = new bootstrap.Modal(document.getElementById('modalEliminarCita'));
+            modal.show();
+
+            // Elimino cualquier listener previo para evitar duplicados
+            var btnConfirmar = document.getElementById('confirmarEliminarCita');
+            btnConfirmar.onclick = function() {
+                // Lógica de eliminación real
+                fetch('/eliminar_cita', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: dataId })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        modal.hide();
+                        filaSeleccionada.remove();
+                        showToast('Éxito', 'La cita ha sido eliminada correctamente.', '/templates/includes/toast/toast_success.html');
+                    } else {
+                        showToast('Error', 'No se pudo eliminar la cita.', '/templates/includes/toast/toast_alert.html');
+                    }
+                })
+                .catch(error => {
+                    showToast('Error', 'Error al eliminar la cita.', '/templates/includes/toast/toast_alert.html');
+                });
+            };
+        } else {
+            showToast('Error', 'Seleccione una cita para eliminar.', '/templates/includes/toast/toast_alert.html');
+        }
+    });
+
+    
+
+    document.getElementById('nombre_pat').addEventListener('input', FiltroSumatorioCitasAdmision);
+    document.getElementById('medico_referente').addEventListener('input', FiltroSumatorioCitasAdmision);
+    document.getElementById('medico_solicitante').addEventListener('input', FiltroSumatorioCitasAdmision);
+    document.getElementById('equipo').addEventListener('input', FiltroSumatorioCitasAdmision);
+
+       
     // document.getElementById('b_admisionar_cita').addEventListener('click', function(){
     //     AdmisionarCita('tabla-citas')
     // })
 
-    document.getElementById('b_admisionar_cita').addEventListener('click', function(){
+    document.getElementById('b_admisionar_cita').addEventListener('click', async function(){
         var tabla = document.getElementById('tabla-citas');
         var tbody_ = tabla.querySelector('tbody');
         var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
@@ -459,22 +571,89 @@ document.addEventListener("DOMContentLoaded", function() {
         if (filaSeleccionada) {
             var celdas = filaSeleccionada.querySelectorAll('td');
             var dataId = filaSeleccionada.getAttribute('data-id');
-            var paciente= celdas[0].textContent
-            var med_ref = celdas[2].textContent
-            var examen = celdas[3].textContent
-            var med_sol = celdas[4].textContent
-            var fecha = celdas[1].textContent
-            document.getElementById('idevent').value=dataId
+            var paciente = celdas[0] ? celdas[0].textContent : ''
+            var fecha = celdas[1] ? celdas[1].textContent : ''
+            var med_ref = celdas[2] ? celdas[2].textContent : ''
+            var examen = celdas[3] ? celdas[3].textContent : ''
+            var med_sol = celdas[4] ? celdas[4].textContent : ''
+            document.getElementById('idevent').value = dataId || ''
         }
-        RellenarTabla('tabla-equipo-modal', '/get_equipo_modal')
-        ConfigurarTabla('tabla-equipo-modal','botones_adm_cita')
-        // Mostrar el modal
-
+        
+        // Cargar equipos con el ID del evento para obtener preselección
+        try {
+            const response = await fetch(`/get_equipo_modal?idevent=${dataId}`);
+            const data = await response.json();
+            
+            console.log('Datos recibidos:', data); // Debug
+            
+            // Validar que existan equipos
+            if (!data || !data.equipos || !Array.isArray(data.equipos)) {
+                console.error('Respuesta inválida del servidor:', data);
+                showToast('Error', 'No se pudieron cargar los equipos disponibles', '/templates/includes/toast/toast_error.html');
+                return;
+            }
+            
+            // Limpiar tabla
+            const tbody = document.getElementById('tabla-equipo-modal').querySelector('tbody');
+            tbody.innerHTML = '';
+            
+            // Validar que haya equipos disponibles
+            if (data.equipos.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">No hay equipos disponibles para este tipo de examen</td></tr>';
+            } else {
+                // Llenar tabla con equipos
+                data.equipos.forEach(equipo => {
+                    const row = document.createElement('tr');
+                    row.setAttribute('data-id', equipo[0]);
+                    
+                    // Si es el equipo asignado, agregarlo con clase preseleccionada y badge
+                    if (equipo[4] === 1) { // es_asignado
+                        row.classList.add('fila-seleccionada');
+                        row.innerHTML = `
+                            <td>${equipo[1]}</td>
+                            <td>
+                                ${equipo[2]}
+                                <span class="badge bg-success ms-2">
+                                    <i class="fas fa-check me-1"></i>Asignado
+                                </span>
+                            </td>
+                        `;
+                        // Establecer el idequip preseleccionado
+                        document.getElementById('idequip').value = equipo[0];
+                    } else {
+                        row.innerHTML = `
+                            <td>${equipo[1]}</td>
+                            <td>${equipo[2]}</td>
+                        `;
+                    }
+                    
+                    tbody.appendChild(row);
+                });
+            }
+            
+            // Configurar tabla con clicks
+            ConfigurarTabla('tabla-equipo-modal','botones_adm_cita');
+            
+        } catch (error) {
+            console.error('Error cargando equipos:', error);
+            showToast('Error', 'Error al cargar equipos: ' + error.message, '/templates/includes/toast/toast_error.html');
+            return;
+        }
+        
+        // Configurar selección de equipo
         document.getElementById('tabla-equipo-modal').addEventListener('click',function(){
-            document.getElementById('idequip').value = document.getElementById('tabla-equipo-modal').querySelector('tbody').querySelector('.fila-seleccionada').getAttribute('data-id');
-            console.log(document.getElementById('idequip').value)
+            var filaSeleccionada = document.getElementById('tabla-equipo-modal').querySelector('tbody').querySelector('.fila-seleccionada');
+            var dataId = filaSeleccionada ? filaSeleccionada.getAttribute('data-id') : '';
+            document.getElementById('idequip').value = dataId;
+            console.log('Equipo seleccionado:', document.getElementById('idequip').value)
         })
-        var modal = new bootstrap.Modal(document.getElementById('modal_adm_cita'));
+        
+        // Mostrar el modal SIN backdrop (solución definitiva al problema)
+        var modalElement = document.getElementById('modal_adm_cita');
+        var modal = new bootstrap.Modal(modalElement, {
+            backdrop: false,  // No crear backdrop
+            keyboard: true
+        });
         modal.show();
     })
 
@@ -483,61 +662,64 @@ document.addEventListener("DOMContentLoaded", function() {
         event.preventDefault(); // Evita que el formulario se envíe de forma predeterminada
         
         // Obtén los datos del formulario
-        var idevent=document.getElementById('idevent')
-        var idequip=document.getElementById('idequip')
-        var formData = new FormData(this);
-        // Añade idevent e idequip al FormData
-        formData.append('idevent', idevent);
-        formData.append('idequip', idequip);
-    
+        var idevent=document.getElementById('idevent').value;
+        var idequip=document.getElementById('idequip').value;
+        
+        // Crear objeto JSON con los datos del formulario
+        var formData = {
+            cita_id: idevent,
+            equipo_id: idequip
+        };
     
         // Realiza la lógica que necesites con los datos del formulario
-        fetch('/admisionar_cita', {
+        fetch('/api/admisionar_cita', {
             method: 'POST',
-            body: formData,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData),
         })
         .then(response => response.json())
         .then(data => {
             // Maneja la respuesta del servidor
             if (data.success) {
-                // Cierra el modal y realiza cualquier otra acción necesaria
-                var modal = bootstrap.Modal.getInstance(document.getElementById('modal_adm_cita'));
-                modal.hide();
+                // Cierra el modal correctamente
+                var modalElement = document.getElementById('modal_adm_cita');
+                var modal = bootstrap.Modal.getInstance(modalElement);
+                if (modal) {
+                    modal.hide();
+                }
     
-                // Reemplaza el contenido de la fila seleccionada en la tabla
-                // Obtener la fila seleccionada
-            var tabla = document.getElementById('tabla-citas');
-            var tbody_= tabla.querySelector('tbody');
-            var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
-            if (filaSeleccionada) {
-                var id = filaSeleccionada.dataset.id;
+                // Obtener y eliminar la fila seleccionada visualmente
+                var tabla = document.getElementById('tabla-citas');
+                var tbody_= tabla.querySelector('tbody');
+                var filaSeleccionada = tbody_.querySelector('.fila-seleccionada');
                 
-                fetch('/eliminar_cita', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ id: id }),
-                })
-                .then(response => response.json())
-                .then(data => {
+                if (filaSeleccionada) {
+                    // Eliminar la fila de la tabla
                     filaSeleccionada.remove();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                });
-        } else {
-            console.warn('No hay fila seleccionada.');
-        }
+                    console.log('Fila de cita eliminada visualmente');
+                    
+                    // Verificar si la tabla quedó vacía después de eliminar
+                    verificarYMostrarMensajeTablaVacia('tabla-citas');
+                } else {
+                    console.warn('No hay fila seleccionada.');
+                }
+                
+                // Mostrar notificación toast de éxito
+                showToast('Éxito', `Cita admisionada correctamente. Admisión: ${data.admision || 'N/A'}`, '/templates/includes/toast/toast_success.html');
             } else {
                 // Maneja los errores
-                console.error('Error al editar la cita:', data.error);
+                console.error('Error al admisionar la cita:', data.error);
+                showToast('Error', `Error al admisionar la cita: ${data.error}`, '/templates/includes/toast/toast_alert.html');
             }
         })
         .catch(error => {
             console.error('Error:', error);
+            showToast('Error', 'Error de conexión al admisionar la cita.', '/templates/includes/toast/toast_alert.html');
         });
     });
     
+    // Ya no necesitamos event listeners de limpieza porque usamos backdrop: false
     
 })

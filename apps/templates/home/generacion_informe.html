@@ -1,281 +1,153 @@
-{% extends 'layouts/base.html' %}
+<link rel="stylesheet" href="/static/assets/css/generacion_informe.css">
 
-{% block title %} Tables {% endblock title %}
+  <header class="topbar">
+    <div class="avatar">
+      <i class="fa fa-user-circle" aria-hidden="true"></i>
+    </div>
+    <div class="pt-info">
+      <div class="pt-name">[[Nombre del paciente]]</div>
+      <div class="pt-meta"><span class="badge-info">[[AdmNumber]]</span> · DNI 12.345.678 · 10-19-1953 · HC #E14545</div>
+    </div>
+    <div class="crumb">
 
-<!-- Specific CSS goes HERE -->
-{% block stylesheets %}
-<style>
-    /* Estilo para expandir la sección del informe cuando "Datos del examen" está colapsado */
-    .expand-report {
-        width: 100%; /* Expandir para ocupar todo el ancho disponible */
-    }
+      <button type="button" class="btn-primary btn-dcm botones_sp" id="b_ver_imagenes" title="Ver Imágenes DICOM">
+          <i class="fas fa-image"></i>
+          <span class="btn-text">DCM</span>
+      </button>
+      <button type="button" class="btn-primary btn-save botones_sp" id="b_guardar_reporte" title="Guardar Reporte">
+          <i class="fa fa-save" aria-hidden="true"></i>
+          <span class="btn-text">Guardar</span>
+      </button>
 
-    .report-container {
-        transition: width 0.3s ease; /* Transición suave para la expansión */
-    }
-</style>
-{% endblock stylesheets %}
+      <button type="button" class="btn-primary btn-sign botones_sp" id="b_firmar_reporte" title="Firmar Reporte">
+          <i class="fas fa-signature"></i>
+          <span class="btn-text">Firmar</span>
+      </button>
 
-{% block content %}
+      <button type="button" class="btn-primary btn-pdf botones_sp" id="b_ver_pdf" title="Ver PDF">
+          <i class="far fa-file-pdf"></i>
+          <span class="btn-text">PDF</span>
+      </button>
+      <button type="button" class="btn-primary btn-back botones_sp" id="b_atras_report" title="Volver">
+        <i class="fa fa-arrow-left" aria-hidden="true"></i>
+        <span class="btn-text">Volver</span>
+      </button>
+    </div>
+  </header>
 
-<div class="modal fade" id="predefinedReportsModal" tabindex="-1" aria-labelledby="predefinedReportsLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-      <div class="modal-content">
-  
-        <div class="modal-header">
-          <h5 class="modal-title" id="predefinedReportsLabel">Seleccionar informe predefinido</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-        </div>
-  
-        <div class="modal-body">
-  
-          <!-- Filtros -->
-          <div class="mb-3 d-flex justify-content-between align-items-center">
-            <div class="flex-grow-1 me-3">
-              <input type="text" id="filtroMedico" class="form-control" placeholder="Buscar por médico...">
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="checkSoloMias">
-              <label class="form-check-label" for="checkSoloMias">Solo mis plantillas</label>
-            </div>
+  <main class="app">
+  <!-- Sidebar izquierda -->
+  <aside class="side generacion-informe-side generacion-informe-scroll">
+        <!-- Datos del examen -->
+
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Datos del examen</span></summary>
+        <div class="panel-body">
+          <label class="field"><label>Estudio</label><p class="sidebar-datos">[[examen]]</p></label>
+          <div class="field grid-two">
+            <div class="field"><label>Fecha</label><p class="sidebar-datos">[[Fecha]]</p></div>
+            <div class="field"><label>Modalidad</label><p class="sidebar-datos">[[modalidad]]</p></div>
           </div>
-  
-          <!-- Tabla de informes -->
-          <table class="tabla-primary table" id="tabla_inf_predef">
-            <thead>
-              <tr>
-                <th>Descripción</th>
-                <th>Médico</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Cargado dinámicamente desde JS -->
-            </tbody>
-          </table>
-  
+          <div><label>Médico Referente</label><p class="sidebar-datos">[[medico]]</p></div>
         </div>
-  
-        <!-- Footer con botones -->
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="button" class="btn btn-primary boton_modal" id="btnAceptarInforme" disabled>Aceptar</button>
+      </details>
+
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Datos técnicos</span></summary>
+        <div class="panel-body">
+          <label class="field"><label>Pregunta Clinica</label><p class="sidebar-datos">[[clinical_question]]</p></label>
+          <label class="field"><label>Otros detalles</label><p class="sidebar-datos">[[others_details]]</p></label>
+          <div class="field grid-two">
+            <div class="field"><label>Lateralidad</label><p class="sidebar-datos">[[lateralidad]]</p></div>
+            <div class="field"><label>Stat</label><p class="sidebar-datos">[[stat]]</p></div>
+          </div>
         </div>
-  
-      </div>
-    </div>
-  </div>
-  
+      </details>
 
-<main class="main-content position-relative">
 
-    <div class="row" id="top-informe">
-        <div class="col-12">
-            <div class="mb-2"> 
-                
-                <div class="card-body pt-3 pl-30">
-                    <div class="d-flex justify-content-between flex-wrap">
-                        <div class="col-md-4">
-                            <h4><!--Nombre del paciente--> (<!--AdmNumber-->)</h4>
-                        </div>
-                        <div class="col-md-8 d-flex justify-content-end">
-
-                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_historia_clinica">
-                                HC
-                            </button>
-
-                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_guardar_reporte">
-                                <i class="fa fa-save" aria-hidden="true"></i>
-                            </button>
-
-                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_firmar_reporte">
-                                F
-                            </button>
-
-                            <button type="button" class="btn btn-nr-primary rounded-circle shadow-primary btn-info botones_sp" id="b_ver_pdf">
-                                PDF
-                            </button>
-
-                            <button type="button" class="btn btn-nr-primary rounded-circle btn-danger shadow-primary botones_sp" id="b_atras_report">
-                                <i class="fa fa-undo" aria-hidden="true" style="font-size: 25px;"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div> 
-            </div>
+      <details class="panel" id="predefinidos" open>
+        <summary class="panel-header"><span class="panel-title">Informes predefinidos</span></summary>
+        <div class="panel-body">
+          <div class="field"><label>Predef Seleccionado</label><p class="sidebar-datos">[[tittle]]</p></div>
+          <button class="btn" id="b_ver_predef" data-bs-toggle="modal" data-bs-target="#predefinedReportsModal">Cambiar plantilla</button>
         </div>
-    </div>
+      </details>
 
-    <!-- Secciones técnicas de examen, informe y conclusión -->
-    <div class="row">
-        <div class="col-6">
-            <div class="card  mx-1 mt-2 mb-2  row" id="card-datos">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h6>Datos del examen</h6>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end align-items-center">
-                            <button type="button" id="b_toggle_collapse" class="btn btn-nr-primary btn-info">
-                                <i class="fa fa-angle-down" aria-hidden="true" style="font-size: 25px;"></i>
-                            </button>
-                        </div>
-                    </div>   
-                </div>
-                <div id="collapseDatosExamen" class="collapse">
-                    <div class="card-body-tiny">
-                        <div class="row">
-                            <h6>Examen:</h6><br>
-                            <p><!--examen--></p>
-                        </div>
-                        <div class="row">
-                            <h6>Pregunta Clinica:</h6>
-                            <textarea class="form-control" id="text_pc"><!--Pregunta clínica--></textarea>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-9">
-                            <h5>Informes Predefinidos</h5>
-                        </div>
-                        <div class="col-md-3 d-flex justify-content-end align-items-center">
-                            <button class="btn btn-primary" id="b_ver_predef" data-bs-toggle="modal" data-bs-target="#predefinedReportsModal">
-                                <i class="fas fa-eye"></i>
-                            </button>                           
-                        </div>
-                    </div>   
-                </div>
-            </div>
-
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5>ECG</h5>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end align-items-center">
-                            <button type="button" id="b_ver_ecg" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button type="button" id="b_cargar_ecg" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-upload"></i>
-                            </button>
-                            <input type="file" id="input_ecg" style="display: none;" />
-                            <input type="file" id="input_holter" style="display: none;" />
-                            <button type="button" id="b_asociar_ecg" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-link"></i>
-                            </button>
-                            
-                        </div>
-                    </div>   
-                </div>
-            </div>
-
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-tecnicas">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5>Holter</h5>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end align-items-center">
-                            <button type="button" id="b_ver_holter" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button type="button" id="b_cargar_holter" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-upload"></i>
-                            </button>
-                            <button type="button" id="b_asociar_holter" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-link"></i>
-                            </button>
-                        </div>                            
-                        
-                    </div>   
-                </div>
-            </div>
-
-            
-
-
-            <div class="row report-container" id="report-container">
-                <div class="card  mx-1 mt-2 mb-2  expand-report" id="card-informe">
-                    <div class="card-header minimum-padding-v">
-                        <h5 class="card-title">Diagnostico Principal</h5>
-                    </div>
-                    <div class="card-body minimum-padding-f">
-                        <textarea class="form-control" id="text_dp"><!--Diagnostico Principal--></textarea>
-                    </div>
-                </div>
-            </div>
+      <details class="panel" id="historial" open>
+        <summary class="panel-header"><span class="panel-title">Historia clínica</span></summary>
+        <div class="panel-body">
+          <div class="field">
+            <table class="table" id="tabla_historial_estudios" style="width:100%">
+              <tbody>
+                <tr>
+                  <td class="modalidad-col">Rx</td>
+                  <td class="fecha-col">2025-07-15</td>
+                  <td class="accion-col"><button class="btn btn-sm" onclick="alert('Ver estudio 1')">Ver</button></td>
+                </tr>
+                <tr>
+                  <td class="modalidad-col">US</td>
+                  <td class="fecha-col">2025-06-10</td>
+                  <td class="accion-col"><button class="btn btn-sm" onclick="alert('Ver estudio 2')">Ver</button></td>
+                </tr>
+                <tr>
+                  <td class="modalidad-col">TC</td>
+                  <td class="fecha-col">2025-05-02</td>
+                  <td class="accion-col"><button class="btn btn-sm" onclick="alert('Ver estudio 3')">Ver</button></td>
+                </tr>
+              </tbody>
+            </table>
+            </table>
+          </div>
         </div>
-        
-        <div class="col-6" id="col2">
+      </details>
 
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-subjetivas">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5>Valoraciones Subjetivas</h5>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end align-items-center">
-                            <button type="button" id="b_subjetivas_expand" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-expand-arrows-alt"></i>
-                            </button>
-                        </div>
-                    </div>   
-                </div>
-                <div class="card-body collapse minimum-padding-f">
-                    <textarea class="form-control" id="text_vs"><!--Val Sub--></textarea>
-                </div>
-            </div>
 
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-objetivas">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5>Valoraciones Objetivas</h5>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end align-items-center">
-                            <button type="button" id="b_objetivas_expand" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-expand-arrows-alt"></i>
-                            </button>
-                        </div>
-                    </div>   
-                </div>
-                <div class="card-body collapse minimum-padding-f">
-                    <textarea class="form-control" id="text_vo"><!--Val Obj--></textarea>
-                </div>
-            </div>
+    </aside>
 
-            
+    <!-- Área principal -->
+  <section class="main generacion-informe-main generacion-informe-scroll">
 
-            <div class="card  mx-1 mt-2 mb-2  row"  id="card-indicaciones">
-                <div class="card-header minimun-padding-v">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5>Indicaciones</h5>
-                        </div>
-                        <div class="col-md-4 d-flex justify-content-end">
-                            <button type="button" id="b_indic_expand" class="btn btn-nr-primary btn-info">
-                                <i class="fas fa-expand-arrows-alt"></i>
-                            </button>
-                        </div>
-                    </div>   
-                </div>
-                <div class="card-body collapse minimum-padding-f">
-                    <textarea class="form-control" id="text_ind"><!--Indicaciones--></textarea>
-                </div>
-            </div>
+      <details class="panel">
+        <summary class="panel-header"><span class="panel-title">Historia Clinica</span></summary>
+        <div class="panel-body">
+          <textarea placeholder="Historia clinica escrita por el técnico..." id="text_historia" disabled class="sidebar-datos">[[history]]</textarea>
         </div>
-    </div>
-</main>
+      </details>
 
-<script>
-    // Manejo del colapso con JavaScript
-    
-</script>
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Técnica de examen</span></summary>
+        <div class="panel-body">
+          <textarea placeholder="Describir técnica, cortes, contraste, etc." id="text_tecnicas">{Val Sub}</textarea>
+        </div>
+      </details>
 
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Hallazgos</span></summary>
+        <div class="panel-body">
+          <textarea placeholder="Redacción principal de hallazgos" id="text_findings">{Hallazgos}</textarea>
+        </div>
+      </details>
 
-{% endblock content %}
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Impresiones</span></summary>
+        <div class="panel-body">
+          <textarea placeholder="BP bien controlada…" id="text_impresiones">{Val Obj}</textarea>
+        </div>
+      </details>
+
+      <details class="panel" open>
+        <summary class="panel-header"><span class="panel-title">Conclusiones</span></summary>
+        <div class="panel-body">
+          <textarea placeholder="Conclusión breve, recomendaciones" id="text_conclusiones">{Indicaciones}</textarea>
+          <!-- <div class="actions" style="margin-top:8px">
+            <button class="btn">Guardar</button>
+            <button class="btn">Generar PDF</button>
+          </div> -->
+        </div>
+      </details>
+    </section>
+    <div id="toastContainer"></div>
+  </main>
+
+  <!-- Modal de informes predefinidos -->
+  {% include "home/modals/informes_predefinidos_modal.html" %}

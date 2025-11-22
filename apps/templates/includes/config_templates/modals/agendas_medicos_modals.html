@@ -1,0 +1,99 @@
+<!-- Modal para agregar grupo al médico -->
+<div class="modal fade" id="modal_agregar_grupo_med" tabindex="-1" aria-labelledby="modalAgregarGrupoLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalAgregarGrupoLabel">Agregar Grupo al Médico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <form id="form_agregar_grupo_med">
+          <div class="mb-3">
+            <label for="select_grupo_disponible" class="form-label">Grupo disponible</label>
+            <select class="form-select" id="select_grupo_disponible_med" name="select_grupo_disponible_med" required>
+              <!-- Opciones generadas dinámicamente -->
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn_confirmar_agregar_grupo">Agregar</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Modal Agenda Médicos -->
+<div class="modal fade custom-modal" id="modal_am" tabindex="-1" data-bs-keyboard="true" aria-labelledby="modalLabel" aria-hidden="true" data-bs-backdrop="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="modalLabel">Nuevo Segmento de Agenda</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="/agregar_item" id="Form_am">
+                    <input type="hidden" name="id_agenda_med" id="id_agenda_med" class="not_delete">
+                    <input type="hidden" name="id_item_agenda_med" id="id_item_agenda_med">
+
+                    <div class="form-group row">
+                        <div class="col-md-3">
+                            <label for="day">Día</label>
+                        </div>
+                        <div class="col-md-9">
+                            <select class="form-control" id="day_med" name="day_med" required>
+                                <option value="lunes">Lunes</option>
+                                <option value="martes">Martes</option>
+                                <option value="miércoles">Miércoles</option>
+                                <option value="jueves">Jueves</option>
+                                <option value="viernes">Viernes</option>
+                                <option value="sábado">Sábado</option>
+                                <option value="domingo">Domingo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="timefrom">Inicio</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="time" class="form-control" id="timefrom_med" name="timefrom_med" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="timeto">Final</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="time" class="form-control" id="timeto_med" name="timeto_med" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="initday">A partir del</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="date" class="form-control" id="initday_med" name="initday_med" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group row mt-3">
+                        <div class="col-md-3">
+                            <label for="finishday">Hasta el</label>
+                        </div>
+                        <div class="col-md-9">
+                            <input type="date" class="form-control" id="finishday_med" name="finishday_med" required>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn bg-gradient-success save-changes" form="Form_am">Crear item</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>

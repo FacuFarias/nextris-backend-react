@@ -1,0 +1,518 @@
+/* ====================================
+   MODERN SIDENAV STYLES - NextRIS
+   ==================================== */
+
+/* Contenedor principal del sidenav */
+.sidenav {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%) !important;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.3s ease !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: 100vh !important;
+}
+
+/* Ajustes cuando está colapsado */
+.g-sidenav-hidden .sidenav {
+  width: 80px !important;
+}
+
+.g-sidenav-hidden .sidenav .navbar-nav {
+  align-items: center !important;
+}
+
+/* Header del sidenav */
+.sidenav-header {
+  background: rgba(102, 126, 234, 0.05) !important;
+  backdrop-filter: blur(10px) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.3s ease !important;
+}
+
+.sidenav-header .navbar-brand {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.3s ease !important;
+}
+
+.sidenav-header .navbar-brand-img {
+  filter: none !important;
+  height: 45px !important;
+  width: auto !important;
+  object-fit: contain !important;
+  transition: all 0.3s ease !important;
+}
+
+.sidenav-header .nav-link-text {
+  color: #2d3748 !important;
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  transition: all 0.3s ease !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+/* Estilos para sidenav colapsado */
+.g-sidenav-hidden .sidenav-header {
+  padding: 1rem 0.5rem !important;
+}
+
+.g-sidenav-hidden .sidenav-header .navbar-brand {
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+.g-sidenav-hidden .sidenav-header .navbar-brand-img {
+  height: 50px !important;
+  width: auto !important;
+  max-width: 60px !important;
+  object-fit: contain !important;
+}
+
+.g-sidenav-hidden .sidenav-header .nav-link-text {
+  opacity: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Línea separadora */
+.sidenav hr.horizontal {
+  background: rgba(0, 0, 0, 0.1) !important;
+  margin: 0 !important;
+}
+
+/* Items del menú */
+.sidenav .nav-item {
+  margin: 0.25rem 0 !important;
+}
+
+.sidenav .nav-link {
+  padding: 0.75rem 1rem !important;
+  margin: 0.25rem 0.75rem !important;
+  border-radius: 0.75rem !important;
+  color: #4a5568 !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.sidenav .nav-link .nav-link-text {
+  transition: all 0.3s ease !important;
+  white-space: nowrap !important;
+}
+
+/* Estilos para sidenav colapsado - Items de menú */
+.g-sidenav-hidden .sidenav .nav-item {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+.g-sidenav-hidden .sidenav .nav-link {
+  padding: 0.75rem !important;
+  margin: 0.25rem 0.5rem !important;
+  justify-content: center !important;
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 1rem !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.g-sidenav-hidden .sidenav .nav-link .nav-link-text {
+  display: none !important;
+}
+
+.g-sidenav-hidden .sidenav .nav-link .icon-shape {
+  margin: 0 !important;
+}
+
+.g-sidenav-hidden .sidenav .nav-link:hover {
+  transform: scale(1.1) !important;
+}
+
+.g-sidenav-hidden .sidenav .nav-link.active::after {
+  display: none !important;
+}
+
+/* Ocultar submenús cuando está colapsado */
+.g-sidenav-hidden .sidenav ul ul {
+  display: none !important;
+}
+
+/* Efecto hover en los items */
+.sidenav .nav-link::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: -100% !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.1), transparent) !important;
+  transition: left 0.5s ease !important;
+}
+
+.sidenav .nav-link:hover::before {
+  left: 100% !important;
+}
+
+.sidenav .nav-link:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  transform: translateX(5px) !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3) !important;
+}
+
+/* Item activo */
+.sidenav .nav-link.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4) !important;
+}
+
+.sidenav .nav-link.active::after {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 4px !important;
+  height: 70% !important;
+  background: white !important;
+  border-radius: 0 4px 4px 0 !important;
+}
+
+/* Iconos */
+.sidenav .icon-shape {
+  background: rgba(102, 126, 234, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  border-radius: 0.75rem !important;
+  width: 40px !important;
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.3s ease !important;
+}
+
+.sidenav .nav-link:hover .icon-shape {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: rotate(5deg) scale(1.1) !important;
+}
+
+.sidenav .nav-link.active .icon-shape {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.sidenav .icon-shape i {
+  color: #667eea !important;
+  font-size: 1rem !important;
+}
+
+.sidenav .nav-link:hover .icon-shape i,
+.sidenav .nav-link.active .icon-shape i {
+  color: white !important;
+}
+
+/* Submenús desplegables */
+.sidenav ul ul {
+  list-style: none !important;
+  padding-left: 0 !important;
+  margin: 0 !important;
+  background: rgba(102, 126, 234, 0.04) !important;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 0 !important;
+  margin: 0.25rem 0.75rem !important;
+}
+
+.sidenav ul ul li {
+  margin-left: 0 !important;
+  list-style: none !important;
+}
+
+.sidenav ul ul .nav-link {
+  padding: 0.65rem 1rem 0.65rem 1rem !important;
+  font-size: 0.9rem !important;
+  position: relative !important;
+  color: #718096 !important;
+  margin-left: 0.5rem !important;
+  margin-right: 0.5rem !important;
+}
+
+.sidenav ul ul .nav-link .icon-shape {
+  width: 40px !important;
+  height: 40px !important;
+  background: rgba(102, 126, 234, 0.08) !important;
+}
+
+.sidenav ul ul hr {
+  margin: 0.5rem 1rem !important;
+  background: rgba(102, 126, 234, 0.15) !important;
+}
+
+/* Footer del sidenav */
+.sidenav-footer {
+  background: rgba(102, 126, 234, 0.03) !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.3s ease !important;
+}
+
+/* Perfil de usuario moderno */
+.user-profile-section {
+  padding: 0.75rem !important;
+  margin-bottom: 0.75rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.user-profile-card {
+  background: rgba(102, 126, 234, 0.08) !important;
+  backdrop-filter: blur(10px) !important;
+  border-radius: 1rem !important;
+  padding: 1rem !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 1rem !important;
+  border: 1px solid rgba(102, 126, 234, 0.15) !important;
+  transition: all 0.3s ease !important;
+}
+
+.user-profile-card:hover {
+  background: rgba(102, 126, 234, 0.12) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.15) !important;
+}
+
+.user-avatar {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 2px solid rgba(102, 126, 234, 0.3) !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15) !important;
+  flex-shrink: 0 !important;
+  transition: all 0.3s ease !important;
+}
+
+.user-avatar i {
+  color: white !important;
+}
+
+.user-details {
+  flex: 1 !important;
+  overflow: hidden !important;
+  transition: all 0.3s ease !important;
+}
+
+.user-name {
+  color: #2d3748 !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin-bottom: 0.25rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.user-role {
+  color: #667eea !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  background: rgba(102, 126, 234, 0.1) !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.5rem !important;
+  display: inline-block !important;
+  transition: all 0.3s ease !important;
+  white-space: nowrap !important;
+}
+
+
+
+.g-sidenav-hidden .user-profile-section {
+  padding: 1000px !important;
+  margin-bottom: 0.75rem !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+/* Ocultar el card completamente cuando está colapsado */
+.g-sidenav-hidden .user-profile-card {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  width: auto !important;
+}
+
+.g-sidenav-hidden .user-profile-card:hover {
+  background: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
+/* Solo mostrar el icono del avatar */
+.g-sidenav-hidden .user-avatar {
+  width: 44px !important;
+  height: 44px !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.g-sidenav-hidden .user-avatar i {
+  font-size: 1.5rem !important;
+  color: white !important;
+}
+
+.g-sidenav-hidden .user-avatar:hover {
+  transform: scale(1.15) !important;
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4) !important;
+}
+
+/* Ocultar completamente los detalles del usuario */
+.g-sidenav-hidden .user-details {
+  display: none !important;
+}
+
+/* Botón de desconectar */
+.sidenav-footer .nav-link {
+  background: rgba(220, 53, 69, 0.08) !important;
+  border: 1px solid rgba(220, 53, 69, 0.2) !important;
+  transition: all 0.3s ease !important;
+  color: #dc3545 !important;
+  font-weight: 600 !important;
+}
+
+.sidenav-footer .nav-link:hover {
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+  border-color: rgba(220, 53, 69, 0.5) !important;
+  color: white !important;
+}
+
+.sidenav-footer .icon-shape {
+  background: rgba(220, 53, 69, 0.1) !important;
+}
+
+.sidenav-footer .nav-link:hover .icon-shape {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.sidenav-footer .icon-shape i {
+  color: #dc3545 !important;
+}
+
+.sidenav-footer .nav-link:hover .icon-shape i {
+  color: white !important;
+}
+
+/* Estilos para sidenav colapsado - Botón desconectar */
+.g-sidenav-hidden .sidenav-footer .navbar-nav {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.g-sidenav-hidden .sidenav-footer .nav-item {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+.g-sidenav-hidden .sidenav-footer .nav-link {
+  justify-content: center !important;
+  padding: 0.75rem !important;
+  margin: 0.25rem auto !important;
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 1rem !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.g-sidenav-hidden .sidenav-footer .nav-link .nav-link-text {
+  display: none !important;
+}
+
+.g-sidenav-hidden .sidenav-footer .nav-link .icon-shape {
+  margin: 0 !important;
+}
+
+.g-sidenav-hidden .sidenav-footer .nav-link:hover {
+  transform: scale(1.1) !important;
+}
+
+/* Animación de entrada para submenús */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sidenav ul ul {
+  animation: slideDown 0.3s ease !important;
+}
+
+/* Scrollbar personalizado moderno */
+.sidenav::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.sidenav::-webkit-scrollbar-track {
+  background: rgba(102, 126, 234, 0.05) !important;
+  border-radius: 10px !important;
+}
+
+.sidenav::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.5) 0%, rgba(118, 75, 162, 0.5) 100%) !important;
+  border-radius: 10px !important;
+}
+
+.sidenav::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.8) 0%, rgba(118, 75, 162, 0.8) 100%) !important;
+}
+
+/* Responsive */
+@media (max-width: 1199.98px) {
+  .sidenav {
+    transform: translateX(-100%) !important;
+  }
+  
+  .sidenav.show {
+    transform: translateX(0) !important;
+  }
+}
+
+/* Badge/contador (si se necesita en el futuro) */
+.nav-badge {
+  position: absolute !important;
+  top: 0.5rem !important;
+  right: 0.5rem !important;
+  background: #ff6b6b !important;
+  color: white !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  padding: 0.2rem 0.5rem !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.4) !important;
+}

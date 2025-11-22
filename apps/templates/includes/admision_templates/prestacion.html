@@ -1,50 +1,61 @@
 <div class="row">
     <div class="col-12">
-        <div class="card mb-4">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-9">
-                        <h6>Datos de las prestaciones en Admision</h6>
-                    </div>
-                    <div class="col-md-3 d-flex justify-content-end align-items-center">
-                        <label for="cb_same_info" class="me-2">Coincidir Datos</label>
-                        <input type="checkbox" id="cb_same_info" name="cb_same_info" class="d-none">
-                        <i class="fa fa-toggle-off" id="cb_icon" aria-hidden="true" style="cursor: pointer;"></i>
-                    </div>
-                </div>
+        <div class="card mb-4 shadow-lg">
+            <div class="card-header pb-0 bg-gradient-info">
+                <h6 class="mb-0">
+                    <i class="fas fa-file-medical me-2"></i>Datos de la Prestación
+                </h6>
             </div>
-            <div class="card-body collapse" id="allin1">
-                <div class="row">
-                    <div class="col-md-2">
-                        <p>Medico solicitante</p>
-                    </div>
-                    <div class="col-md-2">
-                        <select id="general_ms" class="medico_solicitante form-control"></select>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="medico_solicitante" class="form-label">
+                            <i class="fas fa-user-md me-2"></i>Médico Solicitante
+                        </label>
+                        <select id="medico_solicitante" class="modern-select">
+                            <option value="">Seleccionar médico...</option>
+                        </select>
                     </div>
         
-                    <div class="col-md-2">
-                        <p>Obra social</p>
-                    </div>
-                    <div class="col-md-2">
-                        <select id="general_os" class="obra_social form-control"></select>
+                    <div class="col-md-6">
+                        <label for="obra_social" class="form-label">
+                            <i class="fas fa-heartbeat me-2"></i>Obra Social
+                        </label>
+                        <select id="obra_social" class="modern-select">
+                            <option value="">Seleccionar obra social...</option>
+                        </select>
                     </div>
 
-                    <div class="col-md-2">
-                        <p>urgencia</p>
-                    </div>
-                    <div class="col-md-2">
-                        <select id="urgencia" class="form-control"></select>
+                    <div class="col-md-6">
+                        <label for="urgencia" class="form-label">
+                            <i class="fas fa-exclamation-triangle me-2"></i>Urgencia
+                        </label>
+                        <select id="urgencia" class="modern-select">
+                            <option value="normal">Normal</option>
+                            <option value="urgente">Urgente</option>
+                            <option value="emergencia">Emergencia</option>
+                        </select>
                     </div>
                 </div>
-            </div>
-            <div class="card-footer">
-                            
+
+                <!-- Resumen visual -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <!-- Contenedor para estudio seleccionado (dinámico) -->
+                        <div id="estudio-seleccionado-container" class="d-none"></div>
+                        
+                        <div class="alert alert-info" role="alert">
+                            <h6><i class="fas fa-info-circle me-2"></i>Resumen de la Admisión</h6>
+                            <div id="resumen-admision">
+                                <p class="mb-1"><strong>Paciente:</strong> <span id="resumen-paciente">No seleccionado</span></p>
+                                <p class="mb-1"><strong>Estudio:</strong> <span id="resumen-estudio">No seleccionado</span></p>
+                                <p class="mb-0"><strong>Equipo:</strong> <span id="resumen-equipo">No seleccionado</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-</div>
-
-<div id="conteiner_blocks_prest">
-
 </div>
  

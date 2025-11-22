@@ -1,71 +1,82 @@
-<div class="row" id="agenda-section">
-    <div class="col-4">
-        <div class="card mb-4 shadow">
+<div class="row" id="agenda-section" style="height: calc(100vh - 200px); min-height: 600px;">
+    <!-- Columna izquierda: Controles (col-3) -->
+    <div class="col-3" style="height: 100%; overflow-y: auto;">
+        <!-- Card: Citas a asignar -->
+        <div class="card mb-3 shadow">
             <div class="card-header pb-0">
                 <div class="row align-items-center">
-                    <div class="col-md-8">
+                    <div class="col-8">
                         <h6>Citas a asignar</h6>
                     </div>
-                    <div class="col-md-4 d-flex justify-content-end">
-                        <button type="button" id="b_undo" class="btn btn-nr-primary rounded-circle shadow-primary mx-2 botones_sp btn-danger">
-                            <i class="fa fa-undo" aria-hidden="true" style="font-size: 25px;"></i>
+                    <div class="col-4 d-flex justify-content-end">
+                        <button type="button" id="b_undo" class="btn btn-nr-primary rounded-circle shadow-primary botones_sp btn-danger" title="Deshacer">
+                            <i class="fa fa-undo" aria-hidden="true"></i>
                         </button>
                     </div>
                 </div>   
             </div>
-            <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
-                <div id='external-events'>
-           
+            <div class="card-body px-3 pt-2 pb-2" style="min-height: 120px;">
+                <div id='external-events'></div>
+            </div> 
+        </div>
+        
+        <!-- Card: Máquina a asignar -->
+        <div class="card mb-3 shadow">
+            <div class="card-header pb-0">
+                <h6 id="l_profesional_o_equipo">Máquina a asignar</h6>
+            </div>
+            <div class="card-body px-0 pt-0 pb-2" style="max-height: 300px; overflow-y: auto;">
+                <div class="table-responsive p-0">
+                    <table id="tabla-equipos" class="table align-items-center mb-0">
+                        <thead>
+                            <tr>
+                                <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Equipo</th>
+                                <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Modalidad</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Los equipos se cargarán dinámicamente -->
+                        </tbody>
+                    </table>
                 </div>
+                <!-- Select oculto para mantener compatibilidad con código existente -->
+                <select id="prof_ag" name="prof_ag" class="form-control" style="display: none;">
+                    <!-- Opciones de profesionales -->
+                </select>
             </div> 
-        </div>   
-    </div>
-    <div class="col-4">
-        <div class="card mb-4 shadow">
+        </div>
+        
+        <!-- Card: Fecha deseada -->
+        <div class="card mb-3 shadow">
             <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-12">
-                        <h6>Profesional</h6>
-                    </div>
-                </div>   
+                <h6>Fecha deseada</h6>
             </div>
-            <div class="card-body card-tabla-paciente">
-                <div class="row">
-                    <div class="col-md-12">
-                        <select id="prof_ag" name="prof_ag" class="form-control">
-                            <!-- Opciones de profesionales -->
-                        </select>
-                    </div>
-                </div>
+            <div class="card-body px-3 py-3">
+                <input type="date" id="wish_date" name="wish_date" disabled max="2029-12-31" class="form-control"/>
+                <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    var wishDateInput = document.getElementById('wish_date');
+                    var tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    var yyyy = tomorrow.getFullYear();
+                    var mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+                    var dd = String(tomorrow.getDate()).padStart(2, '0');
+                    var minDate = yyyy + '-' + mm + '-' + dd;
+                    wishDateInput.setAttribute('min', minDate);
+                });
+                </script>
             </div> 
-        </div>   
+        </div>
     </div>
-
-    <div class="col-4">
-        <div class="card mb-4 shadow">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-12">
-                        <h6>Fecha deseada</h6>
-                    </div>
-                </div>   
+    
+    <!-- Columna derecha: Calendario (col-9) -->
+    <div class="col-9" style="height: 100%; display: flex; flex-direction: column;">
+        <div class="card shadow" id="card-agenda" hidden style="height: 100%; display: flex; flex-direction: column;">
+            <div class="card-header pb-0" style="flex-shrink: 0;">
+                <h6>Arrastra el evento donde lo requieras</h6>
             </div>
-            <div class="card-body card-tabla-paciente">
-                <input type="date" id="wish_date" name="wish_date" min="2023-01-01" max="2024-12-31" class="form-control"/>
-            </div> 
-        </div>   
-    </div>
-    <div class="row" id="card-agenda" hidden>
-        <div class="card mb-12 shadow">
-            <div class="card-header pb-0">
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Arrastra el evento donde lo requieras>></h6>
-                    </div>
-                </div>   
-            </div>
-            <div class="card-agenda-general px-0 pt-0 pb-2">
-                <div id="calendario" class="calendarioo"></div>
+            <div class="card-body" style="flex: 1; overflow: hidden; padding: 1rem;">
+                <div id="calendario" class="calendarioo" style="height: 100%;"></div>
             </div> 
         </div>
     </div>

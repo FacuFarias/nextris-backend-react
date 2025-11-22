@@ -1,46 +1,61 @@
+<link rel="stylesheet" href="/static/assets/css/modern-select.css">
+
 <div class="row" id="fill_exam">
 
+    <style>
+        /* Estilos para controlar el tamaño de la tabla de estudios */
+        #fill_exam .card-tabla-estudios {
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        /* Header sticky con degradado */
+        #fill_exam .tabla-estudios thead {
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        #fill_exam .tabla-estudios thead th {
+            color: white !important;
+            font-weight: 600;
+            padding: 12px 16px;
+            border-bottom: none !important;
+        }
+    </style>
+
     <div class="row">
-      <div class="card mb-4">
-        <div class="card-header pb-0">
-          <h6>Selecciona examen</h6>
+      <div class="modern-select-card">
+        <div class="card-title">
+          <i class="fas fa-filter"></i>
+          Filtros de búsqueda
         </div>
-        <div class="card-body px-0 pt-0 pb-2">
-          <div class="row">
-            <div class="col-md-6">
-                <div class="row">
-                    <div class="col-md-4">
-                        <label for="tipoexamen">
-                            Tipo de examen:
-                        </label>
-                    </div>
-                    <div class="col-md-8">
-                        <select id="tipo_examen" name="tipo_examen" class="form-control" >
-                            <option value="default">default</option>
-                        </select>
-                    </div>
-                </div>      
-            </div>
-            <div class="col-md-6">
-                <div class="row">
-                    <div class="col-md-4">
-                        <label for="tipoexamen">
-                            Partes del cuerpo:
-                        </label>
-                    </div>
-                    <div class="col-md-8">
-                        <select id="parte_cuerpo" name="parte_cuerpo" class="form-control">
-                            <option value="default">default</option>
-                        </select>
-                    </div>
-                </div>      
-            </div>
-            
+        <div class="modern-select-grid">
+          <div class="modern-select-group">
+            <label for="tipo_examen" class="modern-select-label">
+              <i class="fas fa-stethoscope"></i>
+              Tipo de examen
+            </label>
+            <select id="tipo_examen" name="tipo_examen" class="modern-select">
+              <option value="default">Seleccione un tipo</option>
+            </select>
           </div>
-        
+          
+          <div class="modern-select-group">
+            <label for="parte_cuerpo" class="modern-select-label">
+              <i class="fas fa-user-injured"></i>
+              Partes del cuerpo
+            </label>
+            <select id="parte_cuerpo" name="parte_cuerpo" class="modern-select">
+              <option value="default">Seleccione una parte</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
 
   <div class="row">
     <div class="col-12">
@@ -51,8 +66,8 @@
                     <h6>Estudios</h6>
                 </div>
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="seleccionar-estudio" class="btn btn-nr-primary rounded-circle shadow-primary mx-2  boton_est" disabled>
-                        <i class="fa fa-plus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    <button type="button" id="seleccionar-estudio" class="btn-primary btn-primary-icon btn-save boton_est" disabled title="Agregar estudio seleccionado">
+                        <i class="fa fa-plus-circle" aria-hidden="true"></i>
                     </button>
                 </div>
                 
@@ -60,7 +75,7 @@
             
             
         </div>
-        <div class="card-body card-tabla-paciente px-0 pt-0 pb-2">
+        <div class="card-body card-tabla-estudios px-0 pt-0 pb-2">
             <table class="tabla-estudios table" id="tabla-estudios">
                 <thead>
                     <tr>
@@ -68,6 +83,7 @@
                         <th>Descripcion</th>
                         <th>Modalidad</th>
                         <th>Parte del cuerpo</th>
+                        <th>Grupo</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -89,8 +105,8 @@
                 </div>
 
                 <div class="col-md-8 d-flex justify-content-end">
-                    <button type="button" id="quitar-estudio"  class="btn btn-nr-primary rounded-circle shadow-primary mx-2  botones btn-danger" disabled>
-                        <i class="fa fa-minus-circle" aria-hidden="true" style="font-size: 25px;"></i>
+                    <button type="button" id="quitar-estudio" class="btn-primary btn-primary-icon btn-back botones" disabled title="Quitar estudio seleccionado">
+                        <i class="fa fa-minus-circle" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>

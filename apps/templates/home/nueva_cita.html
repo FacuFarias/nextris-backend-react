@@ -3,14 +3,158 @@
 {% block title %} Nueva Cita {% endblock title %}
 
 {% block stylesheets %}
-<link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
-<link href="https://stackpath.bootstrapcdn.com/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
 
+<link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css' rel='stylesheet' />
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<link rel="stylesheet" href="/static/assets/css/modern-select.css">
+<link rel="stylesheet" href="/static/assets/css/generacion_informe.css">
+<style>
+  /* Fondo que ocupa toda la pantalla */
+  .background-full {
+    position: fixed !important;
+    width: 100% !important;
+    height: 100% !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: -1 !important;
+  }
+
+  /* Estructura para nueva_cita - scroll en tablas */
+  .main-content {
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .container-fluid {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .container-fluid > .row {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Tab content con estructura flexible */
+  #pills-tabContent {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .tab-pane {
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .tab-pane.active,
+  .tab-pane.show {
+    display: flex;
+  }
+
+  /* Cards de las tablas deben tener scroll */
+  .tab-pane .card-body.card-tabla-paciente {
+    max-height: calc(100vh - 450px);
+    overflow-y: auto;
+    overflow-x: auto;
+  }
+
+  /* Header sticky con degradado */
+  .tabla-primary thead {
+    position: sticky;
+    top: 0;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .tabla-primary thead th {
+    color: white !important;
+    font-weight: 600;
+    padding: 12px 16px;
+    border-bottom: none !important;
+  }
+
+  /* ============================================ */
+  /* ESTILOS PARA BADGES DE MODALIDAD MÉDICA */
+  /* ============================================ */
+  
+  /* Configuración base para columna de modalidad */
+  #fill_exam .tabla-estudios tbody td:nth-child(3) {
+    text-align: center !important;
+    vertical-align: middle !important;
+  }
+
+  /* Wrapper para el badge usando ::before */
+  #fill_exam .tabla-estudios tbody td:nth-child(3)[data-modalidad]::before {
+    content: attr(data-modalidad);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.5px;
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+
+  /* Ocultar el texto original para usar el ::before */
+  #fill_exam .tabla-estudios tbody td:nth-child(3)[data-modalidad] {
+    font-size: 0;
+  }
+
+  /* Colores por tipo de modalidad médica */
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="CT"]::before {
+    color: #3b82f6 !important;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(147, 197, 253, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="MG"]::before {
+    color: #ec4899 !important;
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(251, 207, 232, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="US"]::before {
+    color: #8b5cf6 !important;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(221, 214, 254, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="RX"]::before {
+    color: #10b981 !important;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(167, 243, 208, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="MR"]::before,
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="RMN"]::before {
+    color: #f59e0b !important;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(254, 215, 170, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="NM"]::before {
+    color: #ef4444 !important;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(254, 202, 202, 0.2)) !important;
+  }
+
+  #fill_exam .tabla-estudios tbody tr td:nth-child(3)[data-modalidad="DX"]::before {
+    color: #06b6d4 !important;
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(165, 243, 252, 0.2)) !important;
+  }
+</style>
 {% endblock stylesheets %} 
 
 {% block content %}
-<div class="position-absolute w-100 min-height-300 top-0" 
-style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); background-size: cover; background-repeat: no-repeat; background-position: top;">
+<div class="background-full" 
+style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar2.jpg'); background-size: cover; background-repeat: no-repeat; background-position: center;">
 <span class="mask bg-primary opacity-6"></span>
 </div>
 
@@ -18,13 +162,13 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
 
   
   
-  <main class="main-content position-relative" id="main_content">
+  <main class="main-content position-relative d-flex flex-column min-vh-100" id="main_content">
 
-    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
+    
     <div class="modal-container" id="modalCointeiner"></div>
   
-    <div class="container-fluid py-4 h-100">
-        <div class="row">
+    <div class="container-fluid py-4 flex-grow-1 d-flex flex-column">
+        <div class="row flex-grow-1 d-flex flex-column">
           <ul class="nav nav-pills mb-3 align-items-center d-flex w-100" id="pills-tab" role="tablist">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="pills-paciente-tab" data-bs-toggle="pill" data-bs-target="#pills-paciente" type="button" role="tab" aria-controls="pills-paciente" aria-selected="true">Paciente</button>
@@ -44,57 +188,50 @@ style="background-image: url('{{ config.ASSETS_ROOT }}/img/calendar.jpg'); backg
             </li>
             <!-- Botón adicional con clase ms-auto -->
             <li class="nav-item align-items-end" role="presentation">
-                <button type="button" id="b_conf_datos" class="btn btn-nr-primary btn-success">
-                    <i class="fa fa-check-circle" aria-hidden="true" style="font-size: 30px;"></i>
+                <button type="button" id="b_conf_datos" class="btn-primary btn-primary-icon btn-save" title="Confirmar datos de la cita">
+                    <i class="fa fa-check-circle" aria-hidden="true"></i>
                 </button>
             </li>
         </ul>
         
-            <div class="tab-content" id="pills-tabContent">
-                <div class="tab-pane fade show active" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
-                    {% include "includes/admision_templates/search_patient.html" %}
+            <div class="tab-content flex-grow-1 d-flex flex-column" id="pills-tabContent">
+                <div class="tab-pane fade show active h-100 d-flex flex-column" id="pills-paciente" role="tabpanel" aria-labelledby="pills-paciente-tab">
+                    {% include "includes/citas_templates/search_patient.html" %}
                 </div>
-                <div class="tab-pane fade" id="pills-examen" role="tabpanel" aria-labelledby="pills-examen-tab">
+                <div class="tab-pane fade h-100 d-flex flex-column" id="pills-examen" role="tabpanel" aria-labelledby="pills-examen-tab">
                     {% include "includes/citas_templates/exam.html" %}
                 </div>
-                <div class="tab-pane fade" id="pills-agenda" role="tabpanel" aria-labelledby="pills-agenda-tab">
+                <div class="tab-pane fade h-100 d-flex flex-column" id="pills-agenda" role="tabpanel" aria-labelledby="pills-agenda-tab">
                   {% include "includes/citas_templates/agenda.html" %}
                 </div>
-                <div class="tab-pane fade" id="pills-prest" role="tabpanel" aria-labelledby="pills-prest-tab">
+                <div class="tab-pane fade h-100 d-flex flex-column" id="pills-prest" role="tabpanel" aria-labelledby="pills-prest-tab">
                     {% include "includes/citas_templates/prestacion.html" %}
                 </div>
             </div>
         </div>
 
-      {% include "includes/footer.html" %}
+      <div class="mt-auto">
+        {% include "includes/footer.html" %}
+      </div>
     </div>
+    </main>
     
-    <script src="{{ config.ASSETS_ROOT }}/js/citas.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/functions.js"></script>
     <script src="{{ config.ASSETS_ROOT }}/js/nrframework.js"></script>
+    <script src="{{ config.ASSETS_ROOT }}/js/citas.js"></script>
+    
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.js'></script>
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
   </main>
 {% endblock content %}
+
+{% block modals %}
+  {% include "home/modals/paciente_rapido_modal.html" %}
+{% endblock modals %}
 
 {% block javascripts %}
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/interaction/main.min.js'></script>
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/daygrid/main.min.js'></script>
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/timegrid/main.min.js'></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const pillsTab = document.getElementById('pills-tab');
-            const navLinks = pillsTab.querySelectorAll('.nav-link');
-
-            navLinks.forEach(function (navLink) {
-                navLink.addEventListener('click', function () {
-                    navLinks.forEach(function (link) {
-                        link.classList.remove('active');
-                    });
-                    navLink.classList.add('active');
-                });
-            });
-        });
-        // Inicializar la animación Lottie
-
-    </script>
+    <!-- Toda la lógica de JavaScript está en citas.js -->
 {% endblock javascripts %}

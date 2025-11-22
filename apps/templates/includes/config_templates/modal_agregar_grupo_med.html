@@ -1,0 +1,25 @@
+<!-- Modal para agregar grupo al médico -->
+<div class="modal fade" id="modal_agregar_grupo_med" tabindex="-1" aria-labelledby="modalAgregarGrupoLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalAgregarGrupoLabel">Agregar Grupo al Médico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <form id="form_agregar_grupo_med">
+          <div class="mb-3">
+            <label for="select_grupo_disponible" class="form-label">Grupo disponible</label>
+            <select class="form-select" id="select_grupo_disponible" name="grupo_id" required>
+              <!-- Opciones generadas dinámicamente -->
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn_confirmar_agregar_grupo">Agregar</button>
+      </div>
+    </div>
+  </div>
+</div>
