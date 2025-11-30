@@ -9,15 +9,15 @@ echo "  NextRIS - Setup Dev Environment"
 echo "=================================="
 echo ""
 
-# Variables de configuración (EDITAR SEGÚN TU VPS)
+# Variables de configuración
 APP_NAME="nextris-dev"
 APP_USER="nextris"
 APP_DIR="/var/www/nextris-dev"
 REPO_URL="https://github.com/FacuFarias/Multitenant-NextRIS.git"
-BRANCH="feature/1"  # o main
+BRANCH="feature/1"
 PYTHON_VERSION="python3"
-DEV_PORT="5001"
-DOMAIN="dev.nextris.cloud"  # o tu IP:5001
+DEV_PORT="5000"
+SERVER_IP="148.230.72.8"
 
 # Colores para output
 GREEN='\033[0;32m'
@@ -114,46 +114,10 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-echo -e "${YELLOW}9. Configurando Nginx...${NC}"
-cat > /etc/nginx/sites-available/$APP_NAME << EOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-
-    location / {
-        proxy_pass http://127.0.0.1:$DEV_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # WebSocket support (si lo necesitas)
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts más largos para desarrollo
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-    }
-
-    location /static {
-        alias $APP_DIR/apps/static;
-        expires 1d;
-    }
-
-    location /media {
-        alias $APP_DIR/media;
-        expires 1d;
-    }
-}
-EOF
-
-# Habilitar sitio
-ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/
-nginx -t
-systemctl reload nginx
+echo -e "${YELLOW}9. Configurando firewall...${NC}"
+# Asegurarse de que el puerto está abierto
+ufw allow $DEV_PORT/tcp
+echo -e "${GREEN}Puerto $DEV_PORT abierto en firewall${NC}"
 
 echo -e "${YELLOW}10. Iniciando servicios...${NC}"
 systemctl daemon-reload
@@ -166,11 +130,11 @@ echo "  ✅ Instalación completada!"
 echo "==================================${NC}"
 echo ""
 echo "Servidor de desarrollo disponible en:"
-echo "  → http://$DOMAIN"
-echo "  → http://$(curl -s ifconfig.me):$DEV_PORT (si no usas dominio)"
+echo "  → http://$SERVER_IP:$DEV_PORT"
 echo ""
 echo "Comandos útiles:"
 echo "  sudo systemctl status $APP_NAME    # Ver estado"
 echo "  sudo systemctl restart $APP_NAME   # Reiniciar"
 echo "  sudo journalctl -u $APP_NAME -f    # Ver logs"
+echo "  curl http://localhost:$DEV_PORT    # Probar localmente"
 echo ""
