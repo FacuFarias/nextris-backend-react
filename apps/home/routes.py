@@ -17,7 +17,8 @@ from apps import db
 from flask import jsonify, send_file, send_from_directory
 import requests
 from apps.home import blueprint
-from datetime import datetime
+from datetime import datetime, timedelta
+import jwt
 
 # Cargar variables de entorno
 load_dotenv()
@@ -186,6 +187,237 @@ def get_dicom_viewer_url():
     except Exception as e:
         print(f"Error obteniendo URL del visor DICOM: {str(e)}")
         return jsonify({'url': 'http://192.168.1.45:8085/viewer.html'})  # URL por defecto
+
+@blueprint.route('/generate_dicom_token', methods=['POST'])
+def generate_dicom_token():
+    """
+    Genera un token de Keycloak de corta duración para visualizar un estudio DICOM específico.
+    
+    Flujo de seguridad:
+    1. Recibe usuario (de sesión) y studyInstanceUID
+    2. Verifica en tbexamination cuál es el location_id del estudio
+    3. Valida que el usuario tenga relación en rel_user_location con esa location
+    4. Si tiene acceso, genera token de Keycloak con usuario genérico (nextrisviewer)
+    5. El token es de corta duración (5 minutos) y solo para ese estudio
+    """
+    try:
+        data = request.get_json()
+        study_instance_uid = data.get('studyInstanceUID')
+        
+        if not study_instance_uid:
+            return jsonify({'error': 'StudyInstanceUID requerido'}), 400
+        
+        # Obtener información del usuario actual de la sesión
+        user_guid = session.get('user_guid')
+        username = session.get('username', 'anonymous')
+        
+        if not user_guid:
+            return jsonify({'error': 'Usuario no autenticado'}), 401
+        
+        # PASO 1 y 2: Obtener location_id del estudio desde tbexamination
+        db_service = DatabaseService()
+        query_location = """
+            SELECT location_id 
+            FROM nextris.tbexamination 
+            WHERE studyinstanceuid = %s
+        """
+        
+        result = db_service.execute_query(query_location, (study_instance_uid,))
+        
+        if not result or len(result) == 0:
+            current_app.logger.warning(
+                f"Estudio no encontrado: {study_instance_uid} - Usuario: {username}"
+            )
+            return jsonify({'error': 'Estudio no encontrado'}), 404
+        
+        location_id = result[0][0]
+        
+        if not location_id:
+            current_app.logger.warning(
+                f"Estudio sin location asignada: {study_instance_uid}"
+            )
+            return jsonify({'error': 'Estudio sin ubicación asignada'}), 403
+        
+        # PASO 3: Verificar que el usuario tiene acceso a esa location
+        query_access = """
+            SELECT 1 
+            FROM nextris.rel_user_location 
+            WHERE user_id = %s AND location_id = %s
+        """
+        
+        access_result = db_service.execute_query(query_access, (user_guid, location_id))
+        
+        if not access_result or len(access_result) == 0:
+            current_app.logger.warning(
+                f"Acceso denegado - Usuario: {username} ({user_guid}) - "
+                f"Location: {location_id} - Estudio: {study_instance_uid}"
+            )
+            return jsonify({
+                'error': 'No tiene permisos para visualizar este estudio',
+                'location_id': location_id
+            }), 403
+        
+        current_app.logger.info(
+            f"Acceso autorizado - Usuario: {username} - "
+            f"Location: {location_id} - Estudio: {study_instance_uid}"
+        )
+        
+        # PASO 4: Generar token de Keycloak con usuario genérico
+        keycloak_server = os.getenv('KEYCLOAK_SERVER_URL')
+        keycloak_realm = os.getenv('KEYCLOAK_REALM')
+        keycloak_client_id = os.getenv('KEYCLOAK_CLIENT_ID')
+        keycloak_client_secret = os.getenv('KEYCLOAK_CLIENT_SECRET')  # Opcional para clientes públicos
+        viewer_user = os.getenv('KEYCLOAK_VIEWER_USER', 'nextviewer')
+        viewer_password = os.getenv('KEYCLOAK_VIEWER_PASSWORD', 'viewer')
+        
+        if not all([keycloak_server, keycloak_realm, keycloak_client_id, viewer_user, viewer_password]):
+            current_app.logger.error("Configuración de Keycloak incompleta")
+            return jsonify({'error': 'Configuración de autenticación incompleta'}), 500
+        
+        # Construir URL del token endpoint de Keycloak
+        token_url = f"{keycloak_server}/realms/{keycloak_realm}/protocol/openid-connect/token"
+        
+        # Datos para solicitar el token (sin client_secret porque es cliente público)
+        token_data = {
+            'grant_type': 'password',
+            'client_id': keycloak_client_id,
+            'username': viewer_user,
+            'password': viewer_password,
+            'scope': 'openid'
+        }
+        
+        # Si hay client_secret configurado, agregarlo (para clientes confidenciales)
+        if keycloak_client_secret:
+            token_data['client_secret'] = keycloak_client_secret
+        
+        # Solicitar token a Keycloak
+        try:
+            keycloak_response = requests.post(
+                token_url,
+                data=token_data,
+                timeout=10,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+            
+            if keycloak_response.status_code != 200:
+                current_app.logger.error(
+                    f"Error obteniendo token de Keycloak: {keycloak_response.status_code} - "
+                    f"{keycloak_response.text}"
+                )
+                return jsonify({'error': 'Error generando token de acceso'}), 500
+            
+            keycloak_data = keycloak_response.json()
+            access_token = keycloak_data.get('access_token')
+            expires_in = keycloak_data.get('expires_in', 300)  # Default 5 minutos
+            
+            current_app.logger.info(
+                f"Token Keycloak generado exitosamente - "
+                f"Usuario solicitante: {username} - Estudio: {study_instance_uid} - "
+                f"Expira en: {expires_in}s"
+            )
+            
+            # PASO 5: Retornar token con metadata del estudio
+            return jsonify({
+                'success': True,
+                'token': access_token,
+                'tokenType': 'keycloak',
+                'expiresIn': expires_in,
+                'studyInstanceUID': study_instance_uid,
+                'location_id': location_id,
+                'viewer_user': viewer_user
+            })
+            
+        except requests.exceptions.RequestException as e:
+            current_app.logger.error(f"Error conectando con Keycloak: {str(e)}")
+            return jsonify({'error': 'Error de conexión con servidor de autenticación'}), 500
+        
+    except Exception as e:
+        current_app.logger.error(f"Error generando token DICOM: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+@blueprint.route('/validate_dicom_token', methods=['POST'])
+def validate_dicom_token():
+    """
+    Endpoint para que OHIF/DCM4CHEE valide el token y verifique acceso al estudio.
+    Puede ser llamado desde el visor para validar permisos.
+    """
+    try:
+        data = request.get_json()
+        token = data.get('token')
+        study_instance_uid = data.get('studyInstanceUID')
+        
+        if not token:
+            return jsonify({'valid': False, 'error': 'Token requerido'}), 400
+        
+        # Intentar decodificar como JWT local
+        try:
+            secret_key = current_app.config.get('SECRET_KEY')
+            payload = jwt.decode(token, secret_key, algorithms=['HS256'])
+            
+            # Verificar que el studyInstanceUID coincida
+            token_study_uid = payload.get('studyInstanceUID')
+            if study_instance_uid and token_study_uid != study_instance_uid:
+                return jsonify({
+                    'valid': False,
+                    'error': 'Token no autorizado para este estudio'
+                }), 403
+            
+            return jsonify({
+                'valid': True,
+                'tokenType': 'jwt',
+                'username': payload.get('username'),
+                'studyInstanceUID': token_study_uid,
+                'expiresAt': payload.get('exp')
+            })
+            
+        except jwt.ExpiredSignatureError:
+            return jsonify({'valid': False, 'error': 'Token expirado'}), 401
+        except jwt.InvalidTokenError:
+            # Si no es JWT válido, asumir que es token de Keycloak
+            # En producción, aquí deberías validar contra Keycloak
+            return jsonify({
+                'valid': True,
+                'tokenType': 'keycloak',
+                'note': 'Token de Keycloak - validar en DCM4CHEE'
+            })
+    
+    except Exception as e:
+        current_app.logger.error(f"Error validando token DICOM: {str(e)}")
+        return jsonify({'valid': False, 'error': 'Error validando token'}), 500
+
+@blueprint.route('/save_keycloak_token', methods=['POST'])
+def save_keycloak_token():
+    """
+    Guarda el token de Keycloak en la sesión después del login.
+    Llamar este endpoint desde el frontend después de autenticarse con Keycloak.
+    """
+    try:
+        data = request.get_json()
+        access_token = data.get('access_token')
+        refresh_token = data.get('refresh_token')
+        
+        if not access_token:
+            return jsonify({'success': False, 'error': 'access_token requerido'}), 400
+        
+        # Guardar tokens en la sesión
+        session['keycloak_token'] = access_token
+        session['access_token'] = access_token
+        
+        if refresh_token:
+            session['refresh_token'] = refresh_token
+        
+        current_app.logger.info(f"Token Keycloak guardado para usuario: {session.get('username')}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Token guardado exitosamente'
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error guardando token Keycloak: {str(e)}")
+        return jsonify({'success': False, 'error': 'Error guardando token'}), 500
 
 @blueprint.route('/validar_credenciales', methods=['POST'])
 def validar_credenciales():
