@@ -5,14 +5,20 @@
 set -e
 
 APP_DIR="/var/www/nextris-dev"
-WEBHOOK_SECRET="nextris_webhook_secret_2025"  # Cambiar por algo más seguro
+WEBHOOK_SECRET="nextris_webhook_secret_2025"
+WEBHOOK_PORT="9000"
 
-echo "Configurando webhook de GitHub..."
+echo "=================================="
+echo "  Configurando Auto-Actualización"
+echo "=================================="
+echo ""
 
 # Instalar dependencias
-pip3 install flask flask-cors
+echo "1. Instalando dependencias..."
+pip3 install flask flask-cors >/dev/null 2>&1
 
 # Crear script del webhook
+echo "2. Creando script del webhook..."
 cat > /opt/github-webhook.py << 'EOF'
 from flask import Flask, request, abort
 import hmac
@@ -82,10 +88,12 @@ def health():
     return {'status': 'ok'}, 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=9000)
+    print(f"Webhook server iniciado en puerto {os.getenv('WEBHOOK_PORT', '9000')}")
+    app.run(host='0.0.0.0', port=int(os.getenv('WEBHOOK_PORT', '9000')))
 EOF
 
 # Crear servicio systemd para el webhook
+echo "3. Configurando servicio systemd..."
 cat > /etc/systemd/system/github-webhook.service << EOF
 [Unit]
 Description=GitHub Webhook Service
@@ -96,6 +104,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt
 Environment="WEBHOOK_SECRET=$WEBHOOK_SECRET"
+Environment="WEBHOOK_PORT=$WEBHOOK_PORT"
 ExecStart=/usr/bin/python3 /opt/github-webhook.py
 Restart=always
 RestartSec=3
@@ -104,40 +113,53 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-# Configurar nginx para el webhook
-cat > /etc/nginx/sites-available/github-webhook << 'EOF'
-server {
-    listen 80;
-    server_name webhook.nextris.cloud;  # Cambiar por tu dominio
-
-    location / {
-        proxy_pass http://127.0.0.1:9000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-EOF
-
-ln -sf /etc/nginx/sites-available/github-webhook /etc/nginx/sites-enabled/
-nginx -t
-systemctl reload nginx
+# Abrir puerto del webhook en firewall
+echo "4. Configurando firewall..."
+ufw allow $WEBHOOK_PORT/tcp
 
 # Iniciar webhook
+echo "5. Iniciando servicio webhook..."
 systemctl daemon-reload
 systemctl enable github-webhook
 systemctl start github-webhook
 
+# Esperar que inicie
+sleep 2
+
+# Verificar estado
+if systemctl is-active --quiet github-webhook; then
+    echo "✓ Webhook iniciado correctamente"
+else
+    echo "✗ Error al iniciar webhook"
+    journalctl -u github-webhook -n 20
+    exit 1
+fi
+
 echo ""
-echo "✅ Webhook configurado!"
+echo "=================================="
+echo "  ✅ Webhook Configurado!"
+echo "=================================="
 echo ""
-echo "Siguiente paso:"
+echo "IMPORTANTE: Ahora debes configurar el webhook en GitHub:"
+echo ""
 echo "1. Ve a: https://github.com/FacuFarias/Multitenant-NextRIS-Frontend/settings/hooks"
-echo "2. Click en 'Add webhook'"
-echo "3. Payload URL: http://webhook.nextris.cloud/webhook (o tu IP:9000/webhook)"
-echo "4. Content type: application/json"
-echo "5. Secret: $WEBHOOK_SECRET"
-echo "6. Events: Just the push event"
-echo "7. Active: ✓"
 echo ""
-echo "Ahora cada push al repo frontend actualizará automáticamente el servidor dev!"
+echo "2. Click en 'Add webhook'"
+echo ""
+echo "3. Configuración:"
+echo "   Payload URL: http://148.230.72.8:$WEBHOOK_PORT/webhook"
+echo "   Content type: application/json"
+echo "   Secret: $WEBHOOK_SECRET"
+echo "   SSL verification: Disable (solo para dev)"
+echo "   Events: Just the push event"
+echo "   Active: ✓"
+echo ""
+echo "4. Click 'Add webhook'"
+echo ""
+echo "¡Listo! Ahora cada push al repo frontend actualizará automáticamente el servidor."
+echo ""
+echo "Para verificar:"
+echo "  - Estado: systemctl status github-webhook"
+echo "  - Logs: journalctl -u github-webhook -f"
+echo "  - Test: curl http://localhost:$WEBHOOK_PORT/health"
+echo ""

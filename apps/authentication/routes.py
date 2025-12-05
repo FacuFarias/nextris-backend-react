@@ -30,6 +30,10 @@ def route_default():
 
 # Login & Registration
 
+@blueprint.route('/react-login', methods=['GET'])
+def react_login():
+    """Página de login en React para desarrollo frontend"""
+    return render_template('accounts/react-login.html')
 
 @blueprint.route('/login', methods=['GET', 'POST'])
 def login():
