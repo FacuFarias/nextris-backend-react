@@ -20,6 +20,7 @@ PASSWORD = "1234"
 
 # Token de autenticación (se obtiene en login)
 TOKEN = None
+PATIENTDOMAIN_ID = None  # Se obtiene dinámicamente
 
 # Colores para la consola
 class Colors:
@@ -88,6 +89,41 @@ def get_headers():
         "Authorization": f"Bearer {TOKEN}",
         "Content-Type": "application/json"
     }
+
+
+def get_patientdomain_id():
+    """Obtener un patientdomain_id válido del usuario actual"""
+    try:
+        # Obtener el user_id actual
+        response = requests.get(
+            f"{API_URL}/auth/me",
+            headers=get_headers()
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                user_id = data['data']['id']
+                
+                # Obtener patientdomains del usuario
+                response = requests.get(
+                    f"{API_URL}/auth/user/{user_id}/patientdomains",
+                    headers=get_headers()
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('success') and len(data['data']) > 0:
+                        patientdomain_id = data['data'][0]['patientdomain_id']
+                        print_info(f"Usando PatientDomain: {data['data'][0]['patientdomain_name']} ({patientdomain_id})")
+                        return patientdomain_id
+        
+        print_error("No se pudo obtener patientdomain_id")
+        return None
+        
+    except Exception as e:
+        print_error(f"Error obteniendo patientdomain_id: {str(e)}")
+        return None
 
 
 # ===========================
@@ -286,9 +322,17 @@ def test_create_patient_quick():
 
 def test_create_patient_full():
     """Test: POST /api/patients - Crear paciente completo"""
-    print_test("POST /api/patients - Crear paciente completo")
+    print_test("POST /api/patients - Crear paciente completo (con PatientID autoincremental)")
     
+    global PATIENTDOMAIN_ID
     timestamp = datetime.now().strftime("%H%M%S")
+    
+    # Obtener patientdomain_id si no lo tenemos
+    if not PATIENTDOMAIN_ID:
+        PATIENTDOMAIN_ID = get_patientdomain_id()
+        if not PATIENTDOMAIN_ID:
+            print_error("No se pudo obtener patientdomain_id")
+            return None
     
     try:
         response = requests.post(
@@ -297,7 +341,7 @@ def test_create_patient_full():
             json={
                 "name": f"TestNombreFull{timestamp}",
                 "surname": f"TestApellidoFull{timestamp}",
-                "patientid": f"PID{timestamp}",
+                "patientdomain_id": PATIENTDOMAIN_ID,
                 "nationalcode": f"88{timestamp}",
                 "email": f"test{timestamp}@test.com",
                 "phone": f"555-{timestamp}",
@@ -312,7 +356,17 @@ def test_create_patient_full():
             data = response.json()
             if data.get('success'):
                 guid = data['data']['guid']
-                print_success(f"Paciente completo creado: {guid}")
+                # Obtener el PatientID generado
+                patient_resp = requests.get(
+                    f"{API_URL}/patients/{guid}",
+                    headers=get_headers()
+                )
+                if patient_resp.status_code == 200:
+                    patient_data = patient_resp.json()
+                    if patient_data.get('success'):
+                        patient_id = patient_data['data']['patientid']
+                        print_success(f"Paciente creado: {guid}")
+                        print_info(f"PatientID autoincremental: {patient_id}")
                 return guid
             else:
                 print_error(f"Respuesta no exitosa: {data.get('message')}")

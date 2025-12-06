@@ -381,6 +381,56 @@ def test_12_use_token_after_logout():
 
 # ==================== EJECUTOR DE TESTS ====================
 
+def test_13_get_user_patientdomains():
+    """Test 13: Obtener patientdomains de un usuario"""
+    global access_token
+    
+    print_test_header(13, "GET /auth/user/:user_id/patientdomains")
+    
+    try:
+        # Primero obtener el user_id del usuario actual
+        response = requests.get(
+            f"{BASE_URL}/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        
+        if response.status_code != 200:
+            return print_result(False, "No se pudo obtener información del usuario actual")
+        
+        user_data = response.json()
+        user_id = user_data['data']['id']
+        
+        # Obtener patientdomains del usuario
+        response = requests.get(
+            f"{BASE_URL}/auth/user/{user_id}/patientdomains",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        
+        data = response.json()
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+        
+        if response.status_code == 200 and data.get('success'):
+            # Verificar estructura
+            assert 'data' in data, "Falta campo 'data'"
+            assert isinstance(data['data'], list), "data debe ser una lista"
+            
+            if len(data['data']) > 0:
+                pd = data['data'][0]
+                assert 'patientdomain_id' in pd, "Falta patientdomain_id"
+                assert 'patientdomain_name' in pd, "Falta patientdomain_name"
+                print(f"✓ Usuario tiene {len(data['data'])} patientdomain(s)")
+            else:
+                print(f"✓ Usuario sin patientdomains asignados")
+            
+            return print_result(True)
+        else:
+            return print_result(False, data.get('message', 'Error desconocido'))
+            
+    except Exception as e:
+        return print_result(False, str(e))
+
+
 def run_all_tests():
     """Ejecuta todos los tests en orden"""
     
@@ -403,6 +453,7 @@ def run_all_tests():
         test_10_logout,
         test_11_logout_no_token,
         test_12_use_token_after_logout,
+        test_13_get_user_patientdomains,
     ]
     
     results = []
