@@ -8,16 +8,19 @@ import os
 from flask import Flask
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager
 from importlib import import_module
 
 
 db = SQLAlchemy()
 login_manager = LoginManager()
+jwt = JWTManager()
 
 
 def register_extensions(app):
     db.init_app(app)
     login_manager.init_app(app)
+    jwt.init_app(app)
 
 
 def register_context_processors(app):
@@ -36,6 +39,10 @@ def register_blueprints(app):
     for module_name in ('authentication', 'home'):
         module = import_module('apps.{}.routes'.format(module_name))
         app.register_blueprint(module.blueprint)
+    
+    # Registrar API blueprint
+    from apps.api import api_blueprint
+    app.register_blueprint(api_blueprint)
 
 
 def configure_database(app):

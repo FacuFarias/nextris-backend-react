@@ -1,0 +1,385 @@
+# -*- encoding: utf-8 -*-
+"""
+API de Estudios (Examinations) - Endpoints para gestión de estudios médicos
+Migrado desde examination_controller.py
+"""
+
+from flask import jsonify, request
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+import psycopg2
+import pytz
+from datetime import datetime, timedelta
+from apps.api import api_blueprint
+
+
+def get_db_config():
+    """Obtiene la configuración de la base de datos"""
+    from apps.home.routes import config as db_config
+    return db_config
+
+
+def get_user_locations(user_id, connection):
+    """Obtiene las ubicaciones asignadas a un usuario"""
+    cursor = connection.cursor()
+    cursor.execute("""
+        SELECT location_id 
+        FROM nextris.rel_user_location 
+        WHERE user_id = %s
+    """, (user_id,))
+    locations = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+    return locations
+
+
+@api_blueprint.route('/studies', methods=['GET'])
+@jwt_required()
+def get_studies():
+    """
+    Listar estudios con filtros
+    
+    Query params:
+    - page: número de página (default: 1)
+    - per_page: resultados por página (default: 20)
+    - patient_id: filtrar por paciente (opcional)
+    - modality: filtrar por modalidad (opcional)
+    - date_from: fecha inicio (YYYY-MM-DD)
+    - date_to: fecha fin (YYYY-MM-DD)
+    
+    Respuesta:
+    {
+        "success": true,
+        "data": {
+            "studies": [...],
+            "page": 1,
+            "per_page": 20,
+            "total": 50
+        }
+    }
+    """
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        patient_id = request.args.get('patient_id')
+        modality = request.args.get('modality')
+        date_from = request.args.get('date_from')
+        date_to = request.args.get('date_to')
+        
+        # Validar parámetros
+        if page < 1:
+            page = 1
+        if per_page < 1 or per_page > 100:
+            per_page = 20
+        
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        
+        # Construir WHERE clause dinámico
+        where_clauses = []
+        params = []
+        
+        if patient_id:
+            where_clauses.append("ds.patient_id = %s")
+            params.append(patient_id)
+        
+        if modality:
+            where_clauses.append("ds.modality = %s")
+            params.append(modality)
+        
+        if date_from:
+            where_clauses.append("ds.study_date >= %s")
+            params.append(date_from)
+        
+        if date_to:
+            where_clauses.append("ds.study_date <= %s")
+            params.append(date_to)
+        
+        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        
+        # Contar total
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM nextris.datastudy ds
+            {where_sql}
+        """
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
+        
+        # Obtener estudios
+        offset = (page - 1) * per_page
+        query = f"""
+            SELECT 
+                ds.guid,
+                ds.study_instance_uid,
+                ds.study_description,
+                ds.modality,
+                ds.study_date,
+                ds.study_time,
+                ds.accession_number,
+                ds.patient_id,
+                dp.name,
+                dp.surname,
+                ds.number_of_series,
+                ds.number_of_instances
+            FROM nextris.datastudy ds
+            LEFT JOIN nextris.datapatient dp ON ds.patient_id = dp.guid
+            {where_sql}
+            ORDER BY ds.study_date DESC, ds.study_time DESC
+            LIMIT %s OFFSET %s
+        """
+        
+        cursor.execute(query, params + [per_page, offset])
+        
+        studies = []
+        for row in cursor.fetchall():
+            studies.append({
+                'guid': row[0],
+                'study_instance_uid': row[1],
+                'study_description': row[2],
+                'modality': row[3],
+                'study_date': row[4].isoformat() if row[4] else None,
+                'study_time': str(row[5]) if row[5] else None,
+                'accession_number': row[6],
+                'patient_id': row[7],
+                'patient_name': f"{row[8]} {row[9]}" if row[8] and row[9] else None,
+                'number_of_series': row[10],
+                'number_of_instances': row[11]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'studies': studies,
+                'page': page,
+                'per_page': per_page,
+                'total': total
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"[API STUDIES] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/studies/<guid>', methods=['GET'])
+@jwt_required()
+def get_study(guid):
+    """
+    Obtener detalles de un estudio específico
+    
+    Respuesta:
+    {
+        "success": true,
+        "data": {
+            "study": {...},
+            "series": [...]
+        }
+    }
+    """
+    try:
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        
+        # Obtener estudio
+        cursor.execute("""
+            SELECT 
+                ds.guid,
+                ds.study_instance_uid,
+                ds.study_description,
+                ds.modality,
+                ds.study_date,
+                ds.study_time,
+                ds.accession_number,
+                ds.patient_id,
+                dp.name,
+                dp.surname,
+                dp.dni,
+                ds.number_of_series,
+                ds.number_of_instances
+            FROM nextris.datastudy ds
+            LEFT JOIN nextris.datapatient dp ON ds.patient_id = dp.guid
+            WHERE ds.guid = %s
+        """, (guid,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Estudio no encontrado'
+            }), 404
+        
+        study = {
+            'guid': row[0],
+            'study_instance_uid': row[1],
+            'study_description': row[2],
+            'modality': row[3],
+            'study_date': row[4].isoformat() if row[4] else None,
+            'study_time': str(row[5]) if row[5] else None,
+            'accession_number': row[6],
+            'patient_id': row[7],
+            'patient_name': f"{row[8]} {row[9]}" if row[8] and row[9] else None,
+            'patient_dni': row[10],
+            'number_of_series': row[11],
+            'number_of_instances': row[12]
+        }
+        
+        # Obtener series del estudio
+        cursor.execute("""
+            SELECT 
+                guid,
+                series_instance_uid,
+                series_description,
+                modality,
+                series_number,
+                number_of_instances
+            FROM nextris.dataseries
+            WHERE study_id = %s
+            ORDER BY series_number
+        """, (guid,))
+        
+        series = []
+        for serie_row in cursor.fetchall():
+            series.append({
+                'guid': serie_row[0],
+                'series_instance_uid': serie_row[1],
+                'series_description': serie_row[2],
+                'modality': serie_row[3],
+                'series_number': serie_row[4],
+                'number_of_instances': serie_row[5]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'study': study,
+                'series': series
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"[API STUDY] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/studies/patient/<patient_id>', methods=['GET'])
+@jwt_required()
+def get_patient_studies(patient_id):
+    """
+    Obtener todos los estudios de un paciente específico
+    
+    Respuesta:
+    {
+        "success": true,
+        "data": {
+            "studies": [...]
+        }
+    }
+    """
+    try:
+        # Verificar que el usuario tenga permiso (si es paciente, solo puede ver sus propios estudios)
+        claims = get_jwt()
+        user_type = claims.get('user_type', 'staff')
+        current_user_id = get_jwt_identity()
+        
+        # Si es paciente, validar que esté consultando sus propios estudios
+        if user_type == 'patient':
+            # Obtener el patient_id del usuario actual
+            db_config = get_db_config()
+            connection = psycopg2.connect(**db_config)
+            cursor = connection.cursor()
+            
+            cursor.execute("""
+                SELECT datapatient_id
+                FROM nextris.tbuser_patient
+                WHERE guid = %s
+            """, (current_user_id,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            
+            if not result or result[0] != patient_id:
+                return jsonify({
+                    'success': False,
+                    'message': 'No autorizado para ver estos estudios'
+                }), 403
+        
+        # Obtener estudios
+        db_config = get_db_config()
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                ds.guid,
+                ds.study_instance_uid,
+                ds.study_description,
+                ds.modality,
+                ds.study_date,
+                ds.study_time,
+                ds.accession_number,
+                ds.number_of_series,
+                ds.number_of_instances
+            FROM nextris.datastudy ds
+            WHERE ds.patient_id = %s
+            ORDER BY ds.study_date DESC, ds.study_time DESC
+        """, (patient_id,))
+        
+        studies = []
+        for row in cursor.fetchall():
+            studies.append({
+                'guid': row[0],
+                'study_instance_uid': row[1],
+                'study_description': row[2],
+                'modality': row[3],
+                'study_date': row[4].isoformat() if row[4] else None,
+                'study_time': str(row[5]) if row[5] else None,
+                'accession_number': row[6],
+                'number_of_series': row[7],
+                'number_of_instances': row[8]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'studies': studies
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"[API PATIENT STUDIES] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500

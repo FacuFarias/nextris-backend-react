@@ -537,12 +537,13 @@ def get_patient(guid):
 def create_patient():
     """
     Crear un nuevo paciente con todos los datos completos
+    El PatientID se genera automáticamente con formato NR00000001, NR00000002, etc.
     
     Body JSON:
     {
         "name": "...",
         "surname": "...",
-        "patientid": "...",
+        "patientdomain_id": "uuid",
         "nationalcode": "...",
         "email": "...",
         "phone": "...",
@@ -562,7 +563,7 @@ def create_patient():
             }), 400
         
         # Validar campos requeridos
-        required_fields = ['name', 'surname', 'patientid']
+        required_fields = ['name', 'surname', 'patientdomain_id']
         for field in required_fields:
             if field not in data or not data[field]:
                 return jsonify({
@@ -577,27 +578,53 @@ def create_patient():
         # Generar nuevo GUID
         patient_guid = str(uuid.uuid4())
         
+        # Generar PatientID autoincremental con formato NR00000001
+        cursor.execute("""
+            SELECT patientid 
+            FROM nextris.datapatient 
+            WHERE patientid LIKE 'NR%' 
+            ORDER BY patientid DESC 
+            LIMIT 1
+        """)
+        
+        result = cursor.fetchone()
+        
+        if result and result[0]:
+            # Extraer el número del último PatientID (NR00000005 -> 5)
+            last_id = result[0]
+            try:
+                last_number = int(last_id[2:])  # Quitar "NR" y convertir a int
+                new_number = last_number + 1
+            except (ValueError, IndexError):
+                new_number = 1
+        else:
+            new_number = 1
+        
+        # Formatear con 8 dígitos: NR00000001
+        patient_id = f"NR{new_number:08d}"
+        
         # Insertar paciente
         cursor.execute("""
             INSERT INTO nextris.datapatient 
             (guid, name, surname, patientid, nationalcode, email, phone, birthdate, sexcode, 
-             healthcard, trial190, isanonymous, ismerged)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::bit, %s::bit)
+             healthcard, trial190, isanonymous, ismerged, id_patientdomain)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::bit, %s::bit, %s)
             RETURNING guid
         """, (
             patient_guid,
             data.get('name'),
             data.get('surname'),
-            data.get('patientid'),
+            patient_id,
             data.get('nationalcode'),
             data.get('email'),
             data.get('phone'),
             data.get('birthdate'),
-            data.get('gender', 'O'),
+            data.get('gender', 'O'), 
             data.get('healthcard'),
             data.get('trial190'),
             1 if data.get('isanonymous', False) else 0,
-            1 if data.get('ismerged', False) else 0
+            1 if data.get('ismerged', False) else 0,
+            data.get('patientdomain_id')
         ))
         
         new_guid = cursor.fetchone()[0]

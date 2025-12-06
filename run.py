@@ -6,6 +6,7 @@ import requests
 import os
 from   flask_migrate import Migrate
 from   flask_minify  import Minify
+from   flask_cors import CORS
 from   sys import exit
 import mysql.connector
 from dotenv import load_dotenv
@@ -32,6 +33,17 @@ except KeyError:
 
 app = create_app(app_config)
 Migrate(app, db)
+
+# Configurar CORS para permitir peticiones desde React
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://148.230.72.8:5173"],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 
 if not DEBUG:
     Minify(app=app, html=True, js=False, cssless=False)

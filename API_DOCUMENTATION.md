@@ -161,6 +161,60 @@ Authorization: Bearer {access_token}
 }
 ```
 
+#### GET /auth/user/:user_id/patientdomains
+Obtener los patientdomains asociados a un usuario.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "patientdomain_id": "uuid",
+      "patientdomain_name": "GENERAL",
+      "created_at": "2024-01-01T10:00:00"
+    }
+  ]
+}
+```
+
+---
+
+## Pacientes
+
+### Base URL
+`/api/patients`
+
+### Endpoints
+
+#### GET /patients
+Listar pacientes con filtros opcionales.
+
+**Query Parameters:**
+- `search` (opcional): Búsqueda por nombre, apellido o documento
+- `page` (opcional): Número de página (default: 1)
+- `per_page` (opcional): Items por página (default: 20)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "valid": true,
+    "user": {
+      "id": "uuid",
+      "username": "string",
+      "user_type": "string"
+    }
+  }
+}
+```
+
 ---
 
 ## Pacientes
