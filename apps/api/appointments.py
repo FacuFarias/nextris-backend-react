@@ -544,12 +544,14 @@ def get_appointments():
                 equip.aetitle as equipment,
                 tba.isadmitted,
                 tba.location_id,
-                tba.idequipment as equipment_id
+                tba.idequipment as equipment_id,
+                mod.description as modality
             FROM nextris.tbagendaevents tba
             LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
             LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
             LEFT JOIN nextris.tbuser med ON med.guid = tba.idmed
             LEFT JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
+            LEFT JOIN nextris.ismodality mod ON mod.guid = st.modality_id
             WHERE 1=1
         """
         
@@ -611,7 +613,8 @@ def get_appointments():
                 'equipment': row[6] or 'Sin equipo',
                 'is_admitted': bool(row[7]) if row[7] is not None else False,
                 'location_id': row[8] if row[8] else None,
-                'equipment_id': row[9] if row[9] else None
+                'equipment_id': row[9] if row[9] else None,
+                'modality': row[10] if row[10] else None
             })
         
         return jsonify({

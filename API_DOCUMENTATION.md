@@ -1324,7 +1324,8 @@ Listar turnos con paginación.
         "equipment": "string",
         "is_admitted": false,
         "location_id": "uuid",
-        "equipment_id": "uuid"
+        "equipment_id": "uuid",
+        "modality": "string"
       }
     ],
     "page": 1,
