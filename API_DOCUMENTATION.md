@@ -1323,7 +1323,8 @@ Listar turnos con paginación.
         "doctor": "string",
         "equipment": "string",
         "is_admitted": false,
-        "location_id": "uuid"
+        "location_id": "uuid",
+        "equipment_id": "uuid"
       }
     ],
     "page": 1,

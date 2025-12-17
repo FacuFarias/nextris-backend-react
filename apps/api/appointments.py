@@ -543,7 +543,8 @@ def get_appointments():
                 CONCAT(med.surname, ' ', med.name) as doctor,
                 equip.aetitle as equipment,
                 tba.isadmitted,
-                tba.location_id
+                tba.location_id,
+                tba.idequipment as equipment_id
             FROM nextris.tbagendaevents tba
             LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
             LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
@@ -609,7 +610,8 @@ def get_appointments():
                 'doctor': row[5] or 'Sin médico',
                 'equipment': row[6] or 'Sin equipo',
                 'is_admitted': bool(row[7]) if row[7] is not None else False,
-                'location_id': row[8] if row[8] else None
+                'location_id': row[8] if row[8] else None,
+                'equipment_id': row[9] if row[9] else None
             })
         
         return jsonify({

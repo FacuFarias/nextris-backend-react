@@ -49,7 +49,8 @@ Authorization: Bearer <JWT_TOKEN>
         "doctor": "Dr. Carlos López",
         "equipment": "CT-01",
         "is_admitted": false,
-        "location_id": "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6"
+        "location_id": "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6",
+        "equipment_id": "c1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o8"
       }
     ],
     "page": 1,
@@ -497,7 +498,8 @@ Content-Type: application/json
   "doctor": "string",
   "equipment": "string",
   "is_admitted": "boolean",
-  "location_id": "string (UUID)"
+  "location_id": "string (UUID)",
+  "equipment_id": "string (UUID)"
 }
 ```
 
