@@ -8,11 +8,12 @@ Esta documentación describe todos los endpoints REST disponibles en el sistema 
 2. [Pacientes](#pacientes)
 3. [Estudios](#estudios)
 4. [Administración](#administración)
-5. [Turnos](#turnos)
-6. [Institucional](#institucional)
-7. [Médicos](#médicos)
-8. [Reportes](#reportes)
-9. [Configuración](#configuración)
+5. [Admisión React](#admisión-react)
+6. [Turnos](#turnos)
+7. [Institucional](#institucional)
+8. [Médicos](#médicos)
+9. [Reportes](#reportes)
+10. [Configuración](#configuración)
 
 ---
 
@@ -757,21 +758,30 @@ Obtener logs de auditoría.
 
 ---
 
-## Turnos
+## Admisión React
 
 ### Base URL
-`/api/appointments`
+`/api/institutional` / `/api/patients` / `/api/studies` / `/api/config`
 
-### Endpoints
+### Descripción
+Esta sección documenta las APIs utilizadas en la nueva vista React de Admisión. El flujo de admisión permite crear órdenes de trabajo (worklist) seleccionando:
+1. Una ubicación (solo las que el usuario tiene asignadas)
+2. Un paciente (filtrados por ubicación y dominio de paciente)
+3. Un estudio/examen
+4. Un equipo (filtrado por ubicación)
+5. Médico solicitante y obra social (filtrados por ubicación)
 
-#### GET /appointments
-Listar turnos.
+### Endpoints Utilizados
 
-**Query Parameters:**
-- `date`: Fecha específica (YYYY-MM-DD)
-- `equipment_id`: Filtrar por equipo
-- `status`: Filtrar por estado
-- `patient_id`: Filtrar por paciente
+#### GET /institutional/locations
+Obtener ubicaciones/sedes asignadas al usuario autenticado.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Parámetros:** Ninguno (el user_id se obtiene del token JWT)
 
 **Response (200):**
 ```json
@@ -779,15 +789,547 @@ Listar turnos.
   "success": true,
   "data": [
     {
-      "guid": "uuid",
-      "appointmentdate": "datetime",
-      "patient_name": "string",
-      "studytype": "string",
-      "equipment": "string",
-      "status": "string",
-      "duration": 30
+      "guid": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+      "name": "Sede Centro",
+      "code": "SEDE-001",
+      "is_default": true
+    },
+    {
+      "guid": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "name": "Sede Sur",
+      "code": "SEDE-002",
+      "is_default": false
     }
   ]
+}
+```
+
+**Nota:** Solo retorna ubicaciones donde el usuario tiene acceso en la tabla `rel_user_location`.
+
+---
+
+#### POST /patients/by-location
+Obtener pacientes filtrados por ubicación específica.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "location_id": "d290f1ee-6c54-4b01-90e6-d701748f0851"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "p001",
+      "name": "Juan",
+      "surname": "Pérez",
+      "nationalcode": "12345678",
+      "sexcode": "M",
+      "birthdate": "15/05/1990"
+    },
+    {
+      "guid": "p002",
+      "name": "María",
+      "surname": "García",
+      "nationalcode": "87654321",
+      "sexcode": "F",
+      "birthdate": "22/03/1985"
+    }
+  ]
+}
+```
+
+**Nota:** Los pacientes se obtienen del `patientdomain_id` asociado a la ubicación. Retorna hasta 500 pacientes.
+
+---
+
+#### POST /patients
+Crear nuevo paciente rápidamente desde la vista de admisión.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Carlos",
+  "surname": "López",
+  "nationalcode": "11223344",
+  "birthdate": "1988-07-10",
+  "gender": "M"
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "message": "Paciente creado exitosamente",
+  "data": {
+    "guid": "p003"
+  }
+}
+```
+
+---
+
+#### GET /config/modalities
+Obtener todas las modalidades disponibles (RX, TC, RM, ECO, etc.).
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "m001",
+      "externalcode": "CT",
+      "description": "Tomografía Computada"
+    },
+    {
+      "guid": "m002",
+      "externalcode": "MR",
+      "description": "Resonancia Magnética"
+    },
+    {
+      "guid": "m003",
+      "externalcode": "CR",
+      "description": "Radiografía Digital"
+    }
+  ]
+}
+```
+
+---
+
+#### GET /config/body-parts
+Obtener todas las partes del cuerpo disponibles.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "bp001",
+      "description": "Tórax"
+    },
+    {
+      "guid": "bp002",
+      "description": "Abdomen"
+    },
+    {
+      "guid": "bp003",
+      "description": "Extremidades"
+    }
+  ]
+}
+```
+
+---
+
+#### GET /study-types
+Obtener todos los tipos de estudios disponibles desde la tabla `isstudytype`.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    [
+      "guid-001",
+      "TC-TORAX",
+      "TOMOGRAFIA AXIAL COMPUTADA TORACICA",
+      "CT",
+      "Tórax",
+      "Torax"
+    ],
+    [
+      "guid-002",
+      "RX-TORAX",
+      "RADIOGRAFIA SIMPLE DE TORAX",
+      "RX",
+      "Tórax",
+      "Torax"
+    ]
+  ]
+}
+```
+
+**Nota:** Retorna un array de arrays con [guid, code, description, modality_code, bodypart, studygroup]. Este es el catálogo completo de tipos de estudios disponibles en el sistema.
+
+---
+
+#### GET /config/equipment
+Obtener equipos disponibles filtrados por ubicación.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters:**
+- `location_id` (OBLIGATORIO): UUID de la ubicación para filtrar equipos
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "eq001",
+      "description": "Tomógrafo Siemens SOMATOM",
+      "aeTitle": "CT_SIEMENS_01",
+      "externalcode": "TC-001",
+      "modality": "CT"
+    },
+    {
+      "guid": "eq002",
+      "description": "Radiografo Digital Philips",
+      "aeTitle": "CR_PHILIPS_01",
+      "externalcode": "RX-001",
+      "modality": "CR"
+    }
+  ]
+}
+```
+
+**Response (400) - Sin location_id:**
+```json
+{
+  "success": false,
+  "message": "El parámetro location_id es obligatorio"
+}
+```
+
+---
+
+### Flujo de Trabajo en Admisión React
+
+**Paso 1: Cargar Ubicaciones**
+```
+GET /api/institutional/locations
+↓
+Usuario selecciona ubicación
+```
+
+**Paso 2: Cargar Pacientes de la Ubicación**
+```
+POST /api/patients/by-location
+Body: { "location_id": "..." }
+↓
+Usuario selecciona paciente o crea uno nuevo
+```
+
+**Paso 3: Cargar Catálogo de Tipos de Estudios**
+```
+GET /api/study-types
+↓
+Usuario selecciona estudio por código/descripción
+```
+
+**Paso 4: Cargar Equipos Disponibles**
+```
+GET /api/config/equipment?location_id=...
+↓
+Usuario selecciona equipo
+```
+
+**Paso 5: Cargar Médicos Solicitantes**
+```
+GET /api/institutional/locations/{location_id}/physicians
+↓
+Usuario selecciona médico solicitante
+```
+
+**Paso 6: Cargar Obras Sociales**
+```
+GET /api/institutional/locations/{location_id}/health-insurances
+↓
+Usuario selecciona obra social
+```
+
+**Paso 7: Finalizar Orden**
+```
+POST /api/admission/create-order
+↓
+Orden creada con número de admisión y acceso
+```
+
+#### POST /admission/create-order
+Crear orden de admisión (worklist) con un examen. Este endpoint:
+1. Valida la existencia del paciente, equipo y tipo de estudio
+2. Genera números de admisión y acceso automáticamente
+3. **Envía mensaje HL7 al dcm4chee (que crea el mwl_item en el worklist DICOM)**
+4. Inserta el examen en tbexamination
+5. Crea el registro en tbreport
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "patient_id": "uuid-del-paciente",
+  "location_id": "uuid-de-la-ubicacion",
+  "exam": {
+    "study_type_id": "uuid-del-tipo-de-estudio",
+    "equipment_id": "uuid-del-equipo",
+    "physician_id": "uuid-del-medico-solicitante",
+    "insurance_id": "uuid-de-la-obra-social",
+    "severity": "normal"
+  }
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_number": "ADM001",
+    "accession_number": "ACC001",
+    "exam_id": "uuid-del-examen",
+    "study_instance_uid": "1.2.840..."
+  },
+  "message": "Orden creada exitosamente"
+}
+```
+
+**Request Body:**
+```json
+{
+  "patient_id": "550e8400-e29b-41d4-a716-446655440000",
+  "location_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "exam": {
+    "study_type_id": "cb90d4eb-b298-4e6e-91ea-010a3e4dc8d9",
+    "equipment_id": "eq001-guid",
+    "physician_id": "physician-guid" (opcional),
+    "insurance_id": "insurance-guid" (opcional),
+    "severity": "normal" | "urgent" (opcional, default: "normal")
+  }
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_number": "ADM008",
+    "accession_number": "ACC008",
+    "exam_id": "9b130f5c-e689-4b47-9488-3629a24d9cac",
+    "study_instance_uid": "1.2.840.1765496198069.NR00000013"
+  },
+  "message": "Orden creada exitosamente"
+}
+```
+
+**Response (400) - Campos obligatorios faltantes:**
+```json
+{
+  "success": false,
+  "message": "patient_id es obligatorio"
+}
+```
+
+**Campos Obligatorios:**
+- `patient_id`: UUID del paciente
+- `location_id`: UUID de la ubicación
+- `exam.study_type_id`: UUID del tipo de estudio
+- `exam.equipment_id`: UUID del equipo
+
+**Campos Opcionales:**
+- `exam.physician_id`: UUID del médico solicitante
+- `exam.insurance_id`: UUID de la obra social
+- `exam.severity`: "normal" o "urgent"
+
+#### GET /institutional/locations/{location_id}/physicians
+Obtener médicos solicitantes filtrados por ubicación.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Path Parameters:**
+- `location_id` (OBLIGATORIO): UUID de la ubicación
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "physician-guid-1",
+      "description": "Dr. Juan Pérez"
+    },
+    {
+      "guid": "physician-guid-2",
+      "description": "Dra. María González"
+    }
+  ]
+}
+```
+
+**Response (400) - Sin location_id:**
+```json
+{
+  "success": false,
+  "message": "El parámetro location_id es obligatorio"
+}
+```
+
+#### GET /institutional/locations/{location_id}/health-insurances
+Obtener obras sociales (price lists) filtradas por ubicación.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Path Parameters:**
+- `location_id` (OBLIGATORIO): UUID de la ubicación
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "insurance-guid-1",
+      "description": "OSDE"
+    },
+    {
+      "guid": "insurance-guid-2",
+      "description": "Swiss Medical"
+    }
+  ]
+}
+```
+
+**Response (400) - Sin location_id:**
+```json
+{
+  "success": false,
+  "message": "El parámetro location_id es obligatorio"
+}
+```
+
+---
+
+## Turnos
+
+### Base URL
+`/api/appointments`
+
+### Endpoints
+
+#### POST /appointments/calendar-events
+Obtener eventos del calendario para editar.
+
+**Request Body:**
+```json
+{
+  "guid": "optional-event-guid-to-edit",
+  "equipment_aetitle": "aetitle-del-equipo"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "events": [
+      {
+        "guid": "uuid",
+        "start": "2025-12-05T10:00:00",
+        "end": "2025-12-05T11:00:00",
+        "title": "Paciente - Examen",
+        "patient_name": "string",
+        "exam": "string",
+        "editable": true,
+        "idmed": "uuid",
+        "idmed_sol": "uuid"
+      }
+    ],
+    "work_hours": [
+      {
+        "day": 1,
+        "start": "08:00:00",
+        "end": "17:00:00"
+      }
+    ]
+  }
+}
+```
+
+#### GET /appointments
+Listar turnos con paginación.
+
+**Query Parameters:**
+- `date`: Fecha específica (YYYY-MM-DD)
+- `doctor_id`: Filtrar por médico
+- `equipment_id`: Filtrar por equipo
+- `admitted`: true/false (filtrar por estado de admisión)
+- `today`: true (obtener solo citas del día actual)
+- `page`: Número de página (default: 1)
+- `per_page`: Items por página (default: 20, max: 100)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "data": [
+      {
+        "guid": "uuid",
+        "patient_name": "string",
+        "start": "datetime",
+        "end": "datetime",
+        "exam": "string",
+        "doctor": "string",
+        "equipment": "string",
+        "is_admitted": false,
+        "location_id": "uuid"
+      }
+    ],
+    "page": 1,
+    "per_page": 20,
+    "total": 150
+  }
 }
 ```
 
@@ -884,6 +1426,85 @@ Reprogramar turno.
 }
 ```
 
+#### PATCH /appointments/:id/reschedule
+Actualizar fechas y/o equipo de una cita (reprogramar).
+
+**Path Parameters:**
+- `id`: GUID de la cita
+
+**Request Body:**
+```json
+{
+  "start": "2025-12-05T10:00:00Z",
+  "end": "2025-12-05T11:00:00Z",
+  "equipment_id": "uuid-del-nuevo-equipo (opcional)"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Cita reprogramada exitosamente (1 registro(s) actualizado(s))",
+  "rows_affected": 1
+}
+```
+
+**Notes:**
+- `start` y `end` son requeridos
+- `equipment_id` es opcional - si se proporciona, cambia el equipo de la cita
+- Las fechas deben estar en formato ISO 8601 con zona horaria (Z para UTC)
+
+#### PATCH /appointments/:id
+Actualizar datos de una cita existente.
+
+**Path Parameters:**
+- `id`: GUID de la cita
+
+**Request Body:**
+```json
+{
+  "doctor_id": "optional-nuevo-guid-medico",
+  "requesting_physician_id": "optional-guid-medico-solicitante",
+  "exam_id": "optional-nuevo-guid-examen"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Cita actualizada exitosamente"
+}
+```
+
+#### POST /appointments/:id/admit
+Admisionar una cita y crear examen en worklist.
+
+**Path Parameters:**
+- `id`: GUID de la cita
+
+**Request Body (opcional):**
+```json
+{
+  "equipment_id": "guid-del-equipo"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_number": "ADM123",
+    "accession_number": "ACC123",
+    "exam_id": "guid-del-examen-creado",
+    "study_instance_uid": "1.2.840..."
+  },
+  "message": "Cita admisionada exitosamente"
+}
+```
+
 ---
 
 ## Institucional
@@ -934,6 +1555,44 @@ Listar establecimientos.
       "email": "string",
       "contact_person": "string",
       "status": "string"
+    }
+  ]
+}
+```
+
+#### GET /institutional/locations/:location_id/physicians
+Obtener médicos solicitantes filtrados por ubicación.
+
+**Path Parameters:**
+- `location_id`: UUID de la ubicación (OBLIGATORIO)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "uuid",
+      "description": "Dr. Juan Pérez"
+    }
+  ]
+}
+```
+
+#### GET /institutional/locations/:location_id/health-insurances
+Obtener obras sociales (price lists) filtradas por ubicación.
+
+**Path Parameters:**
+- `location_id`: UUID de la ubicación (OBLIGATORIO)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "uuid",
+      "description": "OSDE"
     }
   ]
 }

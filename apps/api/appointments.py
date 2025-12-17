@@ -12,6 +12,7 @@ from apps.api import api_blueprint
 from datetime import datetime, timedelta
 import uuid
 import pytz
+from apps.home.services import HL7Service
 
 
 def get_db_config():
@@ -170,7 +171,7 @@ def get_calendar_events():
 @jwt_required()
 def reschedule_appointment(appointment_id):
     """
-    Actualiza las fechas de una cita (reprogramar)
+    Actualiza las fechas y/o equipo de una cita (reprogramar)
     
     Path:
     - appointment_id: GUID de la cita
@@ -178,13 +179,15 @@ def reschedule_appointment(appointment_id):
     Body JSON:
     {
         "start": "2025-12-05T10:00:00Z",
-        "end": "2025-12-05T11:00:00Z"
+        "end": "2025-12-05T11:00:00Z",
+        "equipment_id": "uuid-del-equipo (opcional)"
     }
     
     Respuesta:
     {
         "success": true,
-        "message": "Cita reprogramada exitosamente"
+        "message": "Cita reprogramada exitosamente",
+        "rows_affected": 1
     }
     """
     try:
@@ -198,6 +201,7 @@ def reschedule_appointment(appointment_id):
         
         start = data.get('start')
         end = data.get('end')
+        equipment_id = data.get('equipment_id')  # Opcional
         
         if not start or not end:
             return jsonify({
@@ -244,6 +248,8 @@ def reschedule_appointment(appointment_id):
             # Formato para PostgreSQL (sin zona horaria)
             start_str = start_local.strftime('%Y-%m-%d %H:%M:%S')
             end_str = end_local.strftime('%Y-%m-%d %H:%M:%S')
+            
+            print(f"[DEBUG RESCHEDULE] appointment_id: {appointment_id}, start: {start_str}, end: {end_str}, equipment_id: {equipment_id}")
         except Exception as e:
             cursor.close()
             connection.close()
@@ -252,14 +258,35 @@ def reschedule_appointment(appointment_id):
                 'message': f'Error en formato de fecha: {str(e)}'
             }), 400
         
+        # Construir el UPDATE dinámicamente dependiendo de qué campos se actualicen
+        set_clauses = ["comienzo = %s", "fin = %s"]
+        params = [start_str, end_str]
+        
+        if equipment_id:
+            set_clauses.append("idequipment = %s")
+            params.append(equipment_id)
+        
+        params.append(appointment_id)
+        
         # Actualizar la cita
-        query = """
+        query = f"""
             UPDATE nextris.tbagendaevents 
-            SET comienzo = %s, fin = %s 
+            SET {', '.join(set_clauses)}
             WHERE guid = %s
         """
         
-        cursor.execute(query, (start_str, end_str, appointment_id))
+        cursor.execute(query, params)
+        rows_affected = cursor.rowcount
+        
+        # Verificar que la actualización fue exitosa
+        if rows_affected == 0:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No se pudo actualizar la cita (guid no encontrado)'
+            }), 400
+        
         connection.commit()
         
         cursor.close()
@@ -267,7 +294,8 @@ def reschedule_appointment(appointment_id):
         
         return jsonify({
             'success': True,
-            'message': 'Cita reprogramada exitosamente'
+            'message': f'Cita reprogramada exitosamente ({rows_affected} registro(s) actualizado(s))',
+            'rows_affected': rows_affected
         }), 200
         
     except Exception as e:
@@ -281,26 +309,40 @@ def reschedule_appointment(appointment_id):
 @jwt_required()
 def create_appointment():
     """
-    Crea una nueva cita en la agenda
+    Crea una o múltiples citas en la agenda
     
     Body JSON:
     {
         "patient_id": "guid-del-paciente",
-        "exam_id": "guid-del-examen",
-        "start_datetime": "2025-12-05 10:00",
-        "end_datetime": "2025-12-05 11:00",
-        "doctor_id": "optional-guid-del-medico",
-        "equipment_id": "optional-guid-del-equipo",
-        "appointment_type": "doctor" o "equipment"
+        "appointment_type": "doctor" o "equipment",
+        "calendar_events": [
+            {
+                "exam_id": "guid-del-examen",
+                "start_datetime": "2025-12-05 10:00",
+                "end_datetime": "2025-12-05 11:00",
+                "physician_id": "guid-del-medico",
+                "obra_social_id": "guid-de-la-obra-social",
+                "equipment_id": "optional-guid-del-equipo"
+            },
+            {
+                "exam_id": "guid-del-examen-2",
+                "start_datetime": "2025-12-05 14:00",
+                "end_datetime": "2025-12-05 15:00",
+                "physician_id": "guid-del-medico-2",
+                "obra_social_id": "guid-de-la-obra-social-2",
+                "equipment_id": "optional-guid-del-equipo-2"
+            }
+        ]
     }
     
     Respuesta:
     {
         "success": true,
         "data": {
-            "appointment_id": "nuevo-guid"
+            "appointment_ids": ["guid-1", "guid-2"],
+            "created_count": 2
         },
-        "message": "Cita creada exitosamente"
+        "message": "Citas creadas exitosamente"
     }
     """
     try:
@@ -313,31 +355,41 @@ def create_appointment():
             }), 400
         
         patient_id = data.get('patient_id')
-        exam_id = data.get('exam_id')
-        start_datetime = data.get('start_datetime')
-        end_datetime = data.get('end_datetime')
+        calendar_events = data.get('calendar_events', [])
         appointment_type = data.get('appointment_type', 'doctor')
         
-        if not all([patient_id, exam_id, start_datetime, end_datetime]):
+        if not patient_id:
             return jsonify({
                 'success': False,
-                'message': 'Faltan campos requeridos: patient_id, exam_id, start_datetime, end_datetime'
+                'message': 'patient_id es requerido'
             }), 400
         
-        doctor_id = data.get('doctor_id')
-        equipment_id = data.get('equipment_id')
-        
-        if appointment_type == 'equipment' and not equipment_id:
+        if not calendar_events or not isinstance(calendar_events, list):
             return jsonify({
                 'success': False,
-                'message': 'equipment_id es requerido para citas de tipo equipment'
+                'message': 'Se requiere al menos un evento en calendar_events'
             }), 400
         
-        if appointment_type == 'doctor' and not doctor_id:
-            return jsonify({
-                'success': False,
-                'message': 'doctor_id es requerido para citas de tipo doctor'
-            }), 400
+        # Validar cada evento de calendario
+        for i, event in enumerate(calendar_events):
+            exam_id = event.get('exam_id')
+            start_datetime = event.get('start_datetime')
+            end_datetime = event.get('end_datetime')
+            physician_id = event.get('physician_id')
+            obra_social_id = event.get('obra_social_id')
+            equipment_id = event.get('equipment_id')
+            
+            if not all([exam_id, start_datetime, end_datetime, physician_id, obra_social_id]):
+                return jsonify({
+                    'success': False,
+                    'message': f'Evento {i+1}: Faltan campos requeridos exam_id, start_datetime, end_datetime, physician_id, obra_social_id'
+                }), 400
+            
+            if appointment_type == 'equipment' and not equipment_id:
+                return jsonify({
+                    'success': False,
+                    'message': f'Evento {i+1}: equipment_id es requerido para citas de tipo equipment'
+                }), 400
         
         config = get_db_config()
         if not config:
@@ -349,40 +401,62 @@ def create_appointment():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Generar nuevo GUID
-        new_guid = str(uuid.uuid4())
+        created_appointment_ids = []
         
-        # Insertar cita
-        if appointment_type == 'equipment':
-            query = """
-                INSERT INTO nextris.tbagendaevents 
-                (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, createdon, isadmitted)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
-            """
-            params = (new_guid, start_datetime, end_datetime, equipment_id, 
-                     patient_id, exam_id, doctor_id)
-        else:
-            query = """
-                INSERT INTO nextris.tbagendaevents 
-                (guid, comienzo, fin, idmed, idpatient, idexam, createdon, isadmitted)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), false)
-            """
-            params = (new_guid, start_datetime, end_datetime, doctor_id, 
-                     patient_id, exam_id)
+        try:
+            # Crear cada evento de calendario como una cita separada
+            for event in calendar_events:
+                # Generar nuevo GUID para cada cita
+                new_guid = str(uuid.uuid4())
+                
+                exam_id = event.get('exam_id')
+                start_datetime = event.get('start_datetime')
+                end_datetime = event.get('end_datetime')
+                physician_id = event.get('physician_id')
+                obra_social_id = event.get('obra_social_id')
+                equipment_id = event.get('equipment_id')
+                
+                # Insertar cada cita
+                if appointment_type == 'equipment':
+                    query = """
+                        INSERT INTO nextris.tbagendaevents 
+                        (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, createdon, isadmitted)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                    """
+                    params = (new_guid, start_datetime, end_datetime, equipment_id, 
+                             patient_id, exam_id, physician_id, obra_social_id)
+                else:
+                    query = """
+                        INSERT INTO nextris.tbagendaevents 
+                        (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, createdon, isadmitted)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                    """
+                    params = (new_guid, start_datetime, end_datetime, physician_id, 
+                             patient_id, exam_id, obra_social_id)
+                
+                cursor.execute(query, params)
+                created_appointment_ids.append(new_guid)
+            
+            # Confirmar todas las transacciones
+            connection.commit()
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'appointment_ids': created_appointment_ids,
+                    'created_count': len(created_appointment_ids)
+                },
+                'message': f'{len(created_appointment_ids)} cita(s) creada(s) exitosamente'
+            }), 201
+            
+        except Exception as e:
+            # Si hay error, hacer rollback
+            connection.rollback()
+            raise e
         
-        cursor.execute(query, params)
-        connection.commit()
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify({
-            'success': True,
-            'data': {
-                'appointment_id': new_guid
-            },
-            'message': 'Cita creada exitosamente'
-        }), 201
+        finally:
+            cursor.close()
+            connection.close()
         
     except Exception as e:
         return jsonify({
@@ -395,7 +469,7 @@ def create_appointment():
 @jwt_required()
 def get_appointments():
     """
-    Obtiene lista de citas con filtros
+    Obtiene lista de citas con filtros y paginación
     
     Query params:
     - date: fecha específica (YYYY-MM-DD)
@@ -403,23 +477,18 @@ def get_appointments():
     - equipment_id: filtrar por equipo
     - admitted: true/false (filtrar por estado de admisión)
     - today: true (obtener solo citas del día actual)
+    - page: número de página (default: 1)
+    - per_page: items por página (default: 20, max: 100)
     
     Respuesta:
     {
         "success": true,
-        "data": [
-            {
-                "guid": "...",
-                "patient_name": "...",
-                "start": "2025-12-05T10:00:00",
-                "end": "2025-12-05T11:00:00",
-                "exam": "...",
-                "doctor": "...",
-                "equipment": "...",
-                "status": "...",
-                "is_admitted": false
-            }
-        ]
+        "data": {
+            "data": [...],
+            "page": 1,
+            "per_page": 20,
+            "total": 150
+        }
     }
     """
     try:
@@ -429,6 +498,18 @@ def get_appointments():
         equipment_id = request.args.get('equipment_id')
         admitted_filter = request.args.get('admitted')
         today_only = request.args.get('today', 'false').lower() == 'true'
+        
+        # Parámetros de paginación
+        page = int(request.args.get('page', 1))
+        per_page = min(int(request.args.get('per_page', 20)), 100)  # Máximo 100 items
+        
+        if page < 1:
+            page = 1
+        if per_page < 1:
+            per_page = 20
+            
+        # Calcular offset
+        offset = (page - 1) * per_page
         
         config = get_db_config()
         if not config:
@@ -440,8 +521,19 @@ def get_appointments():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Construir query base
-        query = """
+        # Query base para contar total de registros
+        count_query = """
+            SELECT COUNT(*)
+            FROM nextris.tbagendaevents tba
+            LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
+            LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
+            LEFT JOIN nextris.tbuser med ON med.guid = tba.idmed
+            LEFT JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
+            WHERE 1=1
+        """
+        
+        # Query base para obtener datos
+        data_query = """
             SELECT 
                 tba.guid,
                 CONCAT(pat.surname, ' ', pat.name) as patient_name,
@@ -450,7 +542,8 @@ def get_appointments():
                 st.description as exam,
                 CONCAT(med.surname, ' ', med.name) as doctor,
                 equip.aetitle as equipment,
-                tba.isadmitted
+                tba.isadmitted,
+                tba.location_id
             FROM nextris.tbagendaevents tba
             LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
             LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
@@ -461,28 +554,44 @@ def get_appointments():
         
         params = []
         
+        # Aplicar filtros a ambas queries
+        filter_conditions = ""
+        
         if today_only:
-            query += " AND DATE(tba.comienzo) = CURRENT_DATE"
+            filter_conditions += " AND DATE(tba.comienzo) = CURRENT_DATE"
         elif date_filter:
-            query += " AND DATE(tba.comienzo) = %s"
+            filter_conditions += " AND DATE(tba.comienzo) = %s"
             params.append(date_filter)
         
         if doctor_id:
-            query += " AND tba.idmed = %s"
+            filter_conditions += " AND tba.idmed = %s"
             params.append(doctor_id)
         
         if equipment_id:
-            query += " AND tba.idequipment = %s"
+            filter_conditions += " AND tba.idequipment = %s"
             params.append(equipment_id)
         
         if admitted_filter is not None:
             is_admitted = admitted_filter.lower() == 'true'
-            query += " AND tba.isadmitted = %s"
+            filter_conditions += " AND tba.isadmitted = %s"
             params.append(is_admitted)
         
-        query += " ORDER BY tba.comienzo DESC"
+        # Ejecutar query de conteo
+        cursor.execute(count_query + filter_conditions, params)
+        total_items = cursor.fetchone()[0]
         
-        cursor.execute(query, params)
+        # Calcular información de paginación
+        total_pages = (total_items + per_page - 1) // per_page  # Redondear hacia arriba
+        has_next = page < total_pages
+        has_prev = page > 1
+        next_page = page + 1 if has_next else None
+        prev_page = page - 1 if has_prev else None
+        
+        # Ejecutar query de datos con LIMIT y OFFSET
+        data_query += filter_conditions + " ORDER BY tba.comienzo DESC LIMIT %s OFFSET %s"
+        data_params = params + [per_page, offset]
+        
+        cursor.execute(data_query, data_params)
         results = cursor.fetchall()
         
         cursor.close()
@@ -499,12 +608,18 @@ def get_appointments():
                 'exam': row[4] or 'Sin examen',
                 'doctor': row[5] or 'Sin médico',
                 'equipment': row[6] or 'Sin equipo',
-                'is_admitted': bool(row[7]) if row[7] is not None else False
+                'is_admitted': bool(row[7]) if row[7] is not None else False,
+                'location_id': row[8] if row[8] else None
             })
         
         return jsonify({
             'success': True,
-            'data': appointments
+            'data': {
+                'data': appointments,
+                'page': page,
+                'per_page': per_page,
+                'total': total_items
+            }
         }), 200
         
     except Exception as e:
@@ -835,6 +950,375 @@ def admit_appointment(appointment_id):
             },
             'message': 'Cita admisionada exitosamente'
         }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/institutional/locations/<location_id>/physicians', methods=['GET'])
+@jwt_required()
+def get_physicians_by_location(location_id):
+    """
+    Obtiene médicos solicitantes filtrados por ubicación
+    
+    GET /api/institutional/locations/{location_id}/physicians
+    
+    Path Parameters:
+    - location_id (OBLIGATORIO): UUID de la ubicación
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "Dr. Juan Pérez"
+            }
+        ]
+    }
+    """
+    try:
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'El parámetro location_id es obligatorio'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, description
+            FROM nextris.isrequestingphysician
+            WHERE location_id = %s
+            ORDER BY description
+        """
+        
+        cursor.execute(query, (location_id,))
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        physicians_list = []
+        for row in results:
+            physicians_list.append({
+                'guid': row[0],
+                'description': row[1]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': physicians_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/institutional/locations/<location_id>/health-insurances', methods=['GET'])
+@jwt_required()
+def get_health_insurances_by_location(location_id):
+    """
+    Obtiene obras sociales (price lists) filtradas por ubicación
+    
+    GET /api/institutional/locations/{location_id}/health-insurances
+    
+    Path Parameters:
+    - location_id (OBLIGATORIO): UUID de la ubicación
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "OSDE"
+            }
+        ]
+    }
+    """
+    try:
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'El parámetro location_id es obligatorio'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, description
+            FROM nextris.ispricelist
+            WHERE location_id = %s AND isactive = 1
+            ORDER BY description
+        """
+        
+        cursor.execute(query, (location_id,))
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        insurances_list = []
+        for row in results:
+            insurances_list.append({
+                'guid': row[0],
+                'description': row[1]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': insurances_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/admission/create-order', methods=['POST'])
+@jwt_required()
+def create_admission_order():
+    """
+    Crea una orden de admisión (worklist) con un examen
+    
+    POST /api/admission/create-order
+    
+    Body JSON:
+    {
+        "patient_id": "uuid-del-paciente",
+        "location_id": "uuid-de-la-ubicacion",
+        "exam": {
+            "study_type_id": "uuid-del-tipo-de-estudio",
+            "equipment_id": "uuid-del-equipo",
+            "physician_id": "uuid-del-medico-solicitante" (opcional),
+            "insurance_id": "uuid-de-la-obra-social" (opcional),
+            "severity": "normal" | "urgent" (opcional, default: "normal")
+        }
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "admission_number": "ADM001",
+            "accession_number": "ACC001",
+            "exam_id": "uuid-del-examen",
+            "study_instance_uid": "1.2.840..."
+        },
+        "message": "Orden creada exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        patient_id = data.get('patient_id')
+        location_id = data.get('location_id')
+        exam_data = data.get('exam', {})
+        
+        # Validaciones
+        if not patient_id:
+            return jsonify({
+                'success': False,
+                'message': 'patient_id es obligatorio'
+            }), 400
+        
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'location_id es obligatorio'
+            }), 400
+            
+        if not exam_data.get('study_type_id'):
+            return jsonify({
+                'success': False,
+                'message': 'exam.study_type_id es obligatorio'
+            }), 400
+            
+        if not exam_data.get('equipment_id'):
+            return jsonify({
+                'success': False,
+                'message': 'exam.equipment_id es obligatorio'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # 1. Obtener datos del paciente
+        cursor.execute("""
+            SELECT patientid, name, surname, nationalcode, birthdate, sexcode
+            FROM nextris.datapatient
+            WHERE guid = %s
+        """, (patient_id,))
+        
+        patient = cursor.fetchone()
+        if not patient:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        # 2. Generar números de admisión y acceso
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTRING(admisionnumber, 4) AS INTEGER)) 
+            FROM nextris.tbexamination 
+            WHERE admisionnumber LIKE 'ADM%'
+        """)
+        last_adm = cursor.fetchone()[0] or 0
+        
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTRING(localacc, 4) AS INTEGER)) 
+            FROM nextris.tbexamination 
+            WHERE localacc LIKE 'ACC%'
+        """)
+        last_acc = cursor.fetchone()[0] or 0
+        
+        admission_number = f"ADM{(last_adm + 1):03d}"
+        accession_number = f"ACC{(last_acc + 1):03d}"
+        
+        # 3. Obtener datos del equipo y modalidad
+        cursor.execute("""
+            SELECT e.guid, e.aetitle, e.description, e.idmodality,
+                   m.externalcode
+            FROM nextris.isequipment e
+            LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
+            WHERE e.guid = %s
+        """, (exam_data['equipment_id'],))
+        
+        equipment = cursor.fetchone()
+        if not equipment:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Equipo no encontrado'
+            }), 404
+        
+        # 4. Obtener descripción del estudio
+        cursor.execute("""
+            SELECT description
+            FROM nextris.isstudytype
+            WHERE guid = %s
+        """, (exam_data['study_type_id'],))
+        
+        study_type = cursor.fetchone()
+        if not study_type:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Tipo de estudio no encontrado'
+            }), 404
+        
+        # 5. Generar Study Instance UID y enviar mensaje HL7 al dcm4chee
+        import time
+        timestamp = str(int(time.time() * 1000))
+        study_instance_uid = f"1.2.840.{timestamp}.{patient[0]}"
+        
+        # Enviar mensaje HL7 al worklist (dcm4chee creará el mwl_item)
+        study_instance_uid, hl7_success = HL7Service.send_exam_to_worklist(
+            patient_data=patient,
+            exam_data=study_type[0],
+            equipment_data=equipment,
+            modality_data=equipment[4],  # externalcode de la modalidad
+            admission_number=admission_number,
+            accession_number=accession_number
+        )
+        
+        if not hl7_success:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error al enviar orden al worklist DICOM'
+            }), 500
+        
+        # 6. Insertar examen en tbexamination
+        severity_id = None
+        if exam_data.get('severity') == 'urgent':
+            # Obtener ID de severidad "Urgente"
+            cursor.execute("SELECT guid FROM nextris.isseverity WHERE description ILIKE '%urgente%' LIMIT 1")
+            severity_result = cursor.fetchone()
+            severity_id = severity_result[0] if severity_result else None
+        
+        cursor.execute("""
+            INSERT INTO nextris.tbexamination (
+                guid, studyinstanceuid, idpatient, studytype_id, idequipment,
+                admisionnumber, localacc, createdon, status, isexecuted,
+                idseverity, idrequestingphysician, idpricelist
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s
+            ) RETURNING guid
+        """, (
+            study_instance_uid,
+            patient[0],
+            exam_data['study_type_id'],
+            exam_data['equipment_id'],
+            admission_number,
+            accession_number,
+            severity_id,
+            exam_data.get('physician_id'),
+            exam_data.get('insurance_id')
+        ))
+        
+        exam_guid = cursor.fetchone()[0]
+        
+        # 7. Crear registro en tbReport
+        cursor.execute("""
+            INSERT INTO nextris.tbreport (
+                guid, admnumber, idexamination, idpatient, date
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, NOW()
+            )
+        """, (admission_number, exam_guid, patient[0]))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'admission_number': admission_number,
+                'accession_number': accession_number,
+                'exam_id': exam_guid,
+                'study_instance_uid': study_instance_uid
+            },
+            'message': 'Orden creada exitosamente'
+        }), 201
         
     except Exception as e:
         return jsonify({
