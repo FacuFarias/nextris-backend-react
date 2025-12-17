@@ -82,13 +82,17 @@ Creates one or multiple appointments in the system. Supports both equipment-base
 {
   "patient_id": "uuid-del-paciente",
   "appointment_type": "doctor o equipment",
-  "exam_id": "uuid-del-examen",
-  "start": "2025-12-05T10:00:00Z",
-  "end": "2025-12-05T11:00:00Z",
-  "doctor_id": "uuid-del-medico (opcional si appointment_type=equipment)",
-  "equipment_id": "uuid-del-equipo (obligatorio si appointment_type=equipment)",
-  "requesting_physician_id": "uuid-del-medico-solicitante (opcional)",
-  "location_id": "uuid-de-la-ubicacion (opcional)"
+  "location_id": "uuid-de-la-ubicacion (opcional)",
+  "calendar_events": [
+    {
+      "exam_id": "uuid-del-examen",
+      "start_datetime": "2025-12-05 10:00:00",
+      "end_datetime": "2025-12-05 11:00:00",
+      "physician_id": "uuid-del-medico",
+      "obra_social_id": "uuid-de-la-obra-social",
+      "equipment_id": "uuid-del-equipo (obligatorio si appointment_type=equipment)"
+    }
+  ]
 }
 ```
 
@@ -101,11 +105,17 @@ Authorization: Bearer <JWT_TOKEN>
 {
   "patient_id": "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6",
   "appointment_type": "equipment",
-  "exam_id": "b1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o7",
-  "start": "2025-12-05T10:00:00Z",
-  "end": "2025-12-05T11:00:00Z",
-  "equipment_id": "c1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o8",
-  "location_id": "d1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o9"
+  "location_id": "d1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o9",
+  "calendar_events": [
+    {
+      "exam_id": "b1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o7",
+      "start_datetime": "2025-12-05 10:00:00",
+      "end_datetime": "2025-12-05 11:00:00",
+      "physician_id": "e1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5f1",
+      "obra_social_id": "f1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5f2",
+      "equipment_id": "c1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o8"
+    }
+  ]
 }
 ```
 
@@ -115,10 +125,11 @@ Authorization: Bearer <JWT_TOKEN>
 ```json
 {
   "success": true,
-  "message": "Cita(s) creada(s) exitosamente",
   "data": {
-    "guid": "f39710b4-7914-44ba-ab72-ad4ed5e22e98"
-  }
+    "appointment_ids": ["f39710b4-7914-44ba-ab72-ad4ed5e22e98"],
+    "created_count": 1
+  },
+  "message": "1 cita(s) creada(s) exitosamente"
 }
 ```
 

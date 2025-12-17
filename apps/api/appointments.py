@@ -315,6 +315,7 @@ def create_appointment():
     {
         "patient_id": "guid-del-paciente",
         "appointment_type": "doctor" o "equipment",
+        "location_id": "guid-de-la-ubicacion (opcional)",
         "calendar_events": [
             {
                 "exam_id": "guid-del-examen",
@@ -323,14 +324,6 @@ def create_appointment():
                 "physician_id": "guid-del-medico",
                 "obra_social_id": "guid-de-la-obra-social",
                 "equipment_id": "optional-guid-del-equipo"
-            },
-            {
-                "exam_id": "guid-del-examen-2",
-                "start_datetime": "2025-12-05 14:00",
-                "end_datetime": "2025-12-05 15:00",
-                "physician_id": "guid-del-medico-2",
-                "obra_social_id": "guid-de-la-obra-social-2",
-                "equipment_id": "optional-guid-del-equipo-2"
             }
         ]
     }
@@ -357,6 +350,7 @@ def create_appointment():
         patient_id = data.get('patient_id')
         calendar_events = data.get('calendar_events', [])
         appointment_type = data.get('appointment_type', 'doctor')
+        location_id = data.get('location_id')  # Parámetro opcional
         
         if not patient_id:
             return jsonify({
@@ -418,21 +412,39 @@ def create_appointment():
                 
                 # Insertar cada cita
                 if appointment_type == 'equipment':
-                    query = """
-                        INSERT INTO nextris.tbagendaevents 
-                        (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, createdon, isadmitted)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                    """
-                    params = (new_guid, start_datetime, end_datetime, equipment_id, 
-                             patient_id, exam_id, physician_id, obra_social_id)
+                    if location_id:
+                        query = """
+                            INSERT INTO nextris.tbagendaevents 
+                            (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, location_id, createdon, isadmitted)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                        """
+                        params = (new_guid, start_datetime, end_datetime, equipment_id, 
+                                 patient_id, exam_id, physician_id, obra_social_id, location_id)
+                    else:
+                        query = """
+                            INSERT INTO nextris.tbagendaevents 
+                            (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, createdon, isadmitted)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                        """
+                        params = (new_guid, start_datetime, end_datetime, equipment_id, 
+                                 patient_id, exam_id, physician_id, obra_social_id)
                 else:
-                    query = """
-                        INSERT INTO nextris.tbagendaevents 
-                        (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, createdon, isadmitted)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                    """
-                    params = (new_guid, start_datetime, end_datetime, physician_id, 
-                             patient_id, exam_id, obra_social_id)
+                    if location_id:
+                        query = """
+                            INSERT INTO nextris.tbagendaevents 
+                            (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, location_id, createdon, isadmitted)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                        """
+                        params = (new_guid, start_datetime, end_datetime, physician_id, 
+                                 patient_id, exam_id, obra_social_id, location_id)
+                    else:
+                        query = """
+                            INSERT INTO nextris.tbagendaevents 
+                            (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, createdon, isadmitted)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
+                        """
+                        params = (new_guid, start_datetime, end_datetime, physician_id, 
+                                 patient_id, exam_id, obra_social_id)
                 
                 cursor.execute(query, params)
                 created_appointment_ids.append(new_guid)
