@@ -266,3 +266,81 @@ def _process_institutional_logo(logo_file):
     except Exception as e:
         print(f"Error procesando logo institucional: {e}")
         return None
+
+
+@api_blueprint.route('/institutional/locations', methods=['GET'])
+@jwt_required()
+def get_institutional_locations():
+    """
+    Obtiene las ubicaciones asignadas al usuario autenticado
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "uuid",
+                "name": "Nombre de ubicación",
+                "code": "Código",
+                "address": "Dirección",
+                "city": "Ciudad",
+                "phone": "Teléfono",
+                "is_default": true/false
+            }
+        ]
+    }
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        user_id = get_jwt_identity()
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener ubicaciones del usuario
+        query = """
+            SELECT 
+                l.guid,
+                l.name,
+                l.code,
+                COALESCE(rul.is_default, false) as is_default
+            FROM nextris.tblocation l
+            LEFT JOIN nextris.rel_user_location rul ON l.guid = rul.location_id AND rul.user_id = %s
+            WHERE rul.user_id = %s
+            ORDER BY COALESCE(rul.is_default, false) DESC, l.name
+        """
+        
+        cursor.execute(query, (user_id, user_id))
+        rows = cursor.fetchall()
+        
+        locations = []
+        for row in rows:
+            locations.append({
+                'guid': row[0],
+                'name': row[1],
+                'code': row[2],
+                'is_default': row[3]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': locations
+        }), 200
+        
+    except Exception as e:
+        print(f"[API INSTITUTIONAL LOCATIONS] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error al obtener ubicaciones: {str(e)}'
+        }), 500
+

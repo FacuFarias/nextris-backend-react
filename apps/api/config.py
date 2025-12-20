@@ -675,7 +675,10 @@ def get_study_groups():
 @jwt_required()
 def get_equipment():
     """
-    Obtiene todos los equipos/máquinas
+    Obtiene equipos/máquinas filtrados por ubicación
+    
+    Query Parameters:
+    - location_id (OBLIGATORIO): Filtrar equipos por ubicación
     
     Returns:
     {
@@ -683,14 +686,24 @@ def get_equipment():
         "data": [
             {
                 "guid": "...",
-                "name": "...",
+                "description": "...",
                 "aeTitle": "...",
-                "location": "..."
+                "externalcode": "...",
+                "modality": "..."
             }
         ]
     }
     """
     try:
+        # Obtener parámetro location_id (OBLIGATORIO)
+        location_id = request.args.get('location_id')
+        
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'El parámetro location_id es obligatorio'
+            }), 400
+        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -705,10 +718,11 @@ def get_equipment():
             SELECT e.guid, e.description, e.aetitle, e.externalcode, m.description as modality
             FROM nextris.isequipment e
             LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
+            WHERE e.location_id = %s
             ORDER BY e.description
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (location_id,))
         results = cursor.fetchall()
         
         cursor.close()

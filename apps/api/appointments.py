@@ -40,6 +40,7 @@ def get_calendar_events():
     {
         "success": true,
         "data": {
+            "timezone": "America/Argentina/Buenos_Aires",
             "events": [
                 {
                     "guid": "...",
@@ -88,6 +89,18 @@ def get_calendar_events():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+        
+        # Obtener timezone de la ubicación del equipo
+        query_timezone = """
+            SELECT tbl.timezone
+            FROM nextris.isequipment equip
+            LEFT JOIN nextris.tblocation tbl ON equip.location_id = tbl.guid
+            WHERE equip.aetitle = %s
+            LIMIT 1
+        """
+        cursor.execute(query_timezone, (equipment_aetitle,))
+        timezone_result = cursor.fetchone()
+        timezone = timezone_result[0] if timezone_result and timezone_result[0] else 'America/Argentina/Buenos_Aires'
         
         # Obtener eventos del equipo
         query_events = """
@@ -155,6 +168,7 @@ def get_calendar_events():
         return jsonify({
             'success': True,
             'data': {
+                'timezone': timezone,
                 'events': events_list,
                 'work_hours': work_hours
             }
@@ -178,8 +192,8 @@ def reschedule_appointment(appointment_id):
     
     Body JSON:
     {
-        "start": "2025-12-05T10:00:00Z",
-        "end": "2025-12-05T11:00:00Z",
+        "start_datetime": "2025-12-05 10:00:00",  // ← Hora LOCAL
+        "end_datetime": "2025-12-05 11:00:00",    // ← Hora LOCAL
         "equipment_id": "uuid-del-equipo (opcional)"
     }
     
@@ -199,14 +213,14 @@ def reschedule_appointment(appointment_id):
                 'message': 'Se requiere un cuerpo JSON'
             }), 400
         
-        start = data.get('start')
-        end = data.get('end')
+        start_datetime = data.get('start_datetime')
+        end_datetime = data.get('end_datetime')
         equipment_id = data.get('equipment_id')  # Opcional
         
-        if not start or not end:
+        if not start_datetime or not end_datetime:
             return jsonify({
                 'success': False,
-                'message': 'Los campos start y end son requeridos'
+                'message': 'Los campos start_datetime y end_datetime son requeridos'
             }), 400
         
         config = get_db_config()
@@ -219,13 +233,14 @@ def reschedule_appointment(appointment_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Verificar que la cita existe
+        # Verificar que la cita existe y obtener su equipo
         cursor.execute(
-            "SELECT guid FROM nextris.tbagendaevents WHERE guid = %s",
+            "SELECT guid, idequipment FROM nextris.tbagendaevents WHERE guid = %s",
             (appointment_id,)
         )
         
-        if not cursor.fetchone():
+        result = cursor.fetchone()
+        if not result:
             cursor.close()
             connection.close()
             return jsonify({
@@ -233,23 +248,46 @@ def reschedule_appointment(appointment_id):
                 'message': 'Cita no encontrada'
             }), 404
         
-        # Convertir fechas ISO a formato PostgreSQL
-        # Manejar zona horaria
-        local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
+        _, current_equipment_id = result
         
+        # Si no se proporciona equipment_id, usar el actual
+        if not equipment_id:
+            equipment_id = current_equipment_id
+        
+        # Obtener timezone de la location del equipo
+        timezone_str = 'America/Argentina/Buenos_Aires'  # Default
+        if equipment_id:
+            query_tz = """
+                SELECT COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires')
+                FROM nextris.isequipment tbe
+                LEFT JOIN nextris.tblocation tbl ON tbl.guid = tbe.location_id
+                WHERE tbe.guid = %s
+            """
+            cursor.execute(query_tz, (equipment_id,))
+            tz_result = cursor.fetchone()
+            if tz_result:
+                timezone_str = tz_result[0]
+        
+        # Convertir datetimes de local a UTC
         try:
-            start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+            # Parsear datetimes locales
+            dt_start_local = datetime.strptime(start_datetime, '%Y-%m-%d %H:%M:%S')
+            dt_end_local = datetime.strptime(end_datetime, '%Y-%m-%d %H:%M:%S')
             
-            # Convertir a zona horaria local
-            start_local = start_dt.astimezone(local_tz)
-            end_local = end_dt.astimezone(local_tz)
+            # Localizar a la zona horaria de la location
+            tz = pytz.timezone(timezone_str)
+            dt_start_local = tz.localize(dt_start_local)
+            dt_end_local = tz.localize(dt_end_local)
             
-            # Formato para PostgreSQL (sin zona horaria)
-            start_str = start_local.strftime('%Y-%m-%d %H:%M:%S')
-            end_str = end_local.strftime('%Y-%m-%d %H:%M:%S')
+            # Convertir a UTC
+            dt_start_utc = dt_start_local.astimezone(pytz.UTC)
+            dt_end_utc = dt_end_local.astimezone(pytz.UTC)
             
-            print(f"[DEBUG RESCHEDULE] appointment_id: {appointment_id}, start: {start_str}, end: {end_str}, equipment_id: {equipment_id}")
+            # Guardar como naive (sin zona horaria)
+            start_to_save = dt_start_utc.replace(tzinfo=None)
+            end_to_save = dt_end_utc.replace(tzinfo=None)
+            
+            print(f"[DEBUG RESCHEDULE] appointment_id: {appointment_id}, start: {start_to_save}, end: {end_to_save}, equipment_id: {equipment_id}")
         except Exception as e:
             cursor.close()
             connection.close()
@@ -260,9 +298,9 @@ def reschedule_appointment(appointment_id):
         
         # Construir el UPDATE dinámicamente dependiendo de qué campos se actualicen
         set_clauses = ["comienzo = %s", "fin = %s"]
-        params = [start_str, end_str]
+        params = [start_to_save, end_to_save]
         
-        if equipment_id:
+        if equipment_id and equipment_id != current_equipment_id:
             set_clauses.append("idequipment = %s")
             params.append(equipment_id)
         
@@ -410,6 +448,43 @@ def create_appointment():
                 obra_social_id = event.get('obra_social_id')
                 equipment_id = event.get('equipment_id')
                 
+                # Obtener timezone de la location del equipo
+                timezone_str = 'America/Argentina/Buenos_Aires'  # Default
+                if equipment_id:
+                    query_tz = """
+                        SELECT COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires')
+                        FROM nextris.isequipment tbe
+                        LEFT JOIN nextris.tblocation tbl ON tbl.guid = tbe.location_id
+                        WHERE tbe.guid = %s
+                    """
+                    cursor.execute(query_tz, (equipment_id,))
+                    tz_result = cursor.fetchone()
+                    if tz_result:
+                        timezone_str = tz_result[0]
+                
+                # Convertir datetimes de local a UTC
+                try:
+                    # Parsear datetimes locales
+                    dt_start_local = datetime.strptime(start_datetime, '%Y-%m-%d %H:%M:%S')
+                    dt_end_local = datetime.strptime(end_datetime, '%Y-%m-%d %H:%M:%S')
+                    
+                    # Localizar a la zona horaria de la location
+                    tz = pytz.timezone(timezone_str)
+                    dt_start_local = tz.localize(dt_start_local)
+                    dt_end_local = tz.localize(dt_end_local)
+                    
+                    # Convertir a UTC
+                    dt_start_utc = dt_start_local.astimezone(pytz.UTC)
+                    dt_end_utc = dt_end_local.astimezone(pytz.UTC)
+                    
+                    # Guardar como naive (sin zona horaria)
+                    start_datetime_to_save = dt_start_utc.replace(tzinfo=None)
+                    end_datetime_to_save = dt_end_utc.replace(tzinfo=None)
+                except Exception as tz_error:
+                    # Si hay error en conversión, guardar como estaba
+                    start_datetime_to_save = start_datetime
+                    end_datetime_to_save = end_datetime
+                
                 # Insertar cada cita
                 if appointment_type == 'equipment':
                     if location_id:
@@ -418,7 +493,7 @@ def create_appointment():
                             (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, location_id, createdon, isadmitted)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
                         """
-                        params = (new_guid, start_datetime, end_datetime, equipment_id, 
+                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, equipment_id, 
                                  patient_id, exam_id, physician_id, obra_social_id, location_id)
                     else:
                         query = """
@@ -426,7 +501,7 @@ def create_appointment():
                             (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, createdon, isadmitted)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
                         """
-                        params = (new_guid, start_datetime, end_datetime, equipment_id, 
+                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, equipment_id, 
                                  patient_id, exam_id, physician_id, obra_social_id)
                 else:
                     if location_id:
@@ -435,7 +510,7 @@ def create_appointment():
                             (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, location_id, createdon, isadmitted)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
                         """
-                        params = (new_guid, start_datetime, end_datetime, physician_id, 
+                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, physician_id, 
                                  patient_id, exam_id, obra_social_id, location_id)
                     else:
                         query = """
@@ -443,7 +518,7 @@ def create_appointment():
                             (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, createdon, isadmitted)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
                         """
-                        params = (new_guid, start_datetime, end_datetime, physician_id, 
+                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, physician_id, 
                                  patient_id, exam_id, obra_social_id)
                 
                 cursor.execute(query, params)
@@ -496,7 +571,22 @@ def get_appointments():
     {
         "success": true,
         "data": {
-            "data": [...],
+            "data": [
+                {
+                    "guid": "...",
+                    "patient_name": "...",
+                    "start": "2025-12-05T10:00:00",
+                    "end": "2025-12-05T11:00:00",
+                    "exam": "...",
+                    "doctor": "...",
+                    "equipment": "...",
+                    "is_admitted": false,
+                    "location_id": "...",
+                    "equipment_id": "...",
+                    "modality": "...",
+                    "timezone": "America/Argentina/Buenos_Aires"
+                }
+            ],
             "page": 1,
             "per_page": 20,
             "total": 150
@@ -557,13 +647,16 @@ def get_appointments():
                 tba.isadmitted,
                 tba.location_id,
                 tba.idequipment as equipment_id,
-                mod.description as modality
+                mod.description as modality,
+                COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires') as timezone,
+                tba.idexam as exam_id
             FROM nextris.tbagendaevents tba
             LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
             LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
             LEFT JOIN nextris.tbuser med ON med.guid = tba.idmed
             LEFT JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
             LEFT JOIN nextris.ismodality mod ON mod.guid = st.modality_id
+            LEFT JOIN nextris.tblocation tbl ON tbl.guid = tba.location_id
             WHERE 1=1
         """
         
@@ -612,15 +705,44 @@ def get_appointments():
         cursor.close()
         connection.close()
         
+        # Obtener timezone (será el mismo para todos)
+        timezone = 'America/Argentina/Buenos_Aires'
+        if results and len(results) > 0:
+            timezone = results[0][11] if results[0][11] else 'America/Argentina/Buenos_Aires'
+        
+        # Crear objeto timezone
+        tz = pytz.timezone(timezone)
+        
         # Formatear resultados
         appointments = []
         for row in results:
+            # Convertir de UTC (naive) a la zona horaria local
+            start_time = row[2]
+            end_time = row[3]
+            
+            if start_time:
+                # Asumir que está en UTC y localizar
+                start_utc = pytz.UTC.localize(start_time)
+                start_local = start_utc.astimezone(tz)
+                start_str = start_local.isoformat()
+            else:
+                start_str = ''
+            
+            if end_time:
+                # Asumir que está en UTC y localizar
+                end_utc = pytz.UTC.localize(end_time)
+                end_local = end_utc.astimezone(tz)
+                end_str = end_local.isoformat()
+            else:
+                end_str = ''
+            
             appointments.append({
                 'guid': row[0],
                 'patient_name': row[1] or 'Sin paciente',
-                'start': row[2].isoformat() if row[2] else '',
-                'end': row[3].isoformat() if row[3] else '',
+                'start': start_str,
+                'end': end_str,
                 'exam': row[4] or 'Sin examen',
+                'exam_id': row[12] if row[12] else None,
                 'doctor': row[5] or 'Sin médico',
                 'equipment': row[6] or 'Sin equipo',
                 'is_admitted': bool(row[7]) if row[7] is not None else False,
@@ -632,6 +754,7 @@ def get_appointments():
         return jsonify({
             'success': True,
             'data': {
+                'timezone': timezone,
                 'data': appointments,
                 'page': page,
                 'per_page': per_page,
@@ -640,6 +763,9 @@ def get_appointments():
         }), 200
         
     except Exception as e:
+        import traceback
+        print(f"Error en GET /appointments: {str(e)}")
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'message': f'Error: {str(e)}'
@@ -831,7 +957,9 @@ def admit_appointment(appointment_id):
         "data": {
             "admission_number": "ADM123",
             "accession_number": "ACC123",
-            "exam_id": "guid-del-examen-creado"
+            "exam_id": "guid-del-examen-creado",
+            "study_instance_uid": "1.2.840...",
+            "timezone": "America/Argentina/Buenos_Aires"
         },
         "message": "Cita admisionada exitosamente"
     }
@@ -850,11 +978,13 @@ def admit_appointment(appointment_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Obtener datos de la cita
+        # Obtener datos de la cita y timezone
         query_appointment = """
-            SELECT idpatient, idexam, idequipment, isadmitted
-            FROM nextris.tbagendaevents 
-            WHERE guid = %s
+            SELECT tba.idpatient, tba.idexam, tba.idequipment, tba.isadmitted, 
+                   COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires') as timezone
+            FROM nextris.tbagendaevents tba
+            LEFT JOIN nextris.tblocation tbl ON tbl.guid = tba.location_id
+            WHERE tba.guid = %s
         """
         cursor.execute(query_appointment, (appointment_id,))
         appointment_data = cursor.fetchone()
@@ -867,7 +997,7 @@ def admit_appointment(appointment_id):
                 'message': 'Cita no encontrada'
             }), 404
         
-        patient_id, exam_id, cita_equipment_id, is_admitted = appointment_data
+        patient_id, exam_id, cita_equipment_id, is_admitted, timezone = appointment_data
         
         # Verificar si ya está admisionada
         if is_admitted:
@@ -963,7 +1093,8 @@ def admit_appointment(appointment_id):
                 'admission_number': new_admission,
                 'accession_number': new_accession,
                 'exam_id': exam_guid,
-                'study_instance_uid': study_instance_uid
+                'study_instance_uid': study_instance_uid,
+                'timezone': timezone
             },
             'message': 'Cita admisionada exitosamente'
         }), 200
@@ -1145,7 +1276,8 @@ def create_admission_order():
             "admission_number": "ADM001",
             "accession_number": "ACC001",
             "exam_id": "uuid-del-examen",
-            "study_instance_uid": "1.2.840..."
+            "study_instance_uid": "1.2.840...",
+            "timezone": "America/Argentina/Buenos_Aires"
         },
         "message": "Orden creada exitosamente"
     }
@@ -1192,7 +1324,17 @@ def create_admission_order():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # 1. Obtener datos del paciente
+        # 1. Obtener timezone de la location
+        cursor.execute("""
+            SELECT COALESCE(timezone, 'America/Argentina/Buenos_Aires')
+            FROM nextris.tblocation
+            WHERE guid = %s
+        """, (location_id,))
+        
+        timezone_result = cursor.fetchone()
+        timezone = timezone_result[0] if timezone_result else 'America/Argentina/Buenos_Aires'
+        
+        # 2. Obtener datos del paciente
         cursor.execute("""
             SELECT patientid, name, surname, nationalcode, birthdate, sexcode
             FROM nextris.datapatient
@@ -1208,7 +1350,7 @@ def create_admission_order():
                 'message': 'Paciente no encontrado'
             }), 404
         
-        # 2. Generar números de admisión y acceso
+        # 3. Generar números de admisión y acceso
         cursor.execute("""
             SELECT MAX(CAST(SUBSTRING(admisionnumber, 4) AS INTEGER)) 
             FROM nextris.tbexamination 
@@ -1226,7 +1368,7 @@ def create_admission_order():
         admission_number = f"ADM{(last_adm + 1):03d}"
         accession_number = f"ACC{(last_acc + 1):03d}"
         
-        # 3. Obtener datos del equipo y modalidad
+        # 4. Obtener datos del equipo y modalidad
         cursor.execute("""
             SELECT e.guid, e.aetitle, e.description, e.idmodality,
                    m.externalcode
@@ -1244,7 +1386,7 @@ def create_admission_order():
                 'message': 'Equipo no encontrado'
             }), 404
         
-        # 4. Obtener descripción del estudio
+        # 5. Obtener descripción del estudio
         cursor.execute("""
             SELECT description
             FROM nextris.isstudytype
@@ -1260,7 +1402,7 @@ def create_admission_order():
                 'message': 'Tipo de estudio no encontrado'
             }), 404
         
-        # 5. Generar Study Instance UID y enviar mensaje HL7 al dcm4chee
+        # 6. Generar Study Instance UID y enviar mensaje HL7 al dcm4chee
         import time
         timestamp = str(int(time.time() * 1000))
         study_instance_uid = f"1.2.840.{timestamp}.{patient[0]}"
@@ -1283,7 +1425,7 @@ def create_admission_order():
                 'message': 'Error al enviar orden al worklist DICOM'
             }), 500
         
-        # 6. Insertar examen en tbexamination
+        # 7. Insertar examen en tbexamination
         severity_id = None
         if exam_data.get('severity') == 'urgent':
             # Obtener ID de severidad "Urgente"
@@ -1313,7 +1455,7 @@ def create_admission_order():
         
         exam_guid = cursor.fetchone()[0]
         
-        # 7. Crear registro en tbReport
+        # 8. Crear registro en tbReport
         cursor.execute("""
             INSERT INTO nextris.tbreport (
                 guid, admnumber, idexamination, idpatient, date
@@ -1332,7 +1474,8 @@ def create_admission_order():
                 'admission_number': admission_number,
                 'accession_number': accession_number,
                 'exam_id': exam_guid,
-                'study_instance_uid': study_instance_uid
+                'study_instance_uid': study_instance_uid,
+                'timezone': timezone
             },
             'message': 'Orden creada exitosamente'
         }), 201

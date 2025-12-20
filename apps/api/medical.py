@@ -26,10 +26,10 @@ def get_db_config():
 @jwt_required()
 def get_doctors():
     """
-    Obtiene lista de médicos/doctores
+    Obtiene lista de médicos filtrando por rol 'Medico'
     
     Query params:
-    - active_only: boolean (opcional) - Solo médicos activos
+    - active_only: boolean (opcional) - Solo médicos activos (default: false)
     
     Returns:
     {
@@ -37,13 +37,9 @@ def get_doctors():
         "data": [
             {
                 "guid": "uuid",
-                "name": "Nombre",
-                "surname": "Apellido",
-                "username": "usuario",
-                "email": "email@ejemplo.com",
-                "isactive": true,
-                "full_name": "Apellido Nombre"
-            }
+                "name": "Apellido Nombre"
+            },
+            ...
         ]
     }
     """
@@ -60,14 +56,16 @@ def get_doctors():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
+        # Obtener médicos filtrando por rol = 'Medico'
         query = """
-            SELECT u.guid, u.name, u.surname, u.username, u.mail, u.isactive
+            SELECT u.guid, u.surname || ' ' || u.name as full_name
             FROM nextris.tbuser u
-            INNER JOIN nextris.tbuser_medical_data md ON md.user_id = u.guid
+            LEFT JOIN nextris.isrole ir ON ir.guid = u.idrole
+            WHERE ir.description = 'Medico'
         """
         
         if active_only:
-            query += " WHERE u.isactive = 1"
+            query += " AND u.isactive = true"
         
         query += " ORDER BY u.surname, u.name"
         
@@ -81,12 +79,7 @@ def get_doctors():
         for row in results:
             doctors.append({
                 'guid': row[0],
-                'name': row[1] or '',
-                'surname': row[2] or '',
-                'username': row[3] or '',
-                'email': row[4] or '',
-                'isactive': bool(row[5]),
-                'full_name': f"{row[2]} {row[1]}" if row[1] and row[2] else row[3]
+                'name': row[1] or ''
             })
         
         return jsonify({

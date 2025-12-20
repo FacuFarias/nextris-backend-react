@@ -66,7 +66,7 @@ def get_patients():
             return jsonify({
                 'success': True,
                 'data': {
-                    'patients': [],
+                    'data': [],
                     'page': page,
                     'per_page': per_page,
                     'total': 0
@@ -141,7 +141,7 @@ def get_patients():
         return jsonify({
             'success': True,
             'data': {
-                'patients': patients,
+                'data': patients,
                 'page': page,
                 'per_page': per_page,
                 'total': total

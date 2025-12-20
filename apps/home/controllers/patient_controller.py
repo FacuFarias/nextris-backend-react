@@ -133,7 +133,7 @@ def agregar_pacientes():
         VALUES (
             uuid_generate_v4(), %s, %s, %s, %s, %s, %s, 
             %s, %s, %s) 
-        RETURNING Guid
+        RETURNING Guid 
         """
         
         params = (

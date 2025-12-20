@@ -10,6 +10,51 @@ Este documento describe todos los endpoints disponibles para la gestión de cita
 
 ## Endpoints
 
+### 0. GET /doctors
+Obtiene la lista de médicos disponibles en el sistema.
+
+#### Description
+Retrieves a list of all users with the role "Medico" (Physician) for assignment in appointments.
+
+#### Parameters
+**Query Parameters:**
+- `active_only` (optional): true/false para obtener solo médicos activos (default: false)
+
+#### Request
+```http
+GET /api/doctors
+Authorization: Bearer <JWT_TOKEN>
+```
+
+#### Response
+**Status Code:** 200 OK
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "584f6b5b-9eb6-438d-a63f-920a12adbfe9",
+      "name": "Paredes Armando"
+    },
+    {
+      "guid": "7cbdd185-2efc-4a61-bff8-0eac3f715b20",
+      "name": "Test Usuario Actualizado"
+    }
+  ]
+}
+```
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "Error: {error_details}"
+}
+```
+
+---
+
 ### 1. GET /appointments
 Obtiene una lista de citas con filtros y paginación.
 
@@ -39,13 +84,15 @@ Authorization: Bearer <JWT_TOKEN>
 {
   "success": true,
   "data": {
+    "timezone": "America/Argentina/Buenos_Aires",
     "data": [
       {
         "guid": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
         "patient_name": "Juan García",
-        "start": "2025-12-18T14:00:00",
-        "end": "2025-12-18T15:00:00",
+        "start": "2025-12-18T14:00:00-03:00",
+        "end": "2025-12-18T15:00:00-03:00",
         "exam": "Tomografía Computarizada",
+        "exam_id": "b1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o7",
         "doctor": "Dr. Carlos López",
         "equipment": "CT-01",
         "is_admitted": false,
@@ -60,6 +107,8 @@ Authorization: Bearer <JWT_TOKEN>
   }
 }
 ```
+
+**Nota:** Los campos `start` y `end` se devuelven en formato ISO 8601 con la zona horaria de la location. La zona horaria se especifica en el campo `timezone` al nivel de `data`. El campo `exam_id` contiene el UUID del tipo de examen (isstudytype.guid).
 
 #### Errors
 ```json
@@ -90,11 +139,19 @@ Creates one or multiple appointments in the system. Supports both equipment-base
       "end_datetime": "2025-12-05 11:00:00",
       "physician_id": "uuid-del-medico",
       "obra_social_id": "uuid-de-la-obra-social",
-      "equipment_id": "uuid-del-equipo (obligatorio si appointment_type=equipment)"
+      "equipment_id": "uuid-del-equipo (REQUERIDO - se usa para obtener la zona horaria)"
     }
   ]
 }
 ```
+
+**Importante:**
+- `start_datetime` y `end_datetime` deben estar en **hora local** de la location (ej: Argentina)
+- El `equipment_id` es **obligatorio** porque se usa para:
+  1. Obtener la `location_id` del equipo
+  2. Obtener el `timezone` de esa location
+  3. Convertir automáticamente la hora local → UTC para almacenar en la BD
+- Formato de fecha: `YYYY-MM-DD HH:MM:SS`
 
 #### Request
 ```http
@@ -155,11 +212,17 @@ Reschedules an appointment by updating its start/end times and optionally changi
 #### Request Body
 ```json
 {
-  "start": "2025-12-05T10:00:00Z",
-  "end": "2025-12-05T11:00:00Z",
+  "start_datetime": "2025-12-05 10:00:00",
+  "end_datetime": "2025-12-05 11:00:00",
   "equipment_id": "uuid-del-nuevo-equipo (opcional)"
 }
 ```
+
+**Importante:**
+- `start_datetime` y `end_datetime` deben estar en **hora local** de la location
+- Si no se proporciona `equipment_id`, se usa el equipo actual de la cita
+- El backend obtiene automáticamente la zona horaria del equipo y convierte local → UTC
+- Formato de fecha: `YYYY-MM-DD HH:MM:SS`
 
 #### Request
 ```http
@@ -168,8 +231,8 @@ Content-Type: application/json
 Authorization: Bearer <JWT_TOKEN>
 
 {
-  "start": "2025-12-20T14:00:00Z",
-  "end": "2025-12-20T15:00:00Z",
+  "start_datetime": "2025-12-20 14:00:00",
+  "end_datetime": "2025-12-20 15:00:00",
   "equipment_id": "new-equipment-uuid"
 }
 ```
@@ -298,7 +361,7 @@ Admits an appointment and creates an examination order in the DICOM worklist.
 #### Request Body (opcional)
 ```json
 {
-  "additional_notes": "Notas adicionales (opcional)"
+  "equipment_id": "uuid-del-equipo (opcional, si no viene en la cita)"
 }
 ```
 
@@ -309,7 +372,7 @@ Content-Type: application/json
 Authorization: Bearer <JWT_TOKEN>
 
 {
-  "additional_notes": "Paciente llegó temprano"
+  "equipment_id": "c1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o8"
 }
 ```
 
@@ -319,10 +382,13 @@ Authorization: Bearer <JWT_TOKEN>
 ```json
 {
   "success": true,
-  "message": "Cita admisionada exitosamente y orden creada en worklist",
+  "message": "Cita admisionada exitosamente",
   "data": {
-    "appointment_id": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
-    "order_status": "admitted"
+    "admission_number": "ADM001",
+    "accession_number": "ACC001",
+    "exam_id": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
+    "study_instance_uid": "1.2.840.113619.1234567890.1",
+    "timezone": "America/Argentina/Buenos_Aires"
   }
 }
 ```
@@ -334,6 +400,8 @@ Authorization: Bearer <JWT_TOKEN>
   "message": "Cita no encontrada"
 }
 ```
+
+**Status Code:** 404 Not Found
 
 ---
 
@@ -370,6 +438,7 @@ Authorization: Bearer <JWT_TOKEN>
 {
   "success": true,
   "data": {
+    "timezone": "America/Argentina/Buenos_Aires",
     "events": [
       {
         "guid": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
@@ -497,6 +566,73 @@ Content-Type: application/json
 
 ---
 
+### 9. POST /admission/create-order
+Crea una orden de admisión (worklist) con un examen.
+
+#### Description
+Creates an admission order (examination) in the system and sends it to the DICOM worklist.
+
+#### Request Body
+```json
+{
+  "patient_id": "uuid-del-paciente",
+  "location_id": "uuid-de-la-ubicacion",
+  "exam": {
+    "study_type_id": "uuid-del-tipo-de-estudio",
+    "equipment_id": "uuid-del-equipo",
+    "physician_id": "uuid-del-medico-solicitante (opcional)",
+    "insurance_id": "uuid-de-la-obra-social (opcional)",
+    "severity": "normal | urgent (opcional, default: normal)"
+  }
+}
+```
+
+#### Request
+```http
+POST /api/admission/create-order
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+
+{
+  "patient_id": "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6",
+  "location_id": "d1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o9",
+  "exam": {
+    "study_type_id": "b1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o7",
+    "equipment_id": "c1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o8",
+    "physician_id": "e1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5f1",
+    "insurance_id": "f1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5f2",
+    "severity": "urgent"
+  }
+}
+```
+
+#### Response
+**Status Code:** 201 Created
+
+```json
+{
+  "success": true,
+  "data": {
+    "admission_number": "ADM001",
+    "accession_number": "ACC001",
+    "exam_id": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
+    "study_instance_uid": "1.2.840.113619.1234567890.1",
+    "timezone": "America/Argentina/Buenos_Aires"
+  },
+  "message": "Orden creada exitosamente"
+}
+```
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "patient_id es obligatorio"
+}
+```
+
+---
+
 ## Data Types
 
 ### Appointment Object
@@ -512,14 +648,37 @@ Content-Type: application/json
   "is_admitted": "boolean",
   "location_id": "string (UUID)",
   "equipment_id": "string (UUID)",
-  "modality": "string"
+  "modality": "string",
+  "timezone": "string (e.g., America/Argentina/Buenos_Aires)"
 }
 ```
 
 ### DateTime Format
-- **Input:** ISO 8601 with timezone (e.g., `2025-12-05T10:00:00Z`)
-- **Output:** ISO 8601 without timezone (e.g., `2025-12-05T10:00:00`)
-- **Timezone:** Argentina/Buenos_Aires (UTC-3)
+
+**Para enviar (POST, PATCH):**
+- Formato: `YYYY-MM-DD HH:MM:SS` (hora **local**)
+- Ejemplo: `2025-12-05 10:00:00` (hora Argentina)
+- El backend obtiene el timezone del `equipment_id` y convierte automáticamente a UTC
+
+**Para recibir (GET):**
+- Formato: ISO 8601 con zona horaria
+- Ejemplo: `2025-12-05T10:00:00-03:00` (hora local + offset)
+- El campo `timezone` en la respuesta indica la zona horaria de la location
+
+**Conversión automática:**
+```
+Frontend envía: "2025-12-05 14:00:00" (Argentina)
+    ↓
+Backend: equipment → location → timezone
+    ↓
+Convierte: 14:00 ART → 17:00 UTC
+    ↓
+Almacena en BD: "2025-12-05 17:00:00" (UTC naive)
+    ↓
+Frontend recibe: "2025-12-05T14:00:00-03:00" (convertido de vuelta)
+```
+
+**Nota:** El frontend **no necesita hacer conversiones**. El backend maneja toda la lógica de timezone automáticamente.
 
 ---
 
@@ -591,6 +750,18 @@ curl -X PATCH http://localhost:5000/api/appointments/f39710b4-7914-44ba-ab72-ad4
   }'
 ```
 
+### Obtener lista de médicos disponibles
+```bash
+curl -X GET "http://localhost:5000/api/doctors" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Obtener solo médicos activos
+```bash
+curl -X GET "http://localhost:5000/api/doctors?active_only=true" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
 ### Obtener citas de hoy
 ```bash
 curl -X GET "http://localhost:5000/api/appointments?today=true&per_page=50" \
@@ -610,6 +781,46 @@ curl -X POST http://localhost:5000/api/appointments/f39710b4-7914-44ba-ab72-ad4e
 ---
 
 ## Change Log
+
+### Version 1.3.1 (2025-12-20) ✨ **Added Doctors Endpoint**
+- ✅ Nuevo endpoint GET /doctors para obtener lista de médicos
+- ✅ Filtra automáticamente usuarios con rol "Medico"
+- ✅ Devuelve guid y nombre completo (concatenado)
+- ✅ Soporta parámetro opcional `active_only` para filtrar médicos activos
+- ✅ Útil para seleccionar médicos al crear/editar citas
+
+### Version 1.3.0 (2025-12-20) ✨ **UTC Storage & Automatic Conversion**
+- ✅ POST /appointments: Convierte automáticamente hora local → UTC usando timezone del equipment
+- ✅ GET /appointments: Devuelve horas en formato ISO 8601 con zona horaria (local)
+- ✅ PATCH /appointments/:id/reschedule: Ahora recibe hora local y convierte a UTC
+- ✅ Todos los endpoints usan `equipment_id` para obtener timezone automáticamente
+- ✅ Frontend **NO necesita hacer conversiones** - el backend maneja todo
+- ✅ Base de datos siempre almacena en UTC (estándar internacional)
+- ⚠️ **BREAKING CHANGE**: Campos de fecha modificados:
+  - POST: `start` → `start_datetime`, `end` → `end_datetime`
+  - PATCH reschedule: `start` → `start_datetime`, `end` → `end_datetime`
+  - GET: Ahora devuelve con zona horaria en formato ISO (ej: `2025-12-18T14:00:00-03:00`)
+
+### Version 1.3.2 (2025-12-20) ✨ **Added exam_id to GET /appointments**
+- ✅ GET /appointments ahora devuelve `exam_id` (isstudytype.guid)
+- ✅ Documentación actualizada con ejemplo de respuesta
+- ✅ Endpoint funcional y verificado
+
+### Version 1.3.1 (2025-12-20) ✨ **Medical Staff Management**
+- ✅ Agregado endpoint GET /doctors para listar médicos
+- ✅ Filtra usuarios con rol "Medico"
+- ✅ Retorna guid y nombre concatenado
+
+### Version 1.3.0 (2025-12-20) ✨ **Timezone Support with UTC Conversion**
+- ✅ Implementada conversión automática de hora local → UTC en POST /appointments
+- ✅ GET /appointments ahora convierte UTC → hora local
+- ✅ PATCH /appointments/:id/reschedule actualizado con conversión UTC
+- ✅ Timezone obtenido automáticamente desde location del equipment
+
+### Version 1.2.0 (2025-12-20) ✨ **Timezone Support (Primera iteración)**
+- ✅ Agregado campo `timezone` a respuestas
+- ✅ Configuradas todas las locations con timezone
+- ⚠️ Sin conversión automática (versión mejorada en 1.3.0)
 
 ### Version 1.1.0 (2025-12-17)
 - ✅ Agregado campo `location_id` a respuesta de GET /appointments
