@@ -633,6 +633,96 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
+### 11. GET /users_physician
+Obtiene la lista de médicos del sistema filtrando por rol 'Medico'.
+
+#### Description
+Retrieves a list of all users with the role "Medico" (Physician) in the system, with optional filtering for active physicians only.
+
+#### Parameters
+**Query Parameters:**
+- `active_only` (optional): `true`/`false` - Obtener solo médicos activos (default: false)
+
+#### Request
+```http
+GET /api/users_physician
+Authorization: Bearer <JWT_TOKEN>
+```
+
+#### Response
+**Status Code:** 200 OK
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "584f6b5b-9eb6-438d-a63f-920a12adbfe9",
+      "name": "Paredes Armando"
+    },
+    {
+      "guid": "7cbdd185-2efc-4a61-bff8-0eac3f715b20",
+      "name": "García López"
+    }
+  ]
+}
+```
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "Error de configuración de base de datos"
+}
+```
+
+---
+
+### 12. GET /institutional/locations/{location_id}/physicians
+Obtiene médicos solicitantes filtrados por ubicación específica.
+
+#### Description
+Retrieves a list of requesting physicians (from `isrequestingphysician` table) filtered by location. This endpoint is useful for location-specific physician assignments.
+
+#### Parameters
+**Path Parameters:**
+- `location_id` (required): UUID de la ubicación
+
+#### Request
+```http
+GET /api/institutional/locations/a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6/physicians
+Authorization: Bearer <JWT_TOKEN>
+```
+
+#### Response
+**Status Code:** 200 OK
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "584f6b5b-9eb6-438d-a63f-920a12adbfe9",
+      "description": "Dr. Juan Pérez"
+    },
+    {
+      "guid": "7cbdd185-2efc-4a61-bff8-0eac3f715b20",
+      "description": "Dra. María García"
+    }
+  ]
+}
+```
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "El parámetro location_id es obligatorio"
+}
+```
+
+---
+
 ## Data Types
 
 ### Appointment Object
@@ -781,6 +871,12 @@ curl -X POST http://localhost:5000/api/appointments/f39710b4-7914-44ba-ab72-ad4e
 ---
 
 ## Change Log
+
+### Version 1.3.5 (2025-12-29) ✨ **Physician Management APIs**
+- ✅ Agregado endpoint GET /users_physician para listar médicos del sistema
+- ✅ Agregado endpoint GET /institutional/locations/{location_id}/physicians para médicos por ubicación
+- ✅ Documentación completa con ejemplos de uso
+- ✅ Ambos endpoints requieren autenticación JWT
 
 ### Version 1.3.1 (2025-12-20) ✨ **Added Doctors Endpoint**
 - ✅ Nuevo endpoint GET /doctors para obtener lista de médicos
