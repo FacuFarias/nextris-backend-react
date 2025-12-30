@@ -213,6 +213,92 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
+### 4. POST /admission/create-order
+Crea una nueva orden de admisión directamente desde datos de paciente y equipo.
+
+#### Description
+Creates a new admission order (worklist entry) with an examination directly from patient, location, and equipment data. Generates unique ADM and ACC numbers automatically. Useful for creating worklist entries without a pre-existing appointment.
+
+#### Request Body
+```json
+{
+  "patient_id": "uuid-del-paciente",
+  "location_id": "uuid-de-la-ubicacion",
+  "exam": {
+    "study_type_id": "uuid-del-tipo-de-estudio",
+    "equipment_id": "uuid-del-equipo",
+    "physician_id": "uuid-del-medico-solicitante (opcional)",
+    "insurance_id": "uuid-de-la-obra-social (opcional)",
+    "severity": "normal|urgent (opcional, default: normal)"
+  }
+}
+```
+
+#### Request
+```http
+POST /api/admission/create-order
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+
+{
+  "patient_id": "f39710b4-7914-44ba-ab72-ad4ed5e22e98",
+  "location_id": "a1234567-8901-2345-6789-012345678901",
+  "exam": {
+    "study_type_id": "b1234567-8901-2345-6789-012345678901",
+    "equipment_id": "c1234567-8901-2345-6789-012345678901",
+    "severity": "normal"
+  }
+}
+```
+
+#### Response
+**Status Code:** 201 Created
+
+```json
+{
+  "success": true,
+  "data": {
+    "admission_number": "ADM019",
+    "accession_number": "ACC019",
+    "exam_id": "d1234567-8901-2345-6789-012345678901",
+    "study_instance_uid": "1.2.840.1767057345518.NR00000001",
+    "timezone": "America/Argentina/Buenos_Aires"
+  },
+  "message": "Orden creada exitosamente"
+}
+```
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "patient_id es obligatorio"
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "Paciente no encontrado"
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "Equipo no encontrado"
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "Tipo de estudio no encontrado"
+}
+```
+
+---
+
 ## Data Types
 
 ### Admission Object (List)
@@ -407,6 +493,7 @@ curl -X DELETE http://localhost:5000/api/admissions/f39710b4-7914-44ba-ab72-ad4e
 - ✅ Agregado endpoint GET /admissions/{id} para detalles de admisión
 - ✅ Agregado endpoint POST /admissions/appointment/{id}/admit para admisionar citas
 - ✅ Agregado endpoint DELETE /admissions/{id} para cancelar admisiones
+- ✅ Agregado endpoint POST /admission/create-order para crear órdenes directas
 - ✅ Implementado filtrado automático por ubicaciones del usuario
 - ✅ Soporte para filtros por status y fecha
 - ✅ Paginación configurable
