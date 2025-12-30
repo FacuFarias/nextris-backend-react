@@ -294,8 +294,7 @@ def execute_examination_order(exam_guid):
                 laterality_id = %s,
                 stat = %s::boolean,
                 numberofviews = %s,
-                othersdetails = %s,
-                UpdatedOn = NOW()
+                othersdetails = %s
             WHERE Guid = %s
         """
         
@@ -357,8 +356,7 @@ def cancel_examination_execution_order(exam_guid):
         
         query = """
             UPDATE nextris.tbexamination
-            SET IsExecuted = 0,
-                UpdatedOn = NOW()
+            SET IsExecuted = 0
             WHERE Guid = %s
         """
         

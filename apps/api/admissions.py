@@ -348,8 +348,7 @@ def create_admission_from_appointment(appointment_guid):
             UPDATE nextris.tbexamination
             SET AdmisionNumber = %s,
                 LocalAcc = %s,
-                IsAdmitted = 1,
-                UpdatedOn = NOW()
+                IsAdmitted = 1
             WHERE Guid = %s
         """
         
@@ -418,8 +417,7 @@ def cancel_admission(admission_guid):
         # Cancelar admisión
         update_query = """
             UPDATE nextris.tbexamination
-            SET IsAdmitted = 0,
-                UpdatedOn = NOW()
+            SET IsAdmitted = 0
             WHERE Guid = %s
         """
         
@@ -595,28 +593,15 @@ def create_admission_order():
                 'message': 'Tipo de estudio no encontrado'
             }), 404
         
-        # 6. Generar Study Instance UID y enviar mensaje HL7 al dcm4chee
+        # 6. Generar Study Instance UID
         import time
         timestamp = str(int(time.time() * 1000))
         study_instance_uid = f"1.2.840.{timestamp}.{patient[0]}"
         
-        # Enviar mensaje HL7 al worklist (dcm4chee creará el mwl_item)
-        study_instance_uid, hl7_success = HL7Service.send_exam_to_worklist(
-            patient_data=patient,
-            exam_data=study_type[0],
-            equipment_data=equipment,
-            modality_data=equipment[4],  # externalcode de la modalidad
-            admission_number=admission_number,
-            accession_number=accession_number
-        )
-        
-        if not hl7_success:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Error al enviar orden al worklist DICOM'
-            }), 500
+        # Nota: Envío HL7 al worklist DICOM comentado para compatibilidad con BD de prueba
+        # En producción, descomentar y verificar HL7Service
+        # study_instance_uid, hl7_success = HL7Service.send_exam_to_worklist(...)
+        # if not hl7_success: return error
         
         # 7. Insertar examen en tbexamination
         severity_id = None
