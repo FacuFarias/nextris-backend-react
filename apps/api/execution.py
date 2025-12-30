@@ -134,7 +134,7 @@ def get_execution_orders():
 
 @api_blueprint.route('/executions/examination/<exam_guid>/details', methods=['GET'])
 @jwt_required()
-def get_examination_execution_details(exam_guid):
+def get_execution_examination_details(exam_guid):
     """
     Obtiene detalles completos de un examen para ejecución
     
@@ -239,7 +239,7 @@ def get_examination_execution_details(exam_guid):
 
 @api_blueprint.route('/executions/examination/<exam_guid>/execute', methods=['POST'])
 @jwt_required()
-def execute_examination(exam_guid):
+def execute_examination_order(exam_guid):
     """
     Ejecuta un examen actualizando su estado y detalles clínicos
     
@@ -331,7 +331,7 @@ def execute_examination(exam_guid):
 
 @api_blueprint.route('/executions/examination/<exam_guid>/cancel', methods=['POST'])
 @jwt_required()
-def cancel_examination_execution(exam_guid):
+def cancel_examination_execution_order(exam_guid):
     """
     Cancela la ejecución de un examen (marca como no ejecutado)
     
