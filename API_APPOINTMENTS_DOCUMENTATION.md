@@ -10,52 +10,7 @@ Este documento describe todos los endpoints disponibles para la gestión de cita
 
 ## Endpoints
 
-### 0. GET /doctors
-Obtiene la lista de médicos disponibles en el sistema.
-
-#### Description
-Retrieves a list of all users with the role "Medico" (Physician) for assignment in appointments.
-
-#### Parameters
-**Query Parameters:**
-- `active_only` (optional): true/false para obtener solo médicos activos (default: false)
-
-#### Request
-```http
-GET /api/doctors
-Authorization: Bearer <JWT_TOKEN>
-```
-
-#### Response
-**Status Code:** 200 OK
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "guid": "584f6b5b-9eb6-438d-a63f-920a12adbfe9",
-      "name": "Paredes Armando"
-    },
-    {
-      "guid": "7cbdd185-2efc-4a61-bff8-0eac3f715b20",
-      "name": "Test Usuario Actualizado"
-    }
-  ]
-}
-```
-
-#### Errors
-```json
-{
-  "success": false,
-  "message": "Error: {error_details}"
-}
-```
-
----
-
-### 1. GET /appointments
+### 0. GET /appointments
 Obtiene una lista de citas con filtros y paginación.
 
 #### Description
@@ -120,7 +75,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 2. POST /appointments
+### 1. POST /appointments
 Crea una nueva cita o múltiples citas.
 
 #### Description
@@ -200,7 +155,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 3. PATCH /appointments/:id/reschedule
+### 2. PATCH /appointments/:id/reschedule
 Actualiza las fechas y/o equipo de una cita (reprogramación).
 
 #### Description
@@ -260,7 +215,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 4. PATCH /appointments/:id
+### 3. PATCH /appointments/:id
 Actualiza datos específicos de una cita.
 
 #### Description
@@ -311,7 +266,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 5. DELETE /appointments/:id
+### 4. DELETE /appointments/:id
 Elimina/cancela una cita.
 
 #### Description
@@ -349,7 +304,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 6. POST /appointments/:id/admit
+### 5. POST /appointments/:id/admit
 Admisiona una cita y crea la orden de examen en worklist.
 
 #### Description
@@ -405,7 +360,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 7. POST /appointments/calendar-events
+### 6. POST /appointments/calendar-events
 Obtiene eventos de calendario para editar una cita específica.
 
 #### Description
@@ -476,7 +431,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 8. GET /appointments/availability
+### 7. GET /appointments/availability
 Obtiene disponibilidad de un equipo para agendar citas.
 
 #### Description
@@ -566,7 +521,7 @@ Content-Type: application/json
 
 ---
 
-### 9. POST /admission/create-order
+### 8. POST /admission/create-order
 Crea una orden de admisión (worklist) con un examen.
 
 #### Description
@@ -633,7 +588,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 11. GET /users_physician
+### 10. GET /users_physician
 Obtiene la lista de médicos del sistema filtrando por rol 'Medico'.
 
 #### Description
@@ -678,7 +633,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### 12. GET /institutional/locations/{location_id}/physicians
+### 11. GET /institutional/locations/{location_id}/physicians
 Obtiene médicos solicitantes filtrados por ubicación específica.
 
 #### Description
