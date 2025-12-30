@@ -222,7 +222,7 @@ def get_admission_details(admission_guid):
                    st.Description,
                    e.Status, e.CreatedOn, e.IsExecuted, e.IsAdmitted,
                    e.isreported,
-                   eq.Description, loc.description
+                   eq.Description, loc.name
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
