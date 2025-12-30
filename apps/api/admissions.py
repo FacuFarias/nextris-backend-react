@@ -274,7 +274,7 @@ def get_admission_details(admission_guid):
 
 @api_blueprint.route('/admissions/appointment/<appointment_guid>/admit', methods=['POST'])
 @jwt_required()
-def admit_appointment(appointment_guid):
+def create_admission_from_appointment(appointment_guid):
     """
     Admisiona una cita existente creando la orden en el worklist
     
