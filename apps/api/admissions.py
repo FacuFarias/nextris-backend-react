@@ -439,3 +439,242 @@ def cancel_admission(admission_guid):
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/admission/create-order', methods=['POST'])
+@jwt_required()
+def create_admission_order():
+    """
+    Crea una orden de admisión (worklist) con un examen
+    
+    POST /api/admission/create-order
+    
+    Body JSON:
+    {
+        "patient_id": "uuid-del-paciente",
+        "location_id": "uuid-de-la-ubicacion",
+        "exam": {
+            "study_type_id": "uuid-del-tipo-de-estudio",
+            "equipment_id": "uuid-del-equipo",
+            "physician_id": "uuid-del-medico-solicitante" (opcional),
+            "insurance_id": "uuid-de-la-obra-social" (opcional),
+            "severity": "normal" | "urgent" (opcional, default: "normal")
+        }
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "admission_number": "ADM001",
+            "accession_number": "ACC001",
+            "exam_id": "uuid-del-examen",
+            "study_instance_uid": "1.2.840...",
+            "timezone": "America/Argentina/Buenos_Aires"
+        },
+        "message": "Orden creada exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        patient_id = data.get('patient_id')
+        location_id = data.get('location_id')
+        exam_data = data.get('exam', {})
+        
+        # Validaciones
+        if not patient_id:
+            return jsonify({
+                'success': False,
+                'message': 'patient_id es obligatorio'
+            }), 400
+        
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'location_id es obligatorio'
+            }), 400
+            
+        if not exam_data.get('study_type_id'):
+            return jsonify({
+                'success': False,
+                'message': 'exam.study_type_id es obligatorio'
+            }), 400
+            
+        if not exam_data.get('equipment_id'):
+            return jsonify({
+                'success': False,
+                'message': 'exam.equipment_id es obligatorio'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # 1. Obtener timezone de la location
+        cursor.execute("""
+            SELECT COALESCE(timezone, 'America/Argentina/Buenos_Aires')
+            FROM nextris.tblocation
+            WHERE guid = %s
+        """, (location_id,))
+        
+        timezone_result = cursor.fetchone()
+        timezone = timezone_result[0] if timezone_result else 'America/Argentina/Buenos_Aires'
+        
+        # 2. Obtener datos del paciente
+        cursor.execute("""
+            SELECT patientid, name, surname, nationalcode, birthdate, sexcode
+            FROM nextris.datapatient
+            WHERE guid = %s
+        """, (patient_id,))
+        
+        patient = cursor.fetchone()
+        if not patient:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        # 3. Generar números de admisión y acceso
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTRING(admisionnumber, 4) AS INTEGER)) 
+            FROM nextris.tbexamination 
+            WHERE admisionnumber LIKE 'ADM%'
+        """)
+        last_adm = cursor.fetchone()[0] or 0
+        
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTRING(localacc, 4) AS INTEGER)) 
+            FROM nextris.tbexamination 
+            WHERE localacc LIKE 'ACC%'
+        """)
+        last_acc = cursor.fetchone()[0] or 0
+        
+        admission_number = f"ADM{(last_adm + 1):03d}"
+        accession_number = f"ACC{(last_acc + 1):03d}"
+        
+        # 4. Obtener datos del equipo y modalidad
+        cursor.execute("""
+            SELECT e.guid, e.aetitle, e.description, e.idmodality,
+                   m.externalcode
+            FROM nextris.isequipment e
+            LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
+            WHERE e.guid = %s
+        """, (exam_data['equipment_id'],))
+        
+        equipment = cursor.fetchone()
+        if not equipment:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Equipo no encontrado'
+            }), 404
+        
+        # 5. Obtener descripción del estudio
+        cursor.execute("""
+            SELECT description
+            FROM nextris.isstudytype
+            WHERE guid = %s
+        """, (exam_data['study_type_id'],))
+        
+        study_type = cursor.fetchone()
+        if not study_type:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Tipo de estudio no encontrado'
+            }), 404
+        
+        # 6. Generar Study Instance UID y enviar mensaje HL7 al dcm4chee
+        import time
+        timestamp = str(int(time.time() * 1000))
+        study_instance_uid = f"1.2.840.{timestamp}.{patient[0]}"
+        
+        # Enviar mensaje HL7 al worklist (dcm4chee creará el mwl_item)
+        study_instance_uid, hl7_success = HL7Service.send_exam_to_worklist(
+            patient_data=patient,
+            exam_data=study_type[0],
+            equipment_data=equipment,
+            modality_data=equipment[4],  # externalcode de la modalidad
+            admission_number=admission_number,
+            accession_number=accession_number
+        )
+        
+        if not hl7_success:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Error al enviar orden al worklist DICOM'
+            }), 500
+        
+        # 7. Insertar examen en tbexamination
+        severity_id = None
+        if exam_data.get('severity') == 'urgent':
+            # Obtener ID de severidad "Urgente"
+            cursor.execute("SELECT guid FROM nextris.isseverity WHERE description ILIKE '%urgente%' LIMIT 1")
+            severity_result = cursor.fetchone()
+            severity_id = severity_result[0] if severity_result else None
+        
+        cursor.execute("""
+            INSERT INTO nextris.tbexamination (
+                guid, studyinstanceuid, idpatient, studytype_id, idequipment,
+                admisionnumber, localacc, createdon, status, isexecuted,
+                idseverity, idrequestingphysician, idpricelist
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s
+            ) RETURNING guid
+        """, (
+            study_instance_uid,
+            patient[0],
+            exam_data['study_type_id'],
+            exam_data['equipment_id'],
+            admission_number,
+            accession_number,
+            severity_id,
+            exam_data.get('physician_id'),
+            exam_data.get('insurance_id')
+        ))
+        
+        exam_guid = cursor.fetchone()[0]
+        
+        # 8. Crear registro en tbReport
+        cursor.execute("""
+            INSERT INTO nextris.tbreport (
+                guid, admnumber, idexamination, idpatient, date
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, NOW()
+            )
+        """, (admission_number, exam_guid, patient[0]))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'admission_number': admission_number,
+                'accession_number': accession_number,
+                'exam_id': exam_guid,
+                'study_instance_uid': study_instance_uid,
+                'timezone': timezone
+            },
+            'message': 'Orden creada exitosamente'
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
