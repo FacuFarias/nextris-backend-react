@@ -21,4 +21,4 @@ def health_check():
 
 
 # Importar las rutas después de crear el blueprint para evitar imports circulares
-from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general
+from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general, execution
