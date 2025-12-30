@@ -592,7 +592,10 @@ Authorization: Bearer <JWT_TOKEN>
 Obtiene la lista de médicos del sistema filtrando por rol 'Medico'.
 
 #### Description
-Retrieves a list of all users with the role "Medico" (Physician) in the system, with optional filtering for active physicians only.
+Retrieves a list of all users with the role "Medico" (Physician) in the system from the `tbuser` table. These are system physicians/medical staff. Supports optional filtering for active physicians only.
+
+**Source Table:** `nextris.tbuser` (WHERE role = 'Medico')
+**Use Case:** When you need all physicians registered in the system for general listings or assignments.
 
 #### Parameters
 **Query Parameters:**
@@ -601,6 +604,12 @@ Retrieves a list of all users with the role "Medico" (Physician) in the system, 
 #### Request
 ```http
 GET /api/users_physician
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Or with filter:
+```http
+GET /api/users_physician?active_only=true
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -637,7 +646,10 @@ Authorization: Bearer <JWT_TOKEN>
 Obtiene médicos solicitantes filtrados por ubicación específica.
 
 #### Description
-Retrieves a list of requesting physicians (from `isrequestingphysician` table) filtered by location. This endpoint is useful for location-specific physician assignments.
+Retrieves a list of requesting physicians from the `isrequestingphysician` table filtered by location. These are physicians designated as requesting physicians for specific locations.
+
+**Source Table:** `nextris.isrequestingphysician` (WHERE location_id = {location_id})
+**Use Case:** When you need location-specific requesting physicians for appointment creation or location-based filtering. This table maintains physician-location relationships.
 
 #### Parameters
 **Path Parameters:**
@@ -677,6 +689,17 @@ Authorization: Bearer <JWT_TOKEN>
 ```
 
 ---
+
+## Physician Types Comparison
+
+| Endpoint | Source Table | Scope | Use Case |
+|----------|-------------|-------|----------|
+| `GET /users_physician` | `nextris.tbuser` | System-wide | All physicians in the system |
+| `GET /institutional/locations/{id}/physicians` | `nextris.isrequestingphysician` | Location-specific | Requesting physicians per location |
+
+**Key Differences:**
+- **Users Physicians (`/users_physician`)**: System-wide physician list from `tbuser` table. Returns physicians with "Medico" role.
+- **Requesting Physicians (`/institutional/locations/{id}/physicians`)**: Location-specific physicians from `isrequestingphysician` table. Returns physicians designated for specific locations.
 
 ## Data Types
 
