@@ -22,7 +22,7 @@ def get_db_config():
         return None
 
 
-@api_blueprint.route('/doctors', methods=['GET'])
+@api_blueprint.route('/users_physician', methods=['GET'])
 @jwt_required()
 def get_doctors():
     """

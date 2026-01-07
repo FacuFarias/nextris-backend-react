@@ -675,10 +675,11 @@ def get_study_groups():
 @jwt_required()
 def get_equipment():
     """
-    Obtiene equipos/máquinas filtrados por ubicación
+    Obtiene equipos/máquinas filtrados por ubicación y opcionalmente por modalidad
     
     Query Parameters:
     - location_id (OBLIGATORIO): Filtrar equipos por ubicación
+    - modality_id (OPCIONAL): Filtrar equipos por modalidad
     
     Returns:
     {
@@ -704,6 +705,9 @@ def get_equipment():
                 'message': 'El parámetro location_id es obligatorio'
             }), 400
         
+        # Obtener parámetro modality_id (OPCIONAL)
+        modality_id = request.args.get('modality_id')
+        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -714,15 +718,24 @@ def get_equipment():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
+        # Construir query base
         query = """
             SELECT e.guid, e.description, e.aetitle, e.externalcode, m.description as modality
             FROM nextris.isequipment e
             LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
             WHERE e.location_id = %s
-            ORDER BY e.description
         """
         
-        cursor.execute(query, (location_id,))
+        params = [location_id]
+        
+        # Agregar filtro de modalidad si se proporciona
+        if modality_id:
+            query += " AND e.idmodality = %s"
+            params.append(modality_id)
+        
+        query += " ORDER BY e.description"
+        
+        cursor.execute(query, params)
         results = cursor.fetchall()
         
         cursor.close()

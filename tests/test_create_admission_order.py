@@ -248,13 +248,57 @@ def test_create_order_without_required_fields():
         return False
 
 
+def test_appointments_to_admit():
+    """Test: Obtener citas para admitir"""
+    print_test("5. Test: GET /appointments_to_admit")
+    
+    print_info("Obteniendo citas no admitidas...")
+    response = requests.get(
+        f"{BASE_URL}/appointments_to_admit",
+        headers=get_headers()
+    )
+    
+    if response.status_code == 200:
+        data = response.json()
+        if data.get('success'):
+            appointments = data.get('data', [])
+            print_success(f"Citas obtenidas: {len(appointments)}")
+            
+            if appointments:
+                # Mostrar detalles del primer resultado
+                first = appointments[0]
+                print_info(f"Primer resultado:")
+                print_info(f"  - GUID: {first.get('guid')}")
+                print_info(f"  - Paciente: {first.get('fullname')}")
+                print_info(f"  - Comienzo: {first.get('comienzo')}")
+                print_info(f"  - Médico referencia: {first.get('medref')}")
+                print_info(f"  - Descripción: {first.get('description')}")
+                print_info(f"  - Equipo: {first.get('equipo')}")
+                print_info(f"  - Médico solicitante: {first.get('med_solicitante')}")
+            else:
+                print_info("No hay citas pendientes de admitir")
+            
+            return True
+        else:
+            print_error(f"Error: {data.get('message')}")
+            return False
+    else:
+        print_error(f"Error HTTP {response.status_code}")
+        try:
+            print(json.dumps(response.json(), indent=2))
+        except:
+            print(response.text)
+        return False
+
+
 def main():
     print_header("TEST: Crear Orden de Admisión")
     
     tests = [
         ("Login", login),
         ("Crear orden completa", test_create_order),
-        ("Validaciones", test_create_order_without_required_fields)
+        ("Validaciones", test_create_order_without_required_fields),
+        ("Obtener citas para admitir", test_appointments_to_admit)
     ]
     
     results = []

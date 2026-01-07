@@ -276,14 +276,15 @@ def get_admission_details(admission_guid):
 @jwt_required()
 def create_admission_from_appointment(appointment_guid):
     """
-    Admisiona una cita existente creando la orden en el worklist
+    Admisiona una cita existente (tbagendaevents) creando un examen en tbexamination
     
     Path Parameters:
-    - appointment_guid: GUID de la cita
+    - appointment_guid: GUID de la cita en tbagendaevents
     
     Body JSON (opcional):
     {
-        "notes": "notas adicionales"
+        "notes": "notas adicionales",
+        "equipment_id": "uuid del equipo" (opcional, sobreescribe el equipo de la cita)
     }
     
     Returns:
@@ -292,13 +293,15 @@ def create_admission_from_appointment(appointment_guid):
         "data": {
             "admission_number": "ADM001",
             "accession_number": "ACC001",
-            "examination_guid": "uuid"
+            "examination_guid": "uuid",
+            "appointment_guid": "uuid"
         }
     }
     """
     try:
         data = request.get_json() or {}
         notes = data.get('notes', '')
+        equipment_id_override = data.get('equipment_id')
         
         db_config = get_db_config()
         if not db_config:
@@ -310,14 +313,16 @@ def create_admission_from_appointment(appointment_guid):
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Verificar que la cita existe
-        cursor.execute(
-            "SELECT IdPatient, IdEquipment, studytype_id FROM nextris.tbexamination WHERE Guid = %s",
-            (appointment_guid,)
-        )
-        exam_row = cursor.fetchone()
+        # Obtener datos de la cita en tbagendaevents
+        cursor.execute("""
+            SELECT idpatient, idequipment, idexam, idmed_sol, location_id, isadmitted
+            FROM nextris.tbagendaevents 
+            WHERE guid = %s
+        """, (appointment_guid,))
         
-        if not exam_row:
+        appointment_row = cursor.fetchone()
+        
+        if not appointment_row:
             cursor.close()
             connection.close()
             return jsonify({
@@ -325,7 +330,33 @@ def create_admission_from_appointment(appointment_guid):
                 'message': 'Cita no encontrada'
             }), 404
         
-        patient_id, equipment_id, study_type_id = exam_row
+        patient_id, equipment_id, study_type_id, physician_id, location_id, is_admitted = appointment_row
+        
+        # Verificar si ya está admitida
+        if is_admitted:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'La cita ya ha sido admitida'
+            }), 400
+        
+        # Si se proporciona equipment_id, usar ese, sino el de la cita
+        final_equipment_id = equipment_id_override if equipment_id_override else equipment_id
+        
+        # Verificar que el equipo existe
+        if final_equipment_id:
+            cursor.execute(
+                "SELECT guid FROM nextris.isequipment WHERE guid = %s",
+                (final_equipment_id,)
+            )
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Equipo no encontrado'
+                }), 404
         
         # Obtener último número de admisión
         cursor.execute(
@@ -343,16 +374,51 @@ def create_admission_from_appointment(appointment_guid):
         last_acc = last_acc_row[0] if last_acc_row[0] else 0
         new_accession = f"ACC{(last_acc + 1):03d}"
         
-        # Actualizar examen con números de admisión y accession
-        update_query = """
-            UPDATE nextris.tbexamination
-            SET AdmisionNumber = %s,
-                LocalAcc = %s,
-                IsAdmitted = 1
-            WHERE Guid = %s
-        """
+        # Generar Study Instance UID (solo números y puntos, formato DICOM válido)
+        import time
+        import hashlib
+        timestamp = str(int(time.time() * 1000))
+        # Convertir patient_id UUID a número usando hash
+        patient_hash = int(hashlib.md5(str(patient_id).encode()).hexdigest()[:12], 16)
+        study_instance_uid = f"1.2.840.{timestamp}.{patient_hash}"
         
-        cursor.execute(update_query, (new_admission, new_accession, appointment_guid))
+        # Crear nuevo examen en tbexamination
+        cursor.execute("""
+            INSERT INTO nextris.tbexamination (
+                guid, studyinstanceuid, idpatient, studytype_id, idequipment,
+                admisionnumber, localacc, createdon, status, isexecuted,
+                idrequestingphysician, isadmitted
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, 1
+            ) RETURNING guid
+        """, (
+            study_instance_uid,
+            patient_id,
+            study_type_id,
+            final_equipment_id,
+            new_admission,
+            new_accession,
+            physician_id
+        ))
+        
+        examination_guid = cursor.fetchone()[0]
+        
+        # Crear registro en tbReport
+        cursor.execute("""
+            INSERT INTO nextris.tbreport (
+                guid, admnumber, idexamination, idpatient, date
+            ) VALUES (
+                uuid_generate_v4(), %s, %s, %s, NOW()
+            )
+        """, (new_admission, examination_guid, patient_id))
+        
+        # Marcar la cita como admitida
+        cursor.execute("""
+            UPDATE nextris.tbagendaevents
+            SET isadmitted = true
+            WHERE guid = %s
+        """, (appointment_guid,))
+        
         connection.commit()
         
         cursor.close()
@@ -363,7 +429,8 @@ def create_admission_from_appointment(appointment_guid):
             'data': {
                 'admission_number': new_admission,
                 'accession_number': new_accession,
-                'examination_guid': str(appointment_guid)
+                'examination_guid': str(examination_guid),
+                'appointment_guid': str(appointment_guid)
             }
         }), 201
         
@@ -527,7 +594,7 @@ def create_admission_order():
         
         # 2. Obtener datos del paciente
         cursor.execute("""
-            SELECT patientid, name, surname, nationalcode, birthdate, sexcode
+            SELECT guid, name, surname, nationalcode, birthdate, sexcode
             FROM nextris.datapatient
             WHERE guid = %s
         """, (patient_id,))
@@ -593,10 +660,13 @@ def create_admission_order():
                 'message': 'Tipo de estudio no encontrado'
             }), 404
         
-        # 6. Generar Study Instance UID
+        # 6. Generar Study Instance UID (solo números y puntos, formato DICOM válido)
         import time
+        import hashlib
         timestamp = str(int(time.time() * 1000))
-        study_instance_uid = f"1.2.840.{timestamp}.{patient[0]}"
+        # Convertir patient_id UUID a número usando hash
+        patient_hash = int(hashlib.md5(str(patient[0]).encode()).hexdigest()[:12], 16)
+        study_instance_uid = f"1.2.840.{timestamp}.{patient_hash}"
         
         # Nota: Envío HL7 al worklist DICOM comentado para compatibilidad con BD de prueba
         # En producción, descomentar y verificar HL7Service
@@ -615,9 +685,9 @@ def create_admission_order():
             INSERT INTO nextris.tbexamination (
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
-                idseverity, idrequestingphysician, idpricelist
+                idseverity, idrequestingphysician, idpricelist, isadmitted
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s, 1
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -657,6 +727,90 @@ def create_admission_order():
             },
             'message': 'Orden creada exitosamente'
         }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/appointments_to_admit', methods=['GET'])
+@jwt_required()
+def appointments_to_admit():
+    """
+    Obtiene todas las citas no admitidas de hoy (appointments_to_admit)
+    
+    Returns:
+    [
+        {
+            "guid": "uuid",
+            "fullname": "nombre apellido",
+            "comienzo": "datetime",
+            "medref": "médico referencia",
+            "description": "descripción examen",
+            "equipo": "equipo DICOM",
+            "med_solicitante": "médico solicitante"
+        },
+        ...
+    ]
+    """
+    try:
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT tba.guid, 
+                   COALESCE(pat.name || ' ' || pat.surname, 'Sin paciente') as fullname, 
+                   tba.comienzo,
+                   tba.idequipment as equipo,
+                   tba.location_id as location,
+                   COALESCE(us.name || ' ' || us.surname, 'Sin médico') as medref, 
+                   COALESCE(st.description, 'Sin examen') as description,
+                   COALESCE(equip.aetitle, 'Sin equipo') as equipo, 
+                   COALESCE(rp.description, 'Sin médico solicitante') as med_solicitante,
+                   equip.idmodality as modality_id
+            FROM nextris.tbagendaevents tba
+            LEFT JOIN nextris.datapatient pat on tba.idpatient=pat.guid
+            LEFT JOIN nextris.isrequestingphysician rp on tba.idmed_sol=rp.guid
+            LEFT JOIN nextris.tbuser us on tba.idmed=us.guid
+            LEFT JOIN nextris.isstudytype st on tba.idexam=st.guid
+            LEFT JOIN nextris.isequipment equip on equip.guid=tba.idequipment
+            WHERE isadmitted=false
+            AND DATE(tba.comienzo) = CURRENT_DATE
+            ORDER BY tba.comienzo DESC
+        """
+        
+        cursor.execute(query)
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'guid': str(row[0]),
+                'fullname': row[1],
+                'comienzo': row[2].isoformat() if row[2] else None,
+                'equipo': row[3],
+                'location': row[4],
+                'medref': row[5],
+                'description': row[6],
+                'equipment_name': row[7],
+                'med_solicitante': row[8],
+                'modality_id': str(row[9]) if row[9] else None
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': results
+        }), 200
         
     except Exception as e:
         return jsonify({

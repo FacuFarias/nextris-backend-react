@@ -764,7 +764,7 @@ def get_study_types():
     {
         "success": true,
         "data": [
-            ["guid", "code", "description", "modality_code", "bodypart_desc", "studygroup_desc"],
+            ["guid", "code", "description", "modality_code", "bodypart_desc", "studygroup_desc", "modality_id"],
             ...
         ]
     }
@@ -782,7 +782,8 @@ def get_study_types():
                 st.Guid, st.Code, st.Description,
                 m.externalcode as modality_code,
                 bp.Description as bodypart,
-                sg.Description as studygroup
+                sg.Description as studygroup,
+                st.modality_id
             FROM nextris.isstudytype st
             LEFT JOIN nextris.ismodality m ON st.modality_id = m.Guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.Guid
@@ -798,7 +799,8 @@ def get_study_types():
                 row[2] if row[2] else '',  # description
                 row[3] if row[3] else '',  # modality_code
                 row[4] if row[4] else '',  # bodypart
-                row[5] if row[5] else ''   # studygroup
+                row[5] if row[5] else '',  # studygroup
+                row[6] if row[6] else ''   # modality_id
             ])
         
         cursor.close()

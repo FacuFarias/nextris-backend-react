@@ -11,13 +11,7 @@ from apps.api import api_blueprint
 from datetime import datetime
 
 
-def get_db_config():
-    """Obtener configuración de base de datos"""
-    try:
-        from apps.home.routes import config
-        return config
-    except:
-        return None
+from apps.api.utils import get_db_config, update_examination_status
 
 
 def get_user_locations(user_id, connection):
@@ -316,6 +310,9 @@ def execute_examination_order(exam_guid):
         cursor.close()
         connection.close()
         
+        # Actualizar status (letra E)
+        update_examination_status(exam_guid)
+        
         return jsonify({
             'success': True,
             'message': 'Examen ejecutado exitosamente'
@@ -373,6 +370,9 @@ def cancel_examination_execution_order(exam_guid):
         connection.commit()
         cursor.close()
         connection.close()
+        
+        # Actualizar status (quitar letra E)
+        update_examination_status(exam_guid)
         
         return jsonify({
             'success': True,
