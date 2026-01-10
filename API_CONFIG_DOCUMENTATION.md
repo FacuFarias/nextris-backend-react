@@ -10,19 +10,124 @@ Esta documentación describe todas las APIs de configuración del sistema NEXTRI
 
 ## Tabla de Contenidos
 
-1. [Localizaciones](#localizaciones)
-2. [Instalaciones](#instalaciones)
-3. [Modalidades](#modalidades)
-4. [Partes del Cuerpo](#partes-del-cuerpo)
-5. [Grupos de Estudio](#grupos-de-estudio)
-6. [Equipos](#equipos)
-7. [Agendas de Equipos](#agendas-de-equipos)
-8. [Usuarios](#usuarios)
-9. [Roles](#roles)
-10. [Pacientes](#pacientes)
-11. [Médicos Solicitantes](#médicos-solicitantes)
-12. [Agendas de Médicos](#agendas-de-médicos)
-13. [Grupos de Estudio por Médico](#grupos-de-estudio-por-médico)
+1. [Tipos de Estudio](#tipos-de-estudio)
+2. [Localizaciones](#localizaciones)
+3. [Instalaciones](#instalaciones)
+4. [Modalidades](#modalidades)
+5. [Partes del Cuerpo](#partes-del-cuerpo)
+6. [Grupos de Estudio](#grupos-de-estudio)
+7. [Equipos](#equipos)
+8. [Agendas de Equipos](#agendas-de-equipos)
+9. [Usuarios](#usuarios)
+10. [Roles](#roles)
+11. [Pacientes](#pacientes)
+12. [Médicos Solicitantes](#médicos-solicitantes)
+13. [Agendas de Médicos](#agendas-de-médicos)
+14. [Grupos de Estudio por Médico](#grupos-de-estudio-por-médico)
+
+---
+
+## Tipos de Estudio
+
+### GET /config/study-types
+Obtiene todos los tipos de estudio con sus relaciones.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "guid": "uuid",
+      "code": "RX-001",
+      "description": "Radiografía de Tórax",
+      "studygroup": "Radiología Simple",
+      "bodypart": "Tórax",
+      "modality": "CR",
+      "rvu": 1.5,
+      "nofviews": 2
+    }
+  ]
+}
+```
+
+### POST /config/study-types
+Crea un nuevo tipo de estudio.
+
+**Request Body:**
+```json
+{
+  "code": "RX-001",                  // requerido
+  "description": "Radiografía de Tórax",  // requerido
+  "studygroup_id": "uuid",           // requerido
+  "bodypart_id": "uuid",             // requerido
+  "modality_id": "uuid",             // requerido
+  "rvu": 1.5,                        // opcional
+  "nofviews": 2                      // opcional
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "message": "Tipo de estudio creado exitosamente",
+  "data": {
+    "study_type_id": "uuid"
+  }
+}
+```
+
+**Errores comunes:**
+- `400`: code, description, studygroup_id, bodypart_id y modality_id son requeridos
+
+### PUT/PATCH /config/study-types/:study_type_id
+Actualiza un tipo de estudio existente.
+
+**Path Parameters:**
+- `study_type_id` (string, requerido): UUID del tipo de estudio
+
+**Request Body:** (todos los campos son opcionales)
+```json
+{
+  "code": "RX-002",
+  "description": "Radiografía de Tórax PA y Lateral",
+  "studygroup_id": "uuid",
+  "bodypart_id": "uuid",
+  "modality_id": "uuid",
+  "rvu": 2.0,
+  "nofviews": 2
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "Tipo de estudio actualizado exitosamente"
+}
+```
+
+**Errores comunes:**
+- `400`: No hay campos para actualizar
+- `404`: Tipo de estudio no encontrado
+
+### DELETE /config/study-types/:study_type_id
+Elimina un tipo de estudio.
+
+**Path Parameters:**
+- `study_type_id` (string, requerido): UUID del tipo de estudio
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "Tipo de estudio eliminado exitosamente"
+}
+```
+
+**Errores comunes:**
+- `404`: Tipo de estudio no encontrado
 
 ---
 
