@@ -128,7 +128,7 @@ def get_examinations_for_reporting():
         # - Si ambos show_reported y show_ready están activos: mostrar ambos (sin filtro)
         # - Si solo show_reported: mostrar solo reportados (isreported=1)
         # - Si solo show_ready: mostrar solo listos/no reportados (isreported=0)
-        # - Si ninguno está activo: mostrar todos por defecto
+        # - Si ninguno está activo: no mostrar nada
         if show_reported and show_ready:
             # Ambos activos: mostrar todo
             reported_filter = ""
@@ -139,8 +139,8 @@ def get_examinations_for_reporting():
             # Solo listos (no reportados)
             reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
         else:
-            # Ninguno activo: mostrar todo por defecto
-            reported_filter = ""
+            # Ninguno activo: no mostrar nada
+            reported_filter = "AND 1=0"
         
         base_query = f"""
             SELECT e.Guid, 
@@ -157,12 +157,14 @@ def get_examinations_for_reporting():
                    e.studyinstanceuid,
                    eq.Description as equipment,
                    loc.name as location,
-                   e.assignto
+                   e.assignto,
+                   rep.pdfpath
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
+            LEFT JOIN nextris.tbreport rep ON e.Guid = rep.IdExamination
             WHERE eq.location_id IN ({location_placeholders})
             AND e.IsExecuted = 1
             {reported_filter}
@@ -211,7 +213,8 @@ def get_examinations_for_reporting():
                 'study_instance_uid': row[11] or '',
                 'equipment': row[12] or '',
                 'location': row[13] or '',
-                'assigned_to': str(row[14]) if row[14] else None
+                'assigned_to': str(row[14]) if row[14] else None,
+                'pdf_path': row[15] or None
             })
         
         cursor.close()
@@ -286,7 +289,12 @@ def get_examination_report(exam_id):
             SELECT e.Guid, e.IdPatient, e.AdmisionNumber,
                    CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
                    e.studytype_id, e.history, e.clinicalquestion,
-                   e.laterality_id, e.stat, e.othersdetails
+                   e.laterality_id, e.stat, e.othersdetails,
+                   dp.Name as first_name,
+                   dp.Surname as last_name,
+                   EXTRACT(YEAR FROM AGE(CURRENT_DATE, dp.birthdate))::INTEGER as age,
+                   dp.sexcode,
+                   e.LocalAcc as accession_number
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             WHERE e.Guid = %s
@@ -311,6 +319,11 @@ def get_examination_report(exam_id):
         laterality_id = exam[7]
         stat = exam[8]
         others_details = exam[9]
+        first_name = exam[10]
+        last_name = exam[11]
+        age = exam[12]
+        sex = exam[13]
+        accession_number = exam[14]
         
         # Obtener reporte
         cursor.execute("""
@@ -406,7 +419,12 @@ def get_examination_report(exam_id):
                 'exam_id': str(exam_guid),
                 'patient_id': str(patient_id) if patient_id else None,
                 'admission_number': admission_number or '',
+                'accession_number': accession_number or '',
                 'patient_name': patient_name or '',
+                'first_name': first_name or '',
+                'last_name': last_name or '',
+                'age': age,
+                'sex': sex or '',
                 'findings': findings,
                 'impressions': impressions,
                 'techniques': techniques,
@@ -522,7 +540,7 @@ def update_examination_report(exam_id):
                 updates.append("Conclusions = %s")
                 params.append(conclusions)
             
-            updates.append("WasSaved = 1")
+            updates.append("WasSaved = true")
             updates.append("Date = NOW()")
             
             if updates:
@@ -543,7 +561,7 @@ def update_examination_report(exam_id):
                     Findings, Impressions, Techniques, Conclusions,
                     WasSaved, CreatedOn, Date
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, 1, NOW(), NOW()
+                    %s, %s, %s, %s, %s, %s, %s, %s, true, NOW(), NOW()
                 )
             """, (
                 report_id, exam_id, patient_id, admission_number,
@@ -1272,28 +1290,178 @@ def save_report(exam_id):
         }), 500
 
 
+@api_blueprint.route('/reports/next-exam', methods=['POST'])
+@jwt_required()
+def get_next_exam():
+    """
+    Obtiene el siguiente examen disponible basado en los filtros configurados
+    
+    Body JSON:
+    {
+        "current_exam_id": "uuid",
+        "show_ready": true/false,
+        "show_reported": true/false,
+        "assigned_to_me": true/false
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "uuid",
+            "study_instance_uid": "...",
+            "patient_name": "...",
+            ...
+        }
+    }
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json(force=True, silent=True) or {}
+        
+        current_exam_id = data.get('current_exam_id')
+        show_ready = data.get('show_ready', True)
+        show_reported = data.get('show_reported', False)
+        assigned_to_me = data.get('assigned_to_me', False)
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        user_locations = get_user_locations(user_id, connection)
+        
+        if not user_locations:
+            connection.close()
+            return jsonify({
+                'success': True,
+                'data': None
+            }), 200
+        
+        cursor = connection.cursor()
+        
+        # Obtener la fecha de creación del examen actual para buscar el siguiente
+        cursor.execute("""
+            SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+        """, (current_exam_id,))
+        current_exam = cursor.fetchone()
+        current_created_on = current_exam[0] if current_exam else None
+        
+        location_placeholders = ','.join(['%s'] * len(user_locations))
+        
+        # Aplicar el mismo filtro de reportado que en la lista
+        if show_reported and show_ready:
+            reported_filter = ""
+        elif show_reported:
+            reported_filter = "AND e.IsReported = 1"
+        elif show_ready:
+            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+        else:
+            reported_filter = "AND 1=0"
+        
+        # Query para obtener el siguiente examen
+        query = f"""
+            SELECT e.Guid, 
+                   e.studyinstanceuid,
+                   CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                   dp.nationalcode,
+                   st.Description as study_type,
+                   e.LocalAcc,
+                   COALESCE(e.IsReported, 0) as is_reported
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
+            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
+            LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
+            WHERE eq.location_id IN ({location_placeholders})
+            AND e.IsExecuted = 1
+            AND e.Guid != %s
+            {reported_filter}
+        """
+        
+        params = list(user_locations)
+        params.append(current_exam_id)
+        
+        # Aplicar filtro de asignación
+        if assigned_to_me:
+            query += " AND e.assignto = %s"
+            params.append(user_id)
+        
+        # Ordenar y limitar a 1
+        if current_created_on:
+            query += " AND e.CreatedOn <= %s"
+            params.append(current_created_on)
+        
+        query += " ORDER BY e.CreatedOn DESC LIMIT 1"
+        
+        cursor.execute(query, params)
+        next_exam = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if next_exam:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'guid': str(next_exam[0]),
+                    'study_instance_uid': next_exam[1] or '',
+                    'patient_name': next_exam[2] or '',
+                    'patient_dni': next_exam[3] or '',
+                    'study_type': next_exam[4] or '',
+                    'accession_number': next_exam[5] or '',
+                    'is_reported': bool(next_exam[6])
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'data': None,
+                'message': 'No hay más exámenes disponibles'
+            }), 200
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
 @api_blueprint.route('/reports/<exam_id>/sign', methods=['POST'])
 @jwt_required()
 def sign_report(exam_id):
     """
-    Firma un reporte médico (marca como reportado)
+    Firma un reporte médico (marca como reportado) y opcionalmente devuelve el siguiente examen
     
     Path:
     - exam_id: GUID del examen
     
     Body JSON (opcional):
     {
-        "reporter_physician_id": "uuid" (opcional, se usa JWT identity si no se provee)
+        "reporter_physician_id": "uuid" (opcional, se usa JWT identity si no se provee),
+        "get_next": true/false (opcional, default: false),
+        "show_ready": true/false (opcional, para obtener siguiente),
+        "show_reported": true/false (opcional, para obtener siguiente),
+        "assigned_to_me": true/false (opcional, para obtener siguiente)
     }
     
     Returns:
     {
         "success": true,
-        "message": "Reporte firmado exitosamente"
+        "message": "Reporte firmado exitosamente",
+        "next_exam": {
+            "guid": "uuid",
+            "study_instance_uid": "...",
+            ...
+        } (opcional, solo si get_next=true)
     }
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(force=True, silent=True) or {}
         
         # Obtener ID del médico que firma
         reporter_physician_id = data.get('reporter_physician_id')
@@ -1311,25 +1479,327 @@ def sign_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Marcar el examen como reportado
-        query = "UPDATE nextris.tbexamination SET isreported=1 WHERE guid=%s"
-        cursor.execute(query, (exam_id,))
+        # Obtener datos del examen para el nombre del PDF
+        cursor.execute("""
+            SELECT e.LocalAcc, p.PatientId, p.Name, p.Surname, e.IdPatient
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
+            WHERE e.Guid = %s
+        """, (exam_id,))
+        
+        exam_data = cursor.fetchone()
+        if not exam_data:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Examen no encontrado: {exam_id}'
+            }), 404
+        
+        accession_number, patient_id, patient_name, patient_surname, patient_guid = exam_data
+        
+        # Crear nombre del PDF: <acc_number>_<patient_id>_<patient_name>.pdf
+        # Limpiar caracteres especiales del nombre y manejar valores None
+        clean_surname = (patient_surname or '').strip().replace(' ', '_')
+        clean_name = (patient_name or '').strip().replace(' ', '_')
+        full_name = f"{clean_surname}_{clean_name}".strip('_')
+        full_name = ''.join(c for c in full_name if c.isalnum() or c == '_') or 'SinNombre'
+        
+        acc_num = accession_number or 'SinACC'
+        pat_id = patient_id or 'SinID'
+        
+        pdf_filename = f"{acc_num}_{pat_id}_{full_name}.pdf"
+        pdf_relative_path = f"output_pdfs/{pdf_filename}"
+        
+        # Marcar el examen como reportado, asignar médico y registrar fecha
+        query = """
+            UPDATE nextris.tbexamination 
+            SET IsReported=1, assignto=%s, reportdate=CURRENT_TIMESTAMP
+            WHERE Guid=%s
+        """
+        cursor.execute(query, (reporter_physician_id, exam_id))
+        
+        if cursor.rowcount == 0:
+            connection.rollback()
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Examen no encontrado: {exam_id}'
+            }), 404
+        
+        # Verificar si existe el reporte, si no, crearlo
+        cursor.execute("SELECT guid FROM nextris.tbreport WHERE idexamination = %s", (exam_id,))
+        report_exists = cursor.fetchone()
+        
+        if not report_exists:
+            # Crear el reporte si no existe
+            report_guid = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO nextris.tbreport (
+                    guid, idexamination, idpatient, admnumber, 
+                    pdfpath, wassaved, createdon, date, iduser
+                ) VALUES (
+                    %s, %s, %s, %s, %s, true, NOW(), NOW(), %s
+                )
+            """, (report_guid, exam_id, patient_guid, accession_number, 
+                  pdf_relative_path, reporter_physician_id))
+        else:
+            # Actualizar pdfpath en tbreport existente
+            cursor.execute("""
+                UPDATE nextris.tbreport
+                SET pdfpath = %s, iduser = %s
+                WHERE idexamination = %s
+            """, (pdf_relative_path, reporter_physician_id, exam_id))
         
         connection.commit()
-        cursor.close()
-        connection.close()
         
         # Actualizar estado (si existe la función)
         try:
             from apps.home.routes import updatestatus
             updatestatus(exam_id)
-        except:
+        except Exception:
             pass
         
-        return jsonify({
+        # Generar PDF del reporte
+        print(f"[SIGN] Generando PDF para exam_id: {exam_id}, filename: {pdf_filename}")
+        try:
+            from apps.home.controllers.report_controller import generate_report_pdf_with_signature
+            pdf_path = generate_report_pdf_with_signature(exam_id, pdf_filename=pdf_filename)
+            
+            print(f"[SIGN] PDF generado, ruta retornada: {pdf_path}")
+            print(f"[SIGN] ¿Existe el archivo?: {os.path.exists(pdf_path) if pdf_path else 'pdf_path es None'}")
+            
+            if not pdf_path or not os.path.exists(pdf_path):
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': f'Error: El PDF no se pudo generar. Ruta: {pdf_path}'
+                }), 500
+                
+        except Exception as pdf_error:
+            # FALLAR si no se puede generar el PDF
+            import traceback
+            traceback.print_exc()
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Error al generar PDF: {str(pdf_error)}'
+            }), 500
+        
+        # Obtener el siguiente examen si se solicita
+        next_exam = None
+        get_next = data.get('get_next', False)
+        
+        if get_next:
+            try:
+                show_ready = data.get('show_ready', True)
+                show_reported = data.get('show_reported', False)
+                assigned_to_me = data.get('assigned_to_me', False)
+                
+                user_locations = get_user_locations(reporter_physician_id, connection)
+                
+                if user_locations:
+                    cursor = connection.cursor()
+                    
+                    # Obtener la fecha de creación del examen actual
+                    cursor.execute("""
+                        SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+                    """, (exam_id,))
+                    current_exam = cursor.fetchone()
+                    current_created_on = current_exam[0] if current_exam else None
+                    
+                    location_placeholders = ','.join(['%s'] * len(user_locations))
+                    
+                    # Aplicar el mismo filtro de reportado que en la lista
+                    if show_reported and show_ready:
+                        reported_filter = ""
+                    elif show_reported:
+                        reported_filter = "AND e.IsReported = 1"
+                    elif show_ready:
+                        reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+                    else:
+                        reported_filter = "AND 1=0"
+                    
+                    # Query para obtener el siguiente examen
+                    query = f"""
+                        SELECT e.Guid, 
+                               e.studyinstanceuid,
+                               CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                               dp.nationalcode,
+                               st.Description as study_type,
+                               e.LocalAcc,
+                               COALESCE(e.IsReported, 0) as is_reported
+                        FROM nextris.tbexamination e
+                        LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
+                        LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
+                        LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
+                        WHERE eq.location_id IN ({location_placeholders})
+                        AND e.IsExecuted = 1
+                        AND e.Guid != %s
+                        {reported_filter}
+                    """
+                    
+                    params = list(user_locations)
+                    params.append(exam_id)
+                    
+                    # Aplicar filtro de asignación
+                    if assigned_to_me:
+                        query += " AND e.assignto = %s"
+                        params.append(reporter_physician_id)
+                    
+                    # Ordenar y limitar a 1
+                    if current_created_on:
+                        query += " AND e.CreatedOn <= %s"
+                        params.append(current_created_on)
+                    
+                    query += " ORDER BY e.CreatedOn DESC LIMIT 1"
+                    
+                    cursor.execute(query, params)
+                    next_exam_row = cursor.fetchone()
+                    
+                    if next_exam_row:
+                        next_exam = {
+                            'guid': str(next_exam_row[0]),
+                            'study_instance_uid': next_exam_row[1] or '',
+                            'patient_name': next_exam_row[2] or '',
+                            'patient_dni': next_exam_row[3] or '',
+                            'study_type': next_exam_row[4] or '',
+                            'accession_number': next_exam_row[5] or '',
+                            'is_reported': bool(next_exam_row[6])
+                        }
+                    
+                    cursor.close()
+            except Exception as next_error:
+                print(f"[SIGN] Error al obtener siguiente examen: {str(next_error)}")
+                # No fallar si hay error al obtener el siguiente, solo loguearlo
+        
+        # Cerrar conexión
+        cursor.close()
+        connection.close()
+        
+        response_data = {
             'success': True,
             'message': 'Reporte firmado exitosamente'
-        }), 200
+        }
+        
+        if next_exam:
+            response_data['next_exam'] = next_exam
+        
+        return jsonify(response_data), 200
+        
+    except psycopg2.Error as db_error:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Error de base de datos: {str(db_error)}'
+        }), 500
+    except Exception as e:
+        print(f"[SIGN ERROR] Error inesperado al firmar reporte: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/verify-credentials', methods=['POST'])
+@jwt_required()
+def verify_credentials():
+    """
+    Verifica las credenciales del usuario actual
+    Útil para acciones críticas como firmar reportes
+    
+    Headers:
+    - Authorization: Bearer <token>
+    
+    Body JSON:
+    {
+        "password": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Credenciales válidas"
+    }
+    
+    Error Response:
+    {
+        "success": false,
+        "message": "Credenciales inválidas"
+    }
+    """
+    try:
+        data = request.get_json(force=True, silent=True)
+        
+        if not data or 'password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'La contraseña es requerida'
+            }), 400
+        
+        password = data.get('password')
+        user_id = get_jwt_identity()
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener hash de contraseña del usuario
+        cursor.execute("""
+            SELECT password FROM nextris.tbuser 
+            WHERE guid = %s
+        """, (user_id,))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        
+        if not result:
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        stored_password = result[0]
+        
+        # Verificar contraseña (asumiendo que está hasheada con bcrypt o similar)
+        try:
+            from werkzeug.security import check_password_hash
+            
+            if check_password_hash(stored_password, password):
+                return jsonify({
+                    'success': True,
+                    'message': 'Credenciales válidas'
+                }), 200
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Credenciales inválidas'
+                }), 401
+        except:
+            # Si no está hasheada, comparar directamente (no recomendado en producción)
+            if stored_password == password:
+                return jsonify({
+                    'success': True,
+                    'message': 'Credenciales válidas'
+                }), 200
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Credenciales inválidas'
+                }), 401
         
     except Exception as e:
         return jsonify({
@@ -1436,6 +1906,52 @@ def get_report_pdf(exam_id):
             }), 404
         
         return send_file(absolute_path, as_attachment=False, mimetype='application/pdf')
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/pdfs/<path:filename>', methods=['GET'])
+def serve_pdf(filename):
+    """
+    Sirve archivos PDF directamente desde output_pdfs
+    Endpoint público sin autenticación para abrir PDFs en nueva pestaña
+    
+    Path:
+    - filename: Nombre del archivo PDF (ej: ACC006_NR00000013_Díaz_Lucía.pdf)
+    
+    URL completa desde pdf_path:
+    - Si pdf_path = "output_pdfs/ACC006_NR00000013_Díaz_Lucía.pdf"
+    - URL = "/api/pdfs/ACC006_NR00000013_Díaz_Lucía.pdf"
+    
+    Returns:
+    - Archivo PDF
+    """
+    try:
+        # Sanitizar el nombre del archivo para evitar path traversal
+        safe_filename = os.path.basename(filename)
+        
+        # Construir ruta absoluta al PDF
+        pdf_path = os.path.join('/var/www/nextris-dev-react/output_pdfs', safe_filename)
+        
+        # Verificar que el archivo existe
+        if not os.path.exists(pdf_path):
+            return jsonify({
+                'success': False,
+                'message': 'PDF no encontrado'
+            }), 404
+        
+        # Verificar que es realmente un archivo PDF
+        if not pdf_path.lower().endswith('.pdf'):
+            return jsonify({
+                'success': False,
+                'message': 'Archivo no válido'
+            }), 400
+        
+        return send_file(pdf_path, as_attachment=False, mimetype='application/pdf')
         
     except Exception as e:
         return jsonify({
