@@ -49,6 +49,9 @@ def get_examinations_for_reporting():
     - show_reported (optional): true para incluir exámenes reportados (isreported=1)
     - show_ready (optional): true para incluir exámenes listos para reportar (isreported=0)
     - assigned_to_me (optional): true para mostrar solo exámenes asignados al usuario actual
+    - modality_id (optional): GUID de la modalidad
+    - body_part_id (optional): GUID de la parte del cuerpo
+    - study_group_id (optional): GUID del grupo de estudio
     - page (optional): Número de página (default: 1)
     - per_page (optional): Items por página (default: 50, max: 100)
     
@@ -103,6 +106,9 @@ def get_examinations_for_reporting():
         show_reported = request.args.get('show_reported', 'false').lower() == 'true'
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
+        modality_id = request.args.get('modality_id')
+        body_part_id = request.args.get('body_part_id')
+        study_group_id = request.args.get('study_group_id')
         
         connection = psycopg2.connect(**config)
         user_locations = get_user_locations(user_id, connection)
@@ -181,6 +187,21 @@ def get_examinations_for_reporting():
         if assigned_to_me:
             base_query += " AND e.assignto = %s"
             params.append(user_id)
+        
+        # Aplicar filtro de modalidad por GUID
+        if modality_id:
+            base_query += " AND e.modality_id = %s"
+            params.append(modality_id)
+        
+        # Aplicar filtro de parte del cuerpo por GUID
+        if body_part_id:
+            base_query += " AND e.bodypart_id = %s"
+            params.append(body_part_id)
+        
+        # Aplicar filtro de grupo de estudio
+        if study_group_id:
+            base_query += " AND st.studygroup_id = %s"
+            params.append(study_group_id)
         
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"

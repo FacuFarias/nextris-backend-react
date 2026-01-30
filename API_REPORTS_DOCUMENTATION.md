@@ -22,6 +22,9 @@ Retrieves a paginated list of executed examinations that are not yet reported, f
 - `show_reported` (optional): true para incluir exámenes reportados (finalizados, isreported=1)
 - `show_ready` (optional): true para incluir exámenes listos para reportar (no reportados, isreported=0)
 - `assigned_to_me` (optional): true para mostrar solo exámenes asignados al usuario actual
+- `modality_id` (optional): GUID de la modalidad para filtrar
+- `body_part_id` (optional): GUID de la parte del cuerpo para filtrar
+- `study_group_id` (optional): GUID del grupo de estudio para filtrar
 - `page` (optional): Número de página (default: 1)
 - `per_page` (optional): Items por página (default: 50, máximo: 100)
 
@@ -56,6 +59,18 @@ GET /api/examinations/for-reporting?assigned_to_me=true&show_ready=true
 
 # Exámenes reportados asignados a mí
 GET /api/examinations/for-reporting?assigned_to_me=true&show_reported=true
+
+# Filtrar por modalidad específica
+GET /api/examinations/for-reporting?show_ready=true&modality_id=abc-123-guid
+
+# Filtrar por parte del cuerpo
+GET /api/examinations/for-reporting?show_ready=true&body_part_id=xyz-789-guid
+
+# Filtrar por grupo de estudio
+GET /api/examinations/for-reporting?show_ready=true&study_group_id=def-456-guid
+
+# Combinar múltiples filtros
+GET /api/examinations/for-reporting?show_ready=true&modality_id=abc-123&body_part_id=xyz-789&study_group_id=def-456&assigned_to_me=true
 ```
 
 #### Response
@@ -79,7 +94,8 @@ GET /api/examinations/for-reporting?assigned_to_me=true&show_reported=true
         "is_executed": true,
         "equipment": "CT-01",
         "location": "Sede Central",
-        "assigned_to": "uuid-del-medico-asignado"
+        "assigned_to": "uuid-del-medico-asignado",
+        "pdf_path": "output_pdfs/ACC001_NR00000001_García_Juan.pdf"
       }
     ],
     "page": 1,
@@ -485,6 +501,12 @@ Catálogo de lateralidades (Izquierda, Derecha, Bilateral, etc.)
 
 ## Changelog
 
+### Version 1.1.0 (2026-01-15)
+- Agregado campo `pdf_path` en GET /examinations/for-reporting
+- Nuevo endpoint público GET /pdfs/{filename} para servir PDFs sin autenticación
+- Mejoras en la generación automática de PDFs al firmar reportes
+- Formato de nombres de PDF: `{ACC}_{PatientID}_{Surname}_{Name}.pdf`
+
 ### Version 1.0.0 (2026-01-03)
 - Endpoints iniciales para redacción de informes
 - GET /examinations/for-reporting
@@ -492,3 +514,62 @@ Catálogo de lateralidades (Izquierda, Derecha, Bilateral, etc.)
 - PUT/PATCH /examinations/{exam_id}/report
 - GET /examinations/{exam_id}/notes
 - PUT/PATCH /examinations/{exam_id}/notes
+
+---
+
+## Endpoints de Visualización de PDFs
+
+### 11. GET /pdfs/{filename}
+Sirve archivos PDF directamente desde el servidor.
+
+#### Description
+Endpoint público (sin autenticación) para servir archivos PDF de reportes médicos. Permite abrir PDFs directamente en el navegador o en nuevas pestañas.
+
+#### Parameters
+**Path Parameters:**
+- `filename` (required): Nombre del archivo PDF
+
+#### Request
+```http
+GET /api/pdfs/ACC001_NR00000001_García_Juan.pdf
+```
+
+**Nota:** No requiere token de autenticación.
+
+#### Response
+**Status Code:** 200 OK
+**Content-Type:** application/pdf
+
+Devuelve el archivo PDF directamente.
+
+#### Errors
+```json
+{
+  "success": false,
+  "message": "PDF no encontrado"
+}
+```
+
+**Status Codes:**
+- `200`: Success - PDF encontrado y servido
+- `400`: Bad Request - Archivo no válido (no es PDF)
+- `404`: Not Found - PDF no encontrado
+- `500`: Internal Server Error
+
+#### Uso desde Frontend
+```javascript
+// Extraer nombre del archivo desde pdf_path
+const pdfPath = "output_pdfs/ACC001_NR00000001_García_Juan.pdf";
+const filename = pdfPath.split('/').pop();
+
+// Construir URL completa
+const pdfUrl = `${API_BASE_URL}/api/pdfs/${filename}`;
+
+// Abrir en nueva pestaña
+window.open(pdfUrl, '_blank');
+```
+
+#### Seguridad
+- El endpoint sanitiza el nombre del archivo para prevenir path traversal
+- Solo sirve archivos con extensión `.pdf`
+- Los archivos se sirven desde `/var/www/nextris-dev-react/output_pdfs/`
