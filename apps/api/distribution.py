@@ -126,9 +126,14 @@ def get_examinations_for_distribution():
                 END as estado,
                 COALESCE(u.name || ' ' || COALESCE(u.surname, ''), u.username, '') as medico_autor,
                 COALESCE(rp.description, '') as medico_solicitante,
-                COALESCE(e.stat, 'N') as urgencia
+                COALESCE(e.stat, 'N') as urgencia,
+                COALESCE(e.isimage, 0) as isimage,
+                COALESCE(e.isreported, 0) as isreported,
+                COALESCE(e.isexecuted, 0) as isexecuted,
+                COALESCE(e.ispublicated, 0) as ispublicated,
+                e.localacc as accession_number
             FROM nextris.tbexamination e
-            LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.patientid
+            LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             LEFT JOIN nextris.isequipment eq ON e.idequipment = eq.guid
             LEFT JOIN nextris.isrequestingphysician rp ON e.idrequestingphysician = rp.guid
@@ -171,7 +176,12 @@ def get_examinations_for_distribution():
                 'estado': row[5],
                 'medico_autor': row[6],
                 'medico_solicitante': row[7],
-                'urgencia': row[8]
+                'urgencia': row[8],
+                'isimage': bool(row[9]),
+                'isreported': bool(row[10]),
+                'isexecuted': bool(row[11]),
+                'ispublicated': bool(row[12]),
+                'accession_number': row[13] or ''
             })
         
         return jsonify({
@@ -242,22 +252,24 @@ def send_report_email(exam_id):
         query = """
             SELECT 
                 r.pdfpath,
-                p.name as patient_name,
+                CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
-                o.accession_number,
+                ex.localacc as accession_number,
                 f.smtp_server,
                 f.smtp_port,
                 f.smtp_user,
                 f.smtp_password,
                 f.smtp_from,
                 f.smtp_from_name,
-                f.use_tls
+                f.use_tls,
+                ex.studyinstanceuid,
+                COALESCE(ex.isimage, 0) as has_images
             FROM nextris.tbexamination ex
-            INNER JOIN nextris.tborder o ON ex.order_id = o.guid
-            INNER JOIN nextris.tbpatient p ON o.patient_id = p.guid
-            INNER JOIN nextris.isstudytype st ON o.studytype_id = st.guid
+            LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
+            LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
-            LEFT JOIN nextris.tblocation l ON o.location_id = l.guid
+            LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
+            LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
             WHERE ex.guid = %s
         """
@@ -277,13 +289,18 @@ def send_report_email(exam_id):
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
-        smtp_server = result[4] or 'smtp.gmail.com'
-        smtp_port = result[5] or 587
-        smtp_user = result[6]
-        smtp_password = result[7]
-        smtp_from = result[8] or smtp_user
-        smtp_from_name = result[9] or 'NextRIS'
+        
+        # Configuración SMTP con valores por defecto
+        smtp_server = result[4] or os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = result[5] or int(os.environ.get('SMTP_PORT', '587'))
+        smtp_user = result[6] or os.environ.get('SMTP_USER')
+        smtp_password = result[7] or os.environ.get('SMTP_PASSWORD')
+        smtp_from = result[8] or smtp_user or os.environ.get('SMTP_FROM')
+        smtp_from_name = result[9] or os.environ.get('SMTP_FROM_NAME', 'NextRIS')
         use_tls = result[10] if result[10] is not None else True
+        
+        study_uid = result[11]
+        has_images = bool(result[12])
         
         if not pdf_path or not os.path.exists(pdf_path):
             cursor.close()
@@ -293,18 +310,38 @@ def send_report_email(exam_id):
                 'message': 'PDF del informe no encontrado'
             }), 404
         
+        if not smtp_user or not smtp_password:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración SMTP incompleta. Configure SMTP_USER y SMTP_PASSWORD en las variables de entorno o en la base de datos.',
+                'data': {
+                    'smtp_configured': False,
+                    'smtp_server': smtp_server,
+                    'smtp_port': smtp_port,
+                    'smtp_user_exists': bool(smtp_user),
+                    'smtp_password_exists': bool(smtp_password)
+                }
+            }), 500
+        
         # Crear mensaje de email
         msg = MIMEMultipart()
         msg['From'] = f"{smtp_from_name} <{smtp_from}>"
         msg['To'] = email
         msg['Subject'] = f'Informe Médico - {study_type}'
         
+        # Generar link del visor DICOM si hay imágenes
+        viewer_link = ""
+        if has_images and study_uid:
+            viewer_link = f"\n\nPara visualizar las imágenes médicas, acceda al siguiente enlace:\nhttps://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}\n"
+        
         body = f"""
 Estimado/a {patient_name},
 
 Adjunto encontrará el informe médico correspondiente al estudio: {study_type}
 Número de acceso: {accession_number}
-
+{viewer_link}
 Este es un mensaje automático, por favor no responder.
 
 Saludos cordiales,
@@ -343,12 +380,22 @@ Saludos cordiales,
         server.quit()
         
         # Registrar envío en cola de emails
-        queue_query = """
-            INSERT INTO nextris.tbemailqueue (
-                guid, examination_id, recipient_email, status, sent_at
-            ) VALUES (%s, %s, %s, 'sent', NOW())
+        # Nota: tbemailqueue table doesn't exist yet, so we skip this for now
+        # queue_query = """
+        #     INSERT INTO nextris.tbemailqueue (
+        #         guid, examination_id, recipient_email, status, sent_at
+        #     ) VALUES (%s, %s, %s, 'sent', NOW())
+        # """
+        # cursor.execute(queue_query, (str(uuid.uuid4()), exam_id, email))
+        # connection.commit()
+        
+        # Mark examination as published/sent
+        update_query = """
+            UPDATE nextris.tbexamination 
+            SET ispublicated = 1
+            WHERE guid = %s
         """
-        cursor.execute(queue_query, (str(uuid.uuid4()), exam_id, email))
+        cursor.execute(update_query, (exam_id,))
         connection.commit()
         
         cursor.close()
@@ -413,9 +460,9 @@ def update_examination_email(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Obtener el order_id del examen
+        # Obtener el patient_id del examen
         cursor.execute(
-            "SELECT order_id FROM nextris.tbexamination WHERE guid = %s",
+            "SELECT idpatient FROM nextris.tbexamination WHERE guid = %s",
             (exam_id,)
         )
         result = cursor.fetchone()
@@ -428,12 +475,12 @@ def update_examination_email(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
         
-        order_id = result[0]
+        patient_id = result[0]
         
-        # Actualizar email en la orden
+        # Actualizar email del paciente
         cursor.execute(
-            "UPDATE nextris.tborder SET patient_email = %s WHERE guid = %s",
-            (email, order_id)
+            "UPDATE nextris.datapatient SET email = %s WHERE guid = %s",
+            (email, patient_id)
         )
         
         connection.commit()
@@ -456,16 +503,13 @@ def update_examination_email(exam_id):
 @jwt_required()
 def view_examination_report(exam_id):
     """
-    Visualiza o descarga el PDF del informe de un examen
+    Visualiza el PDF del informe de un examen en el navegador
     
     Path:
     - exam_id: GUID del examen
     
-    Query Parameters:
-    - download (optional): 'true' para forzar descarga, 'false' para visualizar en navegador (default: false)
-    
     Returns:
-    - Archivo PDF del reporte
+    - Archivo PDF del reporte para visualizar en el navegador
     """
     try:
         config = get_db_config()
@@ -478,15 +522,11 @@ def view_examination_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Obtener ruta del PDF y nombre del paciente para el filename
+        # Obtener ruta del PDF
         query = """
-            SELECT 
-                r.pdfpath,
-                CONCAT(dp.name, '_', dp.surname, '_', st.description) as filename_base
+            SELECT r.pdfpath
             FROM nextris.tbreport r
             INNER JOIN nextris.tbexamination e ON r.idexamination = e.guid
-            LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.patientid
-            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             WHERE e.guid = %s
         """
         cursor.execute(query, (exam_id,))
@@ -502,7 +542,6 @@ def view_examination_report(exam_id):
             }), 404
         
         pdf_path = result[0]
-        filename_base = result[1] if result[1] else 'informe'
         
         # Normalizar y verificar que el archivo existe
         absolute_path = os.path.abspath(os.path.normpath(pdf_path))
@@ -513,16 +552,9 @@ def view_examination_report(exam_id):
                 'message': 'Archivo PDF no encontrado en el sistema'
             }), 404
         
-        # Verificar si se solicita descarga
-        download = request.args.get('download', 'false').lower() == 'true'
-        
-        # Limpiar filename_base de caracteres no permitidos
-        filename = f"{filename_base.replace(' ', '_').replace('/', '_')}.pdf"
-        
+        # Enviar el PDF para visualizar en el navegador (no como descarga)
         return send_file(
             absolute_path,
-            as_attachment=download,
-            download_name=filename if download else None,
             mimetype='application/pdf'
         )
         
@@ -577,7 +609,7 @@ def get_dicom_viewer_info(exam_id):
                 TO_CHAR(e.createdon, 'DD/MM/YYYY') as study_date,
                 e.localacc
             FROM nextris.tbexamination e
-            LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.patientid
+            LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             WHERE e.guid = %s
         """

@@ -77,7 +77,13 @@ def get_examinations_for_reporting():
                 "study_instance_uid": "1.2.840...",
                 "equipment": "equipo",
                 "location": "ubicación",
-                "assigned_to": "uuid del médico asignado"
+                "assigned_to": "uuid del médico asignado",
+                "modality_id": "uuid",
+                "modality_description": "CT",
+                "study_group_id": "uuid",
+                "study_group_description": "Radiología",
+                "bodypart_id": "uuid",
+                "bodypart_description": "Tórax"
             }
         ],
         "total": 150,
@@ -109,6 +115,8 @@ def get_examinations_for_reporting():
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
+        
+        print(f"[PARAMS] modality_id={modality_id}, body_part_id={body_part_id}, study_group_id={study_group_id}")
         
         connection = psycopg2.connect(**config)
         user_locations = get_user_locations(user_id, connection)
@@ -164,13 +172,25 @@ def get_examinations_for_reporting():
                    eq.Description as equipment,
                    loc.name as location,
                    e.assignto,
-                   rep.pdfpath
+                   rep.pdfpath,
+                   st.modality_id,
+                   mod.description as modality_description,
+                   st.studygroup_id,
+                   sg.description as study_group_description,
+                   st.bodypart_id,
+                   bp.description as bodypart_description,
+                   e.blockby,
+                   CONCAT(blocker.name, ' ', blocker.surname) as blocked_by_name
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
             LEFT JOIN nextris.tbreport rep ON e.Guid = rep.IdExamination
+            LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
+            LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
+            LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
+            LEFT JOIN nextris.tbuser blocker ON e.blockby::text = blocker.guid
             WHERE eq.location_id IN ({location_placeholders})
             AND e.IsExecuted = 1
             {reported_filter}
@@ -190,16 +210,19 @@ def get_examinations_for_reporting():
         
         # Aplicar filtro de modalidad por GUID
         if modality_id:
-            base_query += " AND e.modality_id = %s"
+            print(f"[FILTER] Aplicando filtro modality_id: {modality_id}")
+            base_query += " AND st.modality_id = %s"
             params.append(modality_id)
         
         # Aplicar filtro de parte del cuerpo por GUID
         if body_part_id:
-            base_query += " AND e.bodypart_id = %s"
+            print(f"[FILTER] Aplicando filtro body_part_id: {body_part_id}")
+            base_query += " AND st.bodypart_id = %s"
             params.append(body_part_id)
         
         # Aplicar filtro de grupo de estudio
         if study_group_id:
+            print(f"[FILTER] Aplicando filtro study_group_id: {study_group_id}")
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
         
@@ -235,7 +258,15 @@ def get_examinations_for_reporting():
                 'equipment': row[12] or '',
                 'location': row[13] or '',
                 'assigned_to': str(row[14]) if row[14] else None,
-                'pdf_path': row[15] or None
+                'pdf_path': row[15] or None,
+                'modality_id': str(row[16]) if row[16] else None,
+                'modality_description': row[17] or '',
+                'study_group_id': str(row[18]) if row[18] else None,
+                'study_group_description': row[19] or '',
+                'bodypart_id': str(row[20]) if row[20] else None,
+                'bodypart_description': row[21] or '',
+                'blocked_by': str(row[22]) if row[22] else None,
+                'blocked_by_name': row[23] or None
             })
         
         cursor.close()
@@ -315,7 +346,9 @@ def get_examination_report(exam_id):
                    dp.Surname as last_name,
                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, dp.birthdate))::INTEGER as age,
                    dp.sexcode,
-                   e.LocalAcc as accession_number
+                   e.LocalAcc as accession_number,
+                   COALESCE(e.IsReported, 0) as is_reported,
+                   e.studyinstanceuid
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             WHERE e.Guid = %s
@@ -345,6 +378,8 @@ def get_examination_report(exam_id):
         age = exam[12]
         sex = exam[13]
         accession_number = exam[14]
+        is_reported = exam[15]
+        study_instance_uid = exam[16]
         
         # Obtener reporte
         cursor.execute("""
@@ -446,6 +481,8 @@ def get_examination_report(exam_id):
                 'last_name': last_name or '',
                 'age': age,
                 'sex': sex or '',
+                'study_instance_uid': study_instance_uid or '',
+                'is_reported': bool(is_reported),
                 'findings': findings,
                 'impressions': impressions,
                 'techniques': techniques,
@@ -1322,7 +1359,10 @@ def get_next_exam():
         "current_exam_id": "uuid",
         "show_ready": true/false,
         "show_reported": true/false,
-        "assigned_to_me": true/false
+        "assigned_to_me": true/false,
+        "modality_id": "uuid" (optional),
+        "body_part_id": "uuid" (optional),
+        "study_group_id": "uuid" (optional)
     }
     
     Returns:
@@ -1344,6 +1384,9 @@ def get_next_exam():
         show_ready = data.get('show_ready', True)
         show_reported = data.get('show_reported', False)
         assigned_to_me = data.get('assigned_to_me', False)
+        modality_id = data.get('modality_id')
+        body_part_id = data.get('body_part_id')
+        study_group_id = data.get('study_group_id')
         
         config = get_db_config()
         if not config:
@@ -1365,11 +1408,14 @@ def get_next_exam():
         cursor = connection.cursor()
         
         # Obtener la fecha de creación del examen actual para buscar el siguiente
-        cursor.execute("""
-            SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
-        """, (current_exam_id,))
-        current_exam = cursor.fetchone()
-        current_created_on = current_exam[0] if current_exam else None
+        # Si no se proporciona current_exam_id, se busca desde el más reciente
+        current_created_on = None
+        if current_exam_id:
+            cursor.execute("""
+                SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+            """, (current_exam_id,))
+            current_exam = cursor.fetchone()
+            current_created_on = current_exam[0] if current_exam else None
         
         location_placeholders = ','.join(['%s'] * len(user_locations))
         
@@ -1383,32 +1429,72 @@ def get_next_exam():
         else:
             reported_filter = "AND 1=0"
         
-        # Query para obtener el siguiente examen
+        # Query para obtener el siguiente examen con todos los datos del reporte
         query = f"""
-            SELECT e.Guid, 
+            SELECT e.Guid,
                    e.studyinstanceuid,
                    CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
                    dp.nationalcode,
                    st.Description as study_type,
                    e.LocalAcc,
-                   COALESCE(e.IsReported, 0) as is_reported
+                   COALESCE(e.IsReported, 0) as is_reported,
+                   e.IdPatient,
+                   e.AdmisionNumber,
+                   e.studytype_id,
+                   e.history,
+                   e.clinicalquestion,
+                   e.laterality_id,
+                   e.stat,
+                   e.othersdetails,
+                   dp.Name as first_name,
+                   dp.Surname as last_name,
+                   EXTRACT(YEAR FROM AGE(CURRENT_DATE, dp.birthdate))::INTEGER as age,
+                   dp.sexcode,
+                   r.Guid as report_guid,
+                   r.findings,
+                   r.impressions,
+                   r.techniques,
+                   r.conclusions,
+                   r.wassaved,
+                   r.pdfpath,
+                   r.date as report_date,
+                   st.default_predef_id
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
+            LEFT JOIN nextris.tbreport r ON e.Guid = r.IdExamination
             WHERE eq.location_id IN ({location_placeholders})
             AND e.IsExecuted = 1
-            AND e.Guid != %s
-            {reported_filter}
         """
         
         params = list(user_locations)
-        params.append(current_exam_id)
+        
+        # Excluir el examen actual si se proporciona
+        if current_exam_id:
+            query += " AND e.Guid != %s"
+            params.append(current_exam_id)
+        
+        # Aplicar filtro de reportado
+        query += f" {reported_filter}"
         
         # Aplicar filtro de asignación
         if assigned_to_me:
             query += " AND e.assignto = %s"
             params.append(user_id)
+        
+        # Aplicar filtros adicionales
+        if modality_id:
+            query += " AND st.modality_id = %s"
+            params.append(modality_id)
+        
+        if body_part_id:
+            query += " AND st.bodypart_id = %s"
+            params.append(body_part_id)
+        
+        if study_group_id:
+            query += " AND st.studygroup_id = %s"
+            params.append(study_group_id)
         
         # Ordenar y limitar a 1
         if current_created_on:
@@ -1420,23 +1506,92 @@ def get_next_exam():
         cursor.execute(query, params)
         next_exam = cursor.fetchone()
         
-        cursor.close()
-        connection.close()
-        
         if next_exam:
+            # Extraer datos del resultado
+            exam_guid = next_exam[0]
+            study_instance_uid = next_exam[1]
+            patient_name = next_exam[2]
+            patient_dni = next_exam[3]
+            study_type = next_exam[4]
+            accession_number = next_exam[5]
+            is_reported = next_exam[6]
+            patient_id = next_exam[7]
+            admission_number = next_exam[8]
+            study_type_id = next_exam[9]
+            history = next_exam[10]
+            clinical_question = next_exam[11]
+            laterality_id = next_exam[12]
+            stat = next_exam[13]
+            others_details = next_exam[14]
+            first_name = next_exam[15]
+            last_name = next_exam[16]
+            age = next_exam[17]
+            sex = next_exam[18]
+            report_guid = next_exam[19]
+            findings = next_exam[20]
+            impressions = next_exam[21]
+            techniques = next_exam[22]
+            conclusions = next_exam[23]
+            was_saved = next_exam[24]
+            pdf_path = next_exam[25]
+            report_date = next_exam[26]
+            default_predef_id = next_exam[27]
+            
+            # Si el reporte no fue guardado (was_saved es False), buscar el predefinido
+            if not was_saved and default_predef_id:
+                cursor = connection.cursor()
+                cursor.execute("""
+                    SELECT findings, impression, technique, conclusion
+                    FROM nextris.tbinfpredef
+                    WHERE guid = %s
+                """, (default_predef_id,))
+                
+                predef = cursor.fetchone()
+                if predef:
+                    findings = predef[0] or ''
+                    impressions = predef[1] or ''
+                    techniques = predef[2] or ''
+                    conclusions = predef[3] or ''
+                cursor.close()
+            
+            cursor.close()
+            connection.close()
+            
             return jsonify({
                 'success': True,
                 'data': {
-                    'guid': str(next_exam[0]),
-                    'study_instance_uid': next_exam[1] or '',
-                    'patient_name': next_exam[2] or '',
-                    'patient_dni': next_exam[3] or '',
-                    'study_type': next_exam[4] or '',
-                    'accession_number': next_exam[5] or '',
-                    'is_reported': bool(next_exam[6])
+                    'guid': str(exam_guid),
+                    'exam_id': str(exam_guid),
+                    'study_instance_uid': study_instance_uid or '',
+                    'patient_id': str(patient_id) if patient_id else None,
+                    'patient_name': patient_name or '',
+                    'patient_dni': patient_dni or '',
+                    'first_name': first_name or '',
+                    'last_name': last_name or '',
+                    'age': age,
+                    'sex': sex or '',
+                    'study_type': study_type or '',
+                    'accession_number': accession_number or '',
+                    'admission_number': admission_number or '',
+                    'is_reported': bool(is_reported),
+                    'report_guid': str(report_guid) if report_guid else None,
+                    'findings': findings or '',
+                    'impressions': impressions or '',
+                    'techniques': techniques or '',
+                    'conclusions': conclusions or '',
+                    'was_saved': bool(was_saved) if was_saved is not None else False,
+                    'pdf_path': pdf_path or None,
+                    'updated_on': report_date.isoformat() if report_date else None,
+                    'history': history or '',
+                    'clinical_question': clinical_question or '',
+                    'laterality_id': str(laterality_id) if laterality_id else None,
+                    'stat': stat or '',
+                    'others_details': others_details or ''
                 }
             }), 200
         else:
+            cursor.close()
+            connection.close()
             return jsonify({
                 'success': True,
                 'data': None,
@@ -1467,7 +1622,10 @@ def sign_report(exam_id):
         "get_next": true/false (opcional, default: false),
         "show_ready": true/false (opcional, para obtener siguiente),
         "show_reported": true/false (opcional, para obtener siguiente),
-        "assigned_to_me": true/false (opcional, para obtener siguiente)
+        "assigned_to_me": true/false (opcional, para obtener siguiente),
+        "modality_id": "uuid" (opcional, para filtrar siguiente),
+        "body_part_id": "uuid" (opcional, para filtrar siguiente),
+        "study_group_id": "uuid" (opcional, para filtrar siguiente)
     }
     
     Returns:
@@ -1619,6 +1777,9 @@ def sign_report(exam_id):
                 show_ready = data.get('show_ready', True)
                 show_reported = data.get('show_reported', False)
                 assigned_to_me = data.get('assigned_to_me', False)
+                modality_id = data.get('modality_id')
+                body_part_id = data.get('body_part_id')
+                study_group_id = data.get('study_group_id')
                 
                 user_locations = get_user_locations(reporter_physician_id, connection)
                 
@@ -1670,6 +1831,19 @@ def sign_report(exam_id):
                     if assigned_to_me:
                         query += " AND e.assignto = %s"
                         params.append(reporter_physician_id)
+                    
+                    # Aplicar filtros adicionales
+                    if modality_id:
+                        query += " AND st.modality_id = %s"
+                        params.append(modality_id)
+                    
+                    if body_part_id:
+                        query += " AND st.bodypart_id = %s"
+                        params.append(body_part_id)
+                    
+                    if study_group_id:
+                        query += " AND st.studygroup_id = %s"
+                        params.append(study_group_id)
                     
                     # Ordenar y limitar a 1
                     if current_created_on:
@@ -1975,6 +2149,326 @@ def serve_pdf(filename):
         return send_file(pdf_path, as_attachment=False, mimetype='application/pdf')
         
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/block', methods=['POST'])
+@jwt_required()
+def block_examination(exam_id):
+    """
+    Bloquea un examen para edición exclusiva del usuario actual
+    
+    Path Parameters:
+    - exam_id: GUID del examen
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Examen bloqueado exitosamente",
+        "blocked_by": "uuid del usuario"
+    }
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar si el examen existe y si ya está bloqueado
+        cursor.execute("""
+            SELECT blockby FROM nextris.tbexamination
+            WHERE Guid = %s
+        """, (exam_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+        
+        current_block = result[0]
+        
+        # Si ya está bloqueado por otro usuario, no permitir
+        if current_block and str(current_block) != str(user_id):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El examen está bloqueado por otro usuario',
+                'blocked_by': str(current_block)
+            }), 409
+        
+        # Bloquear el examen
+        cursor.execute("""
+            UPDATE nextris.tbexamination
+            SET blockby = %s
+            WHERE Guid = %s
+        """, (user_id, exam_id))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Examen bloqueado exitosamente',
+            'blocked_by': str(user_id)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/unblock', methods=['POST'])
+@jwt_required()
+def unblock_examination(exam_id):
+    """
+    Desbloquea un examen
+    
+    Path Parameters:
+    - exam_id: GUID del examen
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Examen desbloqueado exitosamente"
+    }
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar si el examen existe y quién lo bloqueó
+        cursor.execute("""
+            SELECT blockby FROM nextris.tbexamination
+            WHERE Guid = %s
+        """, (exam_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+        
+        current_block = result[0]
+        
+        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado)
+        if current_block and str(current_block) != str(user_id):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Solo el usuario que bloqueó el examen puede desbloquearlo'
+            }), 403
+        
+        # Desbloquear el examen
+        cursor.execute("""
+            UPDATE nextris.tbexamination
+            SET blockby = NULL
+            WHERE Guid = %s
+        """, (exam_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Examen desbloqueado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/filters/body-parts', methods=['GET'])
+@jwt_required()
+def get_body_parts_filter():
+    """Obtiene lista de partes anatómicas disponibles"""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT DISTINCT guid, description FROM nextris.isanatomicalpart ORDER BY description")
+        results = [{'guid': str(row[0]), 'description': row[1] or ''} for row in cursor.fetchall()]
+        cursor.close()
+        connection.close()
+        return jsonify({'success': True, 'data': results}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/filters/modalities', methods=['GET'])
+@jwt_required()
+def get_modalities_filter():
+    """Obtiene lista de modalidades disponibles"""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT DISTINCT guid, description FROM nextris.ismodality ORDER BY description")
+        results = [{'guid': str(row[0]), 'description': row[1] or ''} for row in cursor.fetchall()]
+        cursor.close()
+        connection.close()
+        return jsonify({'success': True, 'data': results}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/filters/study-groups', methods=['GET'])
+@jwt_required()
+def get_study_groups_filter():
+    """Obtiene lista de grupos de estudio disponibles"""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT DISTINCT guid, description FROM nextris.isstudytypegroup ORDER BY description")
+        results = [{'guid': str(row[0]), 'description': row[1] or ''} for row in cursor.fetchall()]
+        cursor.close()
+        connection.close()
+        return jsonify({'success': True, 'data': results}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/quitar_firma/<exam_id>', methods=['POST'])
+@jwt_required()
+def quitar_firma(exam_id):
+    """
+    Quita la firma de un reporte (desmarca como reportado y elimina el PDF)
+    Esta función es lo contrario de sign_report
+    
+    Path:
+    - exam_id: GUID del examen
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Firma removida exitosamente, PDF eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener el path del PDF antes de eliminarlo de la BD
+        cursor.execute(
+            "SELECT pdfpath FROM nextris.tbreport WHERE idexamination = %s",
+            (exam_id,)
+        )
+        report_result = cursor.fetchone()
+        pdf_path = report_result[0] if report_result else None
+        
+        # Marcar el examen como NO reportado y limpiar campos relacionados
+        cursor.execute("""
+            UPDATE nextris.tbexamination 
+            SET IsReported=0, reportdate=NULL
+            WHERE Guid=%s
+        """, (exam_id,))
+        
+        if cursor.rowcount == 0:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Examen no encontrado: {exam_id}'
+            }), 404
+        
+        # Eliminar el path del PDF en tbreport (limpiar pdfpath)
+        cursor.execute("""
+            UPDATE nextris.tbreport
+            SET pdfpath = NULL
+            WHERE idexamination = %s
+        """, (exam_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        # Eliminar el archivo PDF físico si existe
+        pdf_deleted = False
+        if pdf_path:
+            # Normalizar la ruta del PDF
+            pdf_full_path = os.path.normpath(pdf_path)
+            if not os.path.isabs(pdf_full_path):
+                pdf_full_path = os.path.abspath(pdf_full_path)
+            
+            if os.path.exists(pdf_full_path):
+                try:
+                    os.remove(pdf_full_path)
+                    pdf_deleted = True
+                    print(f"[INFO] PDF eliminado: {pdf_full_path}")
+                except Exception as e:
+                    print(f"[WARN] No se pudo eliminar el PDF: {str(e)}")
+        
+        # Actualizar estado (si existe la función)
+        try:
+            from apps.home.routes import updatestatus
+            updatestatus(exam_id)
+        except:
+            pass
+        
+        message = 'Firma removida exitosamente'
+        if pdf_deleted:
+            message += ', PDF eliminado'
+        elif pdf_path:
+            message += ', pero el PDF no se pudo eliminar'
+        
+        return jsonify({
+            'success': True,
+            'message': message
+        }), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Error al quitar firma: {str(e)}")
         return jsonify({
             'success': False,
             'message': f'Error: {str(e)}'

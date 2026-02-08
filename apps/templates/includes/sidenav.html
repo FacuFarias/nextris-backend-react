@@ -198,6 +198,16 @@
           <span class="nav-link-text ms-1">Ejecucion</span>
         </a>
       </li>
+      
+      <!-- CARGAR ESTUDIO - Solo Tecnico y Sysadmin -->
+      <li class="nav-item">
+        <a class="nav-link {% if 'cargar_estudio' in segment %} active {% endif %}" href="/cargar_estudio.html">
+          <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
+            <i class="ni ni-cloud-upload-96 text-info text-sm opacity-10"></i>
+          </div>
+          <span class="nav-link-text ms-1">Cargar estudio</span>
+        </a>
+      </li>
       {% endif %}
       
       <!-- REDACCION - Solo Medico y Sysadmin -->

@@ -436,19 +436,51 @@ def change_password():
 
 @login_manager.unauthorized_handler
 def unauthorized_handler():
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        from flask import jsonify
+        return jsonify({
+            'success': False,
+            'error': 'Token de autenticación requerido',
+            'msg': 'Missing Authorization Header'
+        }), 401
     return render_template('home/page-403.html'), 403
 
 
 @blueprint.errorhandler(403)
 def access_forbidden(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        from flask import jsonify
+        return jsonify({
+            'success': False,
+            'error': 'Acceso no autorizado',
+            'msg': 'Access forbidden'
+        }), 403
     return render_template('home/page-403.html'), 403
 
 
 @blueprint.errorhandler(404)
 def not_found_error(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        from flask import jsonify
+        return jsonify({
+            'success': False,
+            'error': 'Recurso no encontrado',
+            'msg': 'Resource not found'
+        }), 404
     return render_template('home/page-404.html'), 404
 
 
 @blueprint.errorhandler(500)
 def internal_error(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        from flask import jsonify
+        return jsonify({
+            'success': False,
+            'error': 'Error interno del servidor',
+            'msg': 'Internal server error'
+        }), 500
     return render_template('home/page-500.html'), 500

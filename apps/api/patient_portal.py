@@ -1,0 +1,550 @@
+# -*- encoding: utf-8 -*-
+"""
+API del Portal de Pacientes - Endpoints para pacientes autenticados
+Permite a los pacientes gestionar su perfil y acceder a su información
+"""
+
+from flask import jsonify, request
+from flask_jwt_extended import jwt_required, get_jwt_identity
+import psycopg2
+from datetime import datetime
+from apps.api import api_blueprint
+
+
+def get_db_config():
+    """Obtiene la configuración de la base de datos"""
+    from apps.home.routes import config as db_config
+    return db_config
+
+
+# ====================================================================
+# MIS DATOS - PERFIL DEL PACIENTE
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/my-profile', methods=['GET'])
+@jwt_required()
+def get_my_profile():
+    """
+    Obtiene los datos del perfil del paciente autenticado
+    
+    Headers:
+    - Authorization: Bearer <patient_jwt_token>
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "patient_id": "uuid",
+            "username": "jperez",
+            "name": "Juan",
+            "surname": "Pérez",
+            "full_name": "Pérez, Juan",
+            "national_code": "12345678",
+            "patient_id_number": "20-12345678-9",
+            "birthdate": "1990-01-15",
+            "age": 36,
+            "sex_code": "M",
+            "sex": "Masculino",
+            "phone": "+5491112345678",
+            "email": "juan.perez@email.com",
+            "address": "Calle Falsa 123",
+            "city": "Buenos Aires",
+            "state": "CABA",
+            "zip_code": "1000",
+            "health_card": "123456789",
+            "last_login": "2026-01-10T15:30:00",
+            "account_status": "Active"
+        }
+    }
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener datos del usuario paciente y su información personal
+        query = """
+            SELECT 
+                up.guid as patient_id,
+                up.username,
+                up.status,
+                up.lastlogin,
+                dp.name,
+                dp.surname,
+                dp.nationalcode,
+                dp.patientid,
+                dp.birthdate,
+                dp.sexcode,
+                dp.phone,
+                dp.email,
+                dp.healthcard
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
+            WHERE up.guid = %s
+        """
+        
+        cursor.execute(query, (patient_user_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if not result:
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        # Calcular edad
+        age = None
+        if result[8]:  # birthdate
+            today = datetime.now().date()
+            birthdate = result[8]
+            age = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
+        
+        # Determinar sexo en texto
+        sex_text = None
+        if result[9]:  # sexcode
+            sex_map = {
+                'M': 'Masculino',
+                'F': 'Femenino',
+                'O': 'Otro'
+            }
+            sex_text = sex_map.get(result[9], result[9])
+        
+        patient_data = {
+            'patient_id': result[0],
+            'username': result[1],
+            'account_status': result[2],
+            'last_login': result[3].isoformat() if result[3] else None,
+            'name': result[4],
+            'surname': result[5],
+            'full_name': f"{result[5]}, {result[4]}" if result[5] and result[4] else None,
+            'national_code': result[6],
+            'patient_id_number': result[7],
+            'birthdate': result[8].strftime('%Y-%m-%d') if result[8] else None,
+            'age': age,
+            'sex_code': result[9],
+            'sex': sex_text,
+            'phone': result[10],
+            'email': result[11],
+            'health_card': result[12]
+        }
+        
+        return jsonify({
+            'success': True,
+            'data': patient_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/patient-portal/my-profile', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_my_profile():
+    """
+    Actualiza los datos del perfil del paciente autenticado
+    
+    Headers:
+    - Authorization: Bearer <patient_jwt_token>
+    
+    Body JSON (todos opcionales):
+    {
+        "phone": "+5491112345678",
+        "email": "nuevo.email@example.com"
+    }
+    
+    NOTA: Campos como nombre, apellido, DNI, fecha de nacimiento, sexo, 
+    dirección, ciudad, estado y código postal NO se pueden modificar 
+    desde el portal del paciente por seguridad.
+    Deben ser actualizados por personal administrativo.
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Perfil actualizado exitosamente",
+        "data": { ... datos actualizados ... }
+    }
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener el datapatient_id
+        cursor.execute(
+            "SELECT datapatient_id FROM nextris.tbuser_patient WHERE guid = %s",
+            (patient_user_id,)
+        )
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        datapatient_id = result[0]
+        
+        # Campos permitidos para actualizar desde el portal
+        # Solo phone y email están disponibles en la tabla datapatient
+        allowed_fields = {
+            'phone': 'phone',
+            'email': 'email'
+        }
+        
+        # Construir query de actualización solo con campos permitidos
+        updates = []
+        params = []
+        
+        for json_field, db_field in allowed_fields.items():
+            if json_field in data:
+                updates.append(f"{db_field} = %s")
+                params.append(data[json_field])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos válidos para actualizar'
+            }), 400
+        
+        params.append(datapatient_id)
+        query = f"UPDATE nextris.datapatient SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        # Obtener los datos actualizados usando el endpoint GET
+        return get_my_profile()
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/patient-portal/change-password', methods=['POST'])
+@jwt_required()
+def patient_change_password():
+    """
+    Permite al paciente cambiar su propia contraseña
+    
+    Headers:
+    - Authorization: Bearer <patient_jwt_token>
+    
+    Body JSON:
+    {
+        "current_password": "contraseña_actual",
+        "new_password": "nueva_contraseña",
+        "confirm_password": "nueva_contraseña"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Contraseña actualizada exitosamente"
+    }
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        confirm_password = data.get('confirm_password')
+        
+        if not all([current_password, new_password, confirm_password]):
+            return jsonify({
+                'success': False,
+                'message': 'Se requieren current_password, new_password y confirm_password'
+            }), 400
+        
+        if new_password != confirm_password:
+            return jsonify({
+                'success': False,
+                'message': 'La nueva contraseña y su confirmación no coinciden'
+            }), 400
+        
+        if len(new_password) < 4:
+            return jsonify({
+                'success': False,
+                'message': 'La nueva contraseña debe tener al menos 4 caracteres'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar la contraseña actual
+        cursor.execute(
+            "SELECT password FROM nextris.tbuser_patient WHERE guid = %s",
+            (patient_user_id,)
+        )
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        stored_password = result[0]
+        
+        # Verificar contraseña actual
+        from werkzeug.security import check_password_hash, generate_password_hash
+        
+        if not check_password_hash(stored_password, current_password):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'La contraseña actual es incorrecta'
+            }), 401
+        
+        # Actualizar contraseña
+        new_password_hash = generate_password_hash(new_password)
+        
+        cursor.execute(
+            "UPDATE nextris.tbuser_patient SET password = %s WHERE guid = %s",
+            (new_password_hash, patient_user_id)
+        )
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# MIS ESTUDIOS - LISTADO DE ESTUDIOS DEL PACIENTE
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/my-studies', methods=['GET'])
+@jwt_required()
+def get_my_studies():
+    """
+    Obtiene los estudios médicos del paciente autenticado
+    
+    Headers:
+    - Authorization: Bearer <patient_jwt_token>
+    
+    Query Parameters:
+    - page (optional): Número de página (default: 1)
+    - per_page (optional): Items por página (default: 20, max: 100)
+    - status (optional): Filtrar por estado - 'reported' (con informe), 'pending' (sin informe)
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "examination_id": "uuid",
+                "order_id": "uuid",
+                "accession_number": "ACC001234",
+                "study_type": "TOMOGRAFIA DE TORAX",
+                "modality": "CT",
+                "study_date": "2026-01-10",
+                "study_time": "14:30:00",
+                "status": "Reportado",
+                "has_report": true,
+                "has_images": true,
+                "referring_physician": "Dr. García",
+                "location": "Sede Central",
+                "urgency": "Normal",
+                "report_date": "2026-01-10T16:00:00"
+            }
+        ],
+        "total": 10,
+        "page": 1,
+        "per_page": 20
+    }
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+        
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        status_filter = request.args.get('status', None)
+        
+        per_page = min(per_page, 100)
+        offset = (page - 1) * per_page
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener el patient_id del datapatient
+        cursor.execute("""
+            SELECT dp.guid 
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
+            WHERE up.guid = %s
+        """, (patient_user_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        patient_data_id = result[0]
+        
+        # Query base - usar tbexamination directamente sin tborder
+        base_query = """
+            SELECT 
+                ex.guid as examination_id,
+                ex.localacc as accession_number,
+                st.description as study_type,
+                m.description as modality,
+                ex.createdon as study_datetime,
+                CASE 
+                    WHEN ex.isreported = 1 THEN 'Reportado'
+                    ELSE 'Pendiente'
+                END as status,
+                COALESCE(ex.isreported, 0) as isreported,
+                CASE 
+                    WHEN ex.studyinstanceuid IS NOT NULL AND ex.studyinstanceuid != '' THEN true
+                    ELSE false
+                END as has_images,
+                rp.description as referring_physician,
+                CASE 
+                    WHEN CAST(ex.stat AS TEXT) = 'S' THEN 'Urgente'
+                    ELSE 'Normal'
+                END as urgency,
+                r.date as report_date
+            FROM nextris.tbexamination ex
+            LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
+            LEFT JOIN nextris.ismodality m ON st.modality_id = m.guid
+            LEFT JOIN nextris.isrequestingphysician rp ON ex.idrequestingphysician = rp.guid
+            LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            WHERE ex.idpatient = %s
+        """
+        
+        params = [patient_data_id]
+        
+        # Aplicar filtro de estado si se proporciona
+        if status_filter == 'reported':
+            base_query += " AND ex.isreported = 1"
+        elif status_filter == 'pending':
+            base_query += " AND (ex.isreported = 0 OR ex.isreported IS NULL)"
+        
+        base_query += " ORDER BY ex.createdon DESC"
+        
+        # Contar total
+        count_query = f"SELECT COUNT(*) FROM ({base_query}) as count_table"
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
+        
+        # Agregar paginación
+        paginated_query = base_query + f" LIMIT {per_page} OFFSET {offset}"
+        
+        cursor.execute(paginated_query, params)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        studies = []
+        for row in results:
+            study_datetime = row[4]
+            study_date = study_datetime.strftime('%Y-%m-%d') if study_datetime else None
+            study_time = study_datetime.strftime('%H:%M:%S') if study_datetime else None
+            
+            studies.append({
+                'examination_id': row[0],
+                'accession_number': row[1],
+                'study_type': row[2],
+                'modality': row[3],
+                'study_date': study_date,
+                'study_time': study_time,
+                'status': row[5],
+                'has_report': bool(row[6]),
+                'has_images': row[7],
+                'referring_physician': row[8],
+                'urgency': row[9],
+                'report_date': row[10].isoformat() if row[10] else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'data': studies,
+                'page': page,
+                'per_page': per_page,
+                'total': total
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500

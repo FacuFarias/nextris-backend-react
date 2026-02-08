@@ -1,0 +1,14 @@
+              exam_guid               |                               study_type                                |             bodypart_id              |    bodypart_desc    
+--------------------------------------+-------------------------------------------------------------------------+--------------------------------------+---------------------
+ 646bed76-a9ab-41f4-b9b2-deb6660df876 | ECOGRAFIA DE CUELLO O CERVICAL                                          | 001789ea-687a-45ef-8ac1-6f8b9414fd63 | Columna vertebral
+ ca0ff479-721e-41ce-acd9-d3c5d14d3874 | ECO DOPPLER DE PENE CON INYECCION DE PAPAVERINA U OTROS VASODILATADORES | 42edd51a-8674-44a8-8179-e25d1a4ba802 | Sistema vascular
+ 960dac1e-795d-4f1c-8781-5f5f3f6da174 | ANGIOTOMOGRAFIA TORACICA                                                | 107114ac-171c-4a65-ad87-939e2567a110 | Tórax
+ 222a3af1-bcff-4f54-a559-bbd124cb3350 | ANGIOTOMOGRAFIA TORACICA                                                | 107114ac-171c-4a65-ad87-939e2567a110 | Tórax
+ 5cbf5499-febd-47e9-a465-5117eb7c432d | RX  TORAX (PRIMERA EXPOSICION O FRENTE)                                 | 8d0aea40-38d7-11ef-b0f7-00ffb9d5e4de | Extremidad superior
+ b1919f83-d65a-4bd3-a9db-b03b4f08fba6 | ECOCARDIOGRAMA (2D)                                                     | 107114ac-171c-4a65-ad87-939e2567a110 | Tórax
+ ef2f148a-e297-4035-bf62-b28f55ba34de | ECODOPPLER AORTOILIACO                                                  | 8d0aea40-38d7-11ef-b0f7-00ffb9d5e4de | Extremidad superior
+ ca043244-b6f8-481e-807e-4f34d89691e1 | ECODOPPLER AORTOILIACO                                                  | 8d0aea40-38d7-11ef-b0f7-00ffb9d5e4de | Extremidad superior
+ c4da4433-ea3f-4514-b731-948f54b723cd | ECODOPPLER  ARTERIAL Y/O VENOSO DE OTRAS REGIONES Y PARTES BLANDAS      | 8d0aea40-38d7-11ef-b0f7-00ffb9d5e4de | Extremidad superior
+ 642a9cb2-a611-4344-b492-09ee66782709 | RX ANTEBRAZO UNI O BILATERALES                                          | 8d0aea40-38d7-11ef-b0f7-00ffb9d5e4de | Extremidad superior
+(10 rows)
+

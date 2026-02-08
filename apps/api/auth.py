@@ -46,7 +46,7 @@ def api_login():
     }
     """
     try:
-        data = request.get_json()
+        data = request.get_json(force=True, silent=True)
         
         if not data:
             return jsonify({

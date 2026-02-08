@@ -1,0 +1,3391 @@
+# -*- encoding: utf-8 -*-
+"""
+API REST para Configuración del Sistema
+Endpoints para gestión de configuraciones, tipos de estudio, equipos, ubicaciones, etc.
+"""
+
+from flask import request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+import psycopg2
+from apps.api import api_blueprint
+import uuid
+
+
+def get_db_config():
+    """Obtener configuración de base de datos"""
+    try:
+        from apps.home.routes import config
+        return config
+    except:
+        return None
+
+
+# ====================================================================
+# CONFIGURACIÓN DEL SISTEMA
+# ====================================================================
+
+@api_blueprint.route('/config/system', methods=['GET'])
+@jwt_required()
+def get_system_config():
+    """
+    Obtiene la configuración general del sistema
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "config_key": "config_value"
+        }
+    }
+    """
+    try:
+        # Importar ConfigService
+        from apps.home.services import ConfigService
+        config_data = ConfigService.get_all_config()
+        
+        return jsonify({
+            'success': True,
+            'data': config_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/system', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_system_config():
+    """
+    Actualiza la configuración del sistema
+    
+    Body JSON:
+    {
+        "config_key": "new_value",
+        ...
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración actualizada",
+        "data": {...}
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        from apps.home.services import ConfigService
+        updated_config = ConfigService.update_config(data)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración actualizada exitosamente',
+            'data': updated_config
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/workflow', methods=['GET'])
+@jwt_required()
+def get_workflow_config():
+    """
+    Obtiene la configuración de workflow
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "agenda_tipo": "...",
+            "agenda_estudios": "..."
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT agenda_tipo, agenda_estudios
+            FROM nextris.config_workflow
+            ORDER BY fecha_actualizacion DESC
+            LIMIT 1
+        """
+        
+        cursor.execute(query)
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'agenda_tipo': result[0],
+                    'agenda_estudios': result[1]
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'agenda_tipo': None,
+                    'agenda_estudios': None
+                }
+            }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# TIPOS DE ESTUDIO
+# ====================================================================
+
+@api_blueprint.route('/config/study-types', methods=['GET'])
+@jwt_required()
+def get_study_types_config():
+    """
+    Obtiene todos los tipos de estudio con sus relaciones
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "code": "...",
+                "description": "...",
+                "studygroup": "...",
+                "bodypart": "...",
+                "modality": "...",
+                "rvu": 0,
+                "nofviews": 0
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT st.guid, st.code, st.description, stg.description as studygroup, 
+                   ap.description as bodypart, md.externalcode as modality, 
+                   st.rvu, st.nofviews
+            FROM nextris.isstudytype as st
+            INNER JOIN nextris.isstudytypegroup stg on stg.guid=st.studygroup_id
+            INNER JOIN nextris.isanatomicalpart ap on ap.guid=st.bodypart_id
+            INNER JOIN nextris.ismodality md on md.guid=st.modality_id
+            ORDER BY st.description ASC
+        """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        study_types = []
+        for row in results:
+            study_types.append({
+                'guid': row[0],
+                'code': row[1],
+                'description': row[2],
+                'studygroup': row[3],
+                'bodypart': row[4],
+                'modality': row[5],
+                'rvu': row[6],
+                'nofviews': row[7]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': study_types
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-types', methods=['POST'])
+@jwt_required()
+def create_study_type():
+    """
+    Crea un nuevo tipo de estudio
+    
+    Body JSON:
+    {
+        "code": "string" (required),
+        "description": "string" (required),
+        "studygroup_id": "uuid" (required),
+        "bodypart_id": "uuid" (required),
+        "modality_id": "uuid" (required),
+        "rvu": number (optional),
+        "nofviews": number (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Tipo de estudio creado",
+        "data": {
+            "study_type_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        code = data.get('code')
+        description = data.get('description')
+        studygroup_id = data.get('studygroup_id')
+        bodypart_id = data.get('bodypart_id')
+        modality_id = data.get('modality_id')
+        
+        if not all([code, description, studygroup_id, bodypart_id, modality_id]):
+            return jsonify({
+                'success': False,
+                'message': 'code, description, studygroup_id, bodypart_id y modality_id son requeridos'
+            }), 400
+        
+        rvu = data.get('rvu')
+        nofviews = data.get('nofviews')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isstudytype(
+                guid, code, description, studygroup_id, bodypart_id, modality_id, rvu, nofviews
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, code, description, studygroup_id, bodypart_id, modality_id, rvu, nofviews
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tipo de estudio creado exitosamente',
+            'data': {
+                'study_type_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-types/<study_type_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_study_type(study_type_id):
+    """
+    Actualiza un tipo de estudio existente
+    
+    Path:
+    - study_type_id: GUID del tipo de estudio
+    
+    Body JSON (todos opcionales):
+    {
+        "code": "string",
+        "description": "string",
+        "studygroup_id": "uuid",
+        "bodypart_id": "uuid",
+        "modality_id": "uuid",
+        "rvu": number,
+        "nofviews": number
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Tipo de estudio actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytype WHERE guid=%s", (study_type_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Tipo de estudio no encontrado'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'code' in data:
+            updates.append("code = %s")
+            params.append(data['code'])
+        if 'description' in data:
+            updates.append("description = %s")
+            params.append(data['description'])
+        if 'studygroup_id' in data:
+            updates.append("studygroup_id = %s")
+            params.append(data['studygroup_id'])
+        if 'bodypart_id' in data:
+            updates.append("bodypart_id = %s")
+            params.append(data['bodypart_id'])
+        if 'modality_id' in data:
+            updates.append("modality_id = %s")
+            params.append(data['modality_id'])
+        if 'rvu' in data:
+            updates.append("rvu = %s")
+            params.append(data['rvu'])
+        if 'nofviews' in data:
+            updates.append("nofviews = %s")
+            params.append(data['nofviews'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(study_type_id)
+        query = f"UPDATE nextris.isstudytype SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tipo de estudio actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-types/<study_type_id>', methods=['DELETE'])
+@jwt_required()
+def delete_study_type(study_type_id):
+    """
+    Elimina un tipo de estudio
+    
+    Path:
+    - study_type_id: GUID del tipo de estudio
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Tipo de estudio eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytype WHERE guid=%s", (study_type_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Tipo de estudio no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.isstudytype WHERE guid = %s"
+        cursor.execute(query, (study_type_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tipo de estudio eliminado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# MODALIDADES, PARTES DEL CUERPO, GRUPOS
+# ====================================================================
+
+@api_blueprint.route('/config/modalities', methods=['GET'])
+@jwt_required()
+def get_modalities():
+    """
+    Obtiene todas las modalidades
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "externalcode": "...",
+                "description": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = "SELECT guid, externalcode, description FROM nextris.ismodality ORDER BY description"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        modalities = []
+        for row in results:
+            modalities.append({
+                'guid': row[0],
+                'externalcode': row[1],
+                'description': row[2]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': modalities
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modalities', methods=['POST'])
+@jwt_required()
+def create_modality():
+    """
+    Crea una nueva modalidad
+    
+    Body JSON:
+    {
+        "externalcode": "string" (required),
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad creada",
+        "data": {
+            "modality_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        externalcode = data.get('externalcode')
+        description = data.get('description')
+        
+        if not all([externalcode, description]):
+            return jsonify({
+                'success': False,
+                'message': 'externalcode y description son requeridos'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.ismodality(guid, externalcode, description) 
+            VALUES (%s, %s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, externalcode, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad creada exitosamente',
+            'data': {
+                'modality_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modalities/<modality_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_modality(modality_id):
+    """
+    Actualiza una modalidad existente
+    
+    Path:
+    - modality_id: GUID de la modalidad
+    
+    Body JSON (todos opcionales):
+    {
+        "externalcode": "string",
+        "description": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.ismodality WHERE guid=%s", (modality_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Modalidad no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'externalcode' in data:
+            updates.append("externalcode = %s")
+            params.append(data['externalcode'])
+        if 'description' in data:
+            updates.append("description = %s")
+            params.append(data['description'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(modality_id)
+        query = f"UPDATE nextris.ismodality SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modalities/<modality_id>', methods=['DELETE'])
+@jwt_required()
+def delete_modality(modality_id):
+    """
+    Elimina una modalidad
+    
+    Path:
+    - modality_id: GUID de la modalidad
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.ismodality WHERE guid=%s", (modality_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Modalidad no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.ismodality WHERE guid = %s"
+        cursor.execute(query, (modality_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts', methods=['GET'])
+@jwt_required()
+def get_body_parts():
+    """
+    Obtiene todas las partes del cuerpo
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = "SELECT guid, description FROM nextris.isanatomicalpart ORDER BY description"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        body_parts = []
+        for row in results:
+            body_parts.append({
+                'guid': row[0],
+                'description': row[1]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': body_parts
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts', methods=['POST'])
+@jwt_required()
+def create_body_part():
+    """
+    Crea una nueva parte del cuerpo
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo creada",
+        "data": {
+            "body_part_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isanatomicalpart(guid, description) 
+            VALUES (%s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo creada exitosamente',
+            'data': {
+                'body_part_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts/<body_part_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_body_part(body_part_id):
+    """
+    Actualiza una parte del cuerpo existente
+    
+    Path:
+    - body_part_id: GUID de la parte del cuerpo
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isanatomicalpart WHERE guid=%s", (body_part_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Parte del cuerpo no encontrada'
+            }), 404
+        
+        query = "UPDATE nextris.isanatomicalpart SET description = %s WHERE guid = %s"
+        
+        cursor.execute(query, (description, body_part_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts/<body_part_id>', methods=['DELETE'])
+@jwt_required()
+def delete_body_part(body_part_id):
+    """
+    Elimina una parte del cuerpo
+    
+    Path:
+    - body_part_id: GUID de la parte del cuerpo
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isanatomicalpart WHERE guid=%s", (body_part_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Parte del cuerpo no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.isanatomicalpart WHERE guid = %s"
+        cursor.execute(query, (body_part_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups', methods=['GET'])
+@jwt_required()
+def get_study_groups():
+    """
+    Obtiene todos los grupos de estudio
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = "SELECT guid, description FROM nextris.isstudytypegroup ORDER BY description"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        groups = []
+        for row in results:
+            groups.append({
+                'guid': row[0],
+                'description': row[1]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': groups
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups', methods=['POST'])
+@jwt_required()
+def create_study_group():
+    """
+    Crea un nuevo grupo de estudio
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio creado",
+        "data": {
+            "study_group_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isstudytypegroup(guid, description) 
+            VALUES (%s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio creado exitosamente',
+            'data': {
+                'study_group_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups/<study_group_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_study_group(study_group_id):
+    """
+    Actualiza un grupo de estudio existente
+    
+    Path:
+    - study_group_id: GUID del grupo de estudio
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytypegroup WHERE guid=%s", (study_group_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Grupo de estudio no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.isstudytypegroup SET description = %s WHERE guid = %s"
+        
+        cursor.execute(query, (description, study_group_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups/<study_group_id>', methods=['DELETE'])
+@jwt_required()
+def delete_study_group(study_group_id):
+    """
+    Elimina un grupo de estudio
+    
+    Path:
+    - study_group_id: GUID del grupo de estudio
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytypegroup WHERE guid=%s", (study_group_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Grupo de estudio no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.isstudytypegroup WHERE guid = %s"
+        cursor.execute(query, (study_group_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio eliminado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# EQUIPOS (MÁQUINAS)
+# ====================================================================
+
+@api_blueprint.route('/config/equipment', methods=['GET'])
+@jwt_required()
+def get_equipment():
+    """
+    Obtiene equipos/máquinas filtrados por ubicación y opcionalmente por modalidad
+    
+    Query Parameters:
+    - location_id (OBLIGATORIO): Filtrar equipos por ubicación
+    - modality_id (OPCIONAL): Filtrar equipos por modalidad
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "...",
+                "aeTitle": "...",
+                "externalcode": "...",
+                "modality": "..."
+            }
+        ]
+    }
+    """
+    try:
+        # Obtener parámetro location_id (OBLIGATORIO)
+        location_id = request.args.get('location_id')
+        
+        if not location_id:
+            return jsonify({
+                'success': False,
+                'message': 'El parámetro location_id es obligatorio'
+            }), 400
+        
+        # Obtener parámetro modality_id (OPCIONAL)
+        modality_id = request.args.get('modality_id')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Construir query base
+        query = """
+            SELECT e.guid, e.description, e.aetitle, e.externalcode, m.description as modality
+            FROM nextris.isequipment e
+            LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
+            WHERE e.location_id = %s
+        """
+        
+        params = [location_id]
+        
+        # Agregar filtro de modalidad si se proporciona
+        if modality_id:
+            query += " AND e.idmodality = %s"
+            params.append(modality_id)
+        
+        query += " ORDER BY e.description"
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        equipment_list = []
+        for row in results:
+            equipment_list.append({
+                'guid': row[0],
+                'description': row[1],
+                'aeTitle': row[2],
+                'externalcode': row[3],
+                'modality': row[4]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': equipment_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/equipment', methods=['POST'])
+@jwt_required()
+def create_equipment():
+    """
+    Crea un nuevo equipo
+    
+    Body JSON:
+    {
+        "name": "string" (required),
+        "aetitle": "string" (required),
+        "location_id": "uuid" (required),
+        "modality_id": "uuid" (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Equipo creado",
+        "data": {
+            "equipment_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        aetitle = data.get('aetitle')
+        modality_id = data.get('modality_id')
+        
+        if not all([description, aetitle]):
+            return jsonify({
+                'success': False,
+                'message': 'description y aetitle son requeridos'
+            }), 400
+        
+        externalcode = data.get('externalcode', '')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isequipment(guid, description, aetitle, externalcode, idmodality, isactive) 
+            VALUES (%s, %s, %s, %s, %s, 1)
+        """
+        
+        cursor.execute(query, (new_guid, description, aetitle, externalcode, modality_id))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Equipo creado exitosamente',
+            'data': {
+                'equipment_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/equipment/<equipment_id>', methods=['DELETE'])
+@jwt_required()
+def delete_equipment(equipment_id):
+    """
+    Elimina un equipo
+    
+    Path:
+    - equipment_id: GUID del equipo
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Equipo eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isequipment WHERE guid=%s", (equipment_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Equipo no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.isequipment WHERE guid = %s"
+        cursor.execute(query, (equipment_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Equipo eliminado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# UBICACIONES (LOCATIONS)
+# ====================================================================
+
+@api_blueprint.route('/config/locations', methods=['GET'])
+@jwt_required()
+def get_locations():
+    """
+    Obtiene todas las ubicaciones con todos sus datos
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "facility_id": "...",
+                "name": "...",
+                "code": "...",
+                "address": "...",
+                "phone": "...",
+                "status": "...",
+                "created_at": "...",
+                "updated_at": "...",
+                "id_patientdomain": "...",
+                "mail": "...",
+                "logo_path": "...",
+                "geographic_location": "...",
+                "timezone": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, facility_id, name, code, address, phone, status, 
+                   created_at, updated_at, id_patientdomain, mail, logo_path, 
+                   geographic_location, timezone
+            FROM nextris.tblocation 
+            ORDER BY name
+        """
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        locations = []
+        for row in results:
+            locations.append({
+                'guid': row[0],
+                'facility_id': row[1],
+                'name': row[2],
+                'code': row[3],
+                'address': row[4],
+                'phone': row[5],
+                'status': row[6],
+                'created_at': row[7].isoformat() if row[7] else None,
+                'updated_at': row[8].isoformat() if row[8] else None,
+                'id_patientdomain': row[9],
+                'mail': row[10],
+                'logo_path': row[11],
+                'geographic_location': row[12],
+                'timezone': row[13]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': locations
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations', methods=['POST'])
+@jwt_required()
+def create_location():
+    """
+    Crea una nueva ubicación
+    
+    Body JSON:
+    {
+        "name": "string" (required),
+        "code": "string" (optional),
+        "facility_id": "uuid" (optional),
+        "address": "string" (optional),
+        "phone": "string" (optional),
+        "status": "string" (optional, default: 'Active'),
+        "id_patientdomain": "string" (optional),
+        "mail": "string" (optional),
+        "geographic_location": "string" (optional),
+        "timezone": "string" (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Ubicación creada",
+        "data": {
+            "location_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        name = data.get('name')
+        
+        if not name:
+            return jsonify({
+                'success': False,
+                'message': 'name es requerido'
+            }), 400
+        
+        # Obtener todos los campos opcionales
+        facility_id = data.get('facility_id')
+        code = data.get('code', '')
+        address = data.get('address', '')
+        phone = data.get('phone', '')
+        status = data.get('status', 'Active')
+        id_patientdomain = data.get('id_patientdomain', '')
+        mail = data.get('mail', '')
+        geographic_location = data.get('geographic_location', '')
+        timezone = data.get('timezone', '')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.tblocation(
+                guid, facility_id, name, code, address, phone, status,
+                created_at, updated_at, id_patientdomain, mail, 
+                geographic_location, timezone
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, facility_id, name, code, address, phone, status,
+            id_patientdomain, mail, geographic_location, timezone
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación creada exitosamente',
+            'data': {
+                'location_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations/<location_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_location(location_id):
+    """
+    Actualiza una ubicación existente
+    
+    Path:
+    - location_id: GUID de la ubicación
+    
+    Body JSON (todos opcionales):
+    {
+        "name": "string",
+        "code": "string",
+        "facility_id": "uuid",
+        "address": "string",
+        "phone": "string",
+        "status": "string",
+        "id_patientdomain": "string",
+        "mail": "string",
+        "geographic_location": "string",
+        "timezone": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Ubicación actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'name' in data:
+            updates.append("name = %s")
+            params.append(data['name'])
+        if 'code' in data:
+            updates.append("code = %s")
+            params.append(data['code'])
+        if 'facility_id' in data:
+            updates.append("facility_id = %s")
+            params.append(data['facility_id'])
+        if 'address' in data:
+            updates.append("address = %s")
+            params.append(data['address'])
+        if 'phone' in data:
+            updates.append("phone = %s")
+            params.append(data['phone'])
+        if 'status' in data:
+            updates.append("status = %s")
+            params.append(data['status'])
+        if 'id_patientdomain' in data:
+            updates.append("id_patientdomain = %s")
+            params.append(data['id_patientdomain'])
+        if 'mail' in data:
+            updates.append("mail = %s")
+            params.append(data['mail'])
+        if 'geographic_location' in data:
+            updates.append("geographic_location = %s")
+            params.append(data['geographic_location'])
+        if 'timezone' in data:
+            updates.append("timezone = %s")
+            params.append(data['timezone'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        # Agregar updated_at
+        updates.append("updated_at = NOW()")
+        
+        params.append(location_id)
+        query = f"UPDATE nextris.tblocation SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations/<location_id>', methods=['DELETE'])
+@jwt_required()
+def delete_location(location_id):
+    """
+    Elimina una ubicación
+    
+    Path:
+    - location_id: GUID de la ubicación
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Ubicación eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.tblocation WHERE guid = %s"
+        cursor.execute(query, (location_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# FACILITIES (INSTITUCIONES)
+# ====================================================================
+
+@api_blueprint.route('/config/facilities', methods=['GET'])
+@jwt_required()
+def get_facilities():
+    """
+    Obtiene todas las instituciones/facilities con sus configuraciones
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "name": "...",
+                "code": "...",
+                "email": "...",
+                "contact_person": "...",
+                "status": "...",
+                "smtp_config": {...},
+                "backend_config": {...},
+                "whatsapp_config": {...}
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, name, code, email, contact_person, status,
+                   smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                   db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                   whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id, 
+                   whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+            FROM nextris.tbfacility
+            ORDER BY name
+        """
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        facilities = []
+        for row in results:
+            facilities.append({
+                'guid': row[0],
+                'name': row[1],
+                'code': row[2],
+                'email': row[3],
+                'contact_person': row[4],
+                'status': row[5],
+                'smtp_config': {
+                    'smtp_server': row[6],
+                    'smtp_port': row[7],
+                    'smtp_user': row[8],
+                    'smtp_password': row[9],
+                    'smtp_from': row[10],
+                    'smtp_from_name': row[11],
+                    'use_tls': row[12]
+                },
+                'backend_config': {
+                    'db_user': row[13],
+                    'db_password': row[14],
+                    'db_host': row[15],
+                    'db_port': row[16],
+                    'db_name': row[17],
+                    'base_folder': row[18],
+                    'ipserver': row[19]
+                },
+                'whatsapp_config': {
+                    'api_url': row[20],
+                    'api_token': row[21],
+                    'phone_number_id': row[22],
+                    'business_account_id': row[23],
+                    'webhook_verify_token': row[24],
+                    'is_active': row[25]
+                }
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': facilities
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities', methods=['POST'])
+@jwt_required()
+def create_facility():
+    """
+    Crea una nueva institución/facility
+    
+    Body JSON:
+    {
+        "name": "string" (required),
+        "code": "string" (required),
+        "email": "string" (optional),
+        "contact_person": "string" (optional),
+        "description": "string" (optional),
+        "address": "string" (optional),
+        "city": "string" (optional),
+        "country": "string" (optional),
+        "phone": "string" (optional),
+        "status": "string" (optional, default: "Active")
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Facility creada",
+        "data": {
+            "facility_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        name = data.get('name')
+        code = data.get('code')
+        
+        if not all([name, code]):
+            return jsonify({
+                'success': False,
+                'message': 'name y code son requeridos'
+            }), 400
+        
+        email = data.get('email', '')
+        contact_person = data.get('contact_person', '')
+        description = data.get('description', '')
+        address = data.get('address', '')
+        city = data.get('city', '')
+        country = data.get('country', '')
+        phone = data.get('phone', '')
+        status = data.get('status', 'Active')
+        
+        # Configuración SMTP (opcional)
+        smtp_server = data.get('smtp_server')
+        smtp_port = data.get('smtp_port', 587)
+        smtp_user = data.get('smtp_user')
+        smtp_password = data.get('smtp_password')
+        smtp_from = data.get('smtp_from')
+        smtp_from_name = data.get('smtp_from_name')
+        use_tls = data.get('use_tls', True)
+        
+        # Configuración Backend (opcional)
+        db_user = data.get('db_user')
+        db_password = data.get('db_password')
+        db_host = data.get('db_host')
+        db_port = data.get('db_port', 5432)
+        db_name = data.get('db_name')
+        base_folder = data.get('base_folder')
+        ipserver = data.get('ipserver')
+        
+        # Configuración WhatsApp (opcional)
+        whatsapp_api_url = data.get('whatsapp_api_url')
+        whatsapp_api_token = data.get('whatsapp_api_token')
+        whatsapp_phone_number_id = data.get('whatsapp_phone_number_id')
+        whatsapp_business_account_id = data.get('whatsapp_business_account_id')
+        whatsapp_webhook_verify_token = data.get('whatsapp_webhook_verify_token')
+        whatsapp_is_active = data.get('whatsapp_is_active', False)
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.tbfacility(
+                guid, name, code, email, contact_person, description, 
+                address, city, country, phone, status,
+                smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, name, code, email, contact_person, description,
+            address, city, country, phone, status,
+            smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+            db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+            whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+            whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Facility creada exitosamente',
+            'data': {
+                'facility_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_facility(facility_id):
+    """
+    Actualiza una facility existente
+    
+    Path:
+    - facility_id: GUID de la facility
+    
+    Body JSON (todos opcionales):
+    {
+        "name": "string",
+        "code": "string",
+        "email": "string",
+        "contact_person": "string",
+        "description": "string",
+        "address": "string",
+        "city": "string",
+        "country": "string",
+        "phone": "string",
+        "status": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Facility actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'name' in data:
+            updates.append("name = %s")
+            params.append(data['name'])
+        if 'code' in data:
+            updates.append("code = %s")
+            params.append(data['code'])
+        if 'email' in data:
+            updates.append("email = %s")
+            params.append(data['email'])
+        if 'contact_person' in data:
+            updates.append("contact_person = %s")
+            params.append(data['contact_person'])
+        if 'description' in data:
+            updates.append("description = %s")
+            params.append(data['description'])
+        if 'address' in data:
+            updates.append("address = %s")
+            params.append(data['address'])
+        if 'city' in data:
+            updates.append("city = %s")
+            params.append(data['city'])
+        if 'country' in data:
+            updates.append("country = %s")
+            params.append(data['country'])
+        if 'phone' in data:
+            updates.append("phone = %s")
+            params.append(data['phone'])
+        if 'status' in data:
+            updates.append("status = %s")
+            params.append(data['status'])
+        
+        # Configuración SMTP
+        if 'smtp_server' in data:
+            updates.append("smtp_server = %s")
+            params.append(data['smtp_server'])
+        if 'smtp_port' in data:
+            updates.append("smtp_port = %s")
+            params.append(data['smtp_port'])
+        if 'smtp_user' in data:
+            updates.append("smtp_user = %s")
+            params.append(data['smtp_user'])
+        if 'smtp_password' in data:
+            updates.append("smtp_password = %s")
+            params.append(data['smtp_password'])
+        if 'smtp_from' in data:
+            updates.append("smtp_from = %s")
+            params.append(data['smtp_from'])
+        if 'smtp_from_name' in data:
+            updates.append("smtp_from_name = %s")
+            params.append(data['smtp_from_name'])
+        if 'use_tls' in data:
+            updates.append("use_tls = %s")
+            params.append(data['use_tls'])
+        
+        # Configuración Backend
+        if 'db_user' in data:
+            updates.append("db_user = %s")
+            params.append(data['db_user'])
+        if 'db_password' in data:
+            updates.append("db_password = %s")
+            params.append(data['db_password'])
+        if 'db_host' in data:
+            updates.append("db_host = %s")
+            params.append(data['db_host'])
+        if 'db_port' in data:
+            updates.append("db_port = %s")
+            params.append(data['db_port'])
+        if 'db_name' in data:
+            updates.append("db_name = %s")
+            params.append(data['db_name'])
+        if 'base_folder' in data:
+            updates.append("base_folder = %s")
+            params.append(data['base_folder'])
+        if 'ipserver' in data:
+            updates.append("ipserver = %s")
+            params.append(data['ipserver'])
+        
+        # Configuración WhatsApp
+        if 'whatsapp_api_url' in data:
+            updates.append("whatsapp_api_url = %s")
+            params.append(data['whatsapp_api_url'])
+        if 'whatsapp_api_token' in data:
+            updates.append("whatsapp_api_token = %s")
+            params.append(data['whatsapp_api_token'])
+        if 'whatsapp_phone_number_id' in data:
+            updates.append("whatsapp_phone_number_id = %s")
+            params.append(data['whatsapp_phone_number_id'])
+        if 'whatsapp_business_account_id' in data:
+            updates.append("whatsapp_business_account_id = %s")
+            params.append(data['whatsapp_business_account_id'])
+        if 'whatsapp_webhook_verify_token' in data:
+            updates.append("whatsapp_webhook_verify_token = %s")
+            params.append(data['whatsapp_webhook_verify_token'])
+        if 'whatsapp_is_active' in data:
+            updates.append("whatsapp_is_active = %s")
+            params.append(data['whatsapp_is_active'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(facility_id)
+        query = f"UPDATE nextris.tbfacility SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Facility actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>', methods=['DELETE'])
+@jwt_required()
+def delete_facility(facility_id):
+    """
+    Elimina una facility
+    
+    Path:
+    - facility_id: GUID de la facility
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Facility eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.tbfacility WHERE guid = %s"
+        cursor.execute(query, (facility_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Facility eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "facility_id": "...",
+            "smtp_server": "...",
+            "smtp_port": 587,
+            "smtp_user": "...",
+            "smtp_password": "...",
+            "smtp_from": "...",
+            "smtp_from_name": "...",
+            "use_tls": true
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, facility_id, smtp_server, smtp_port, smtp_user, 
+                   smtp_password, smtp_from, smtp_from_name, use_tls
+            FROM nextris.facility_smtp_config
+            WHERE facility_id = %s
+        """
+        cursor.execute(query, (facility_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'guid': result[0],
+                    'facility_id': result[1],
+                    'smtp_server': result[2],
+                    'smtp_port': result[3],
+                    'smtp_user': result[4],
+                    'smtp_password': result[5],
+                    'smtp_from': result[6],
+                    'smtp_from_name': result[7],
+                    'use_tls': result[8]
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No se encontró configuración SMTP para esta facility'
+            }), 404
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/smtp', methods=['POST'])
+@jwt_required()
+def create_facility_smtp_config(facility_id):
+    """
+    Crea la configuración SMTP para una facility
+    
+    Body JSON:
+    {
+        "smtp_server": "string" (required),
+        "smtp_port": number (required),
+        "smtp_user": "string" (required),
+        "smtp_password": "string" (required),
+        "smtp_from": "string" (required),
+        "smtp_from_name": "string" (required),
+        "use_tls": boolean (optional, default: true)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración SMTP creada",
+        "data": {
+            "config_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        smtp_server = data.get('smtp_server')
+        smtp_port = data.get('smtp_port')
+        smtp_user = data.get('smtp_user')
+        smtp_password = data.get('smtp_password')
+        smtp_from = data.get('smtp_from')
+        smtp_from_name = data.get('smtp_from_name')
+        
+        if not all([smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name]):
+            return jsonify({
+                'success': False,
+                'message': 'Todos los campos SMTP son requeridos'
+            }), 400
+        
+        use_tls = data.get('use_tls', True)
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la facility existe
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.facility_smtp_config(
+                guid, facility_id, smtp_server, smtp_port, smtp_user, 
+                smtp_password, smtp_from, smtp_from_name, use_tls
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, facility_id, smtp_server, smtp_port, smtp_user,
+            smtp_password, smtp_from, smtp_from_name, use_tls
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración SMTP creada exitosamente',
+            'data': {
+                'config_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/smtp', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_facility_smtp_config(facility_id):
+    """
+    Actualiza la configuración SMTP de una facility
+    
+    Body JSON (todos opcionales):
+    {
+        "smtp_server": "string",
+        "smtp_port": number,
+        "smtp_user": "string",
+        "smtp_password": "string",
+        "smtp_from": "string",
+        "smtp_from_name": "string",
+        "use_tls": boolean
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración SMTP actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_smtp_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración SMTP no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'smtp_server' in data:
+            updates.append("smtp_server = %s")
+            params.append(data['smtp_server'])
+        if 'smtp_port' in data:
+            updates.append("smtp_port = %s")
+            params.append(data['smtp_port'])
+        if 'smtp_user' in data:
+            updates.append("smtp_user = %s")
+            params.append(data['smtp_user'])
+        if 'smtp_password' in data:
+            updates.append("smtp_password = %s")
+            params.append(data['smtp_password'])
+        if 'smtp_from' in data:
+            updates.append("smtp_from = %s")
+            params.append(data['smtp_from'])
+        if 'smtp_from_name' in data:
+            updates.append("smtp_from_name = %s")
+            params.append(data['smtp_from_name'])
+        if 'use_tls' in data:
+            updates.append("use_tls = %s")
+            params.append(data['use_tls'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(facility_id)
+        query = f"UPDATE nextris.facility_smtp_config SET {', '.join(updates)} WHERE facility_id = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración SMTP actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/smtp', methods=['DELETE'])
+@jwt_required()
+def delete_facility_smtp_config(facility_id):
+    """
+    Elimina la configuración SMTP de una facility
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración SMTP eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_smtp_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración SMTP no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.facility_smtp_config WHERE facility_id = %s"
+        cursor.execute(query, (facility_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración SMTP eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# CONFIGURACIÓN BACKEND POR FACILITY
+# ====================================================================
+
+@api_blueprint.route('/config/facilities/<facility_id>/backend', methods=['GET'])
+@jwt_required()
+def get_facility_backend_config(facility_id):
+    """
+    Obtiene la configuración de backend de una facility
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "facility_id": "...",
+            "db_user": "...",
+            "db_password": "...",
+            "db_host": "...",
+            "db_port": 5432,
+            "db_name": "...",
+            "base_folder": "...",
+            "ipserver": "..."
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, facility_id, db_user, db_password, db_host, 
+                   db_port, db_name, base_folder, ipserver
+            FROM nextris.facility_backend_config
+            WHERE facility_id = %s
+        """
+        cursor.execute(query, (facility_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'guid': result[0],
+                    'facility_id': result[1],
+                    'db_user': result[2],
+                    'db_password': result[3],
+                    'db_host': result[4],
+                    'db_port': result[5],
+                    'db_name': result[6],
+                    'base_folder': result[7],
+                    'ipserver': result[8]
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No se encontró configuración de backend para esta facility'
+            }), 404
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/backend', methods=['POST'])
+@jwt_required()
+def create_facility_backend_config(facility_id):
+    """
+    Crea la configuración de backend para una facility
+    
+    Body JSON:
+    {
+        "db_user": "string" (required),
+        "db_password": "string" (required),
+        "db_host": "string" (required),
+        "db_port": number (required),
+        "db_name": "string" (required),
+        "base_folder": "string" (optional),
+        "ipserver": "string" (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de backend creada",
+        "data": {
+            "config_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        db_user = data.get('db_user')
+        db_password = data.get('db_password')
+        db_host = data.get('db_host')
+        db_port = data.get('db_port')
+        db_name = data.get('db_name')
+        
+        if not all([db_user, db_password, db_host, db_port, db_name]):
+            return jsonify({
+                'success': False,
+                'message': 'db_user, db_password, db_host, db_port y db_name son requeridos'
+            }), 400
+        
+        base_folder = data.get('base_folder', '')
+        ipserver = data.get('ipserver', '')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la facility existe
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.facility_backend_config(
+                guid, facility_id, db_user, db_password, db_host, 
+                db_port, db_name, base_folder, ipserver
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, facility_id, db_user, db_password, db_host,
+            db_port, db_name, base_folder, ipserver
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de backend creada exitosamente',
+            'data': {
+                'config_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/backend', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_facility_backend_config(facility_id):
+    """
+    Actualiza la configuración de backend de una facility
+    
+    Body JSON (todos opcionales):
+    {
+        "db_user": "string",
+        "db_password": "string",
+        "db_host": "string",
+        "db_port": number,
+        "db_name": "string",
+        "base_folder": "string",
+        "ipserver": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de backend actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_backend_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración de backend no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'db_user' in data:
+            updates.append("db_user = %s")
+            params.append(data['db_user'])
+        if 'db_password' in data:
+            updates.append("db_password = %s")
+            params.append(data['db_password'])
+        if 'db_host' in data:
+            updates.append("db_host = %s")
+            params.append(data['db_host'])
+        if 'db_port' in data:
+            updates.append("db_port = %s")
+            params.append(data['db_port'])
+        if 'db_name' in data:
+            updates.append("db_name = %s")
+            params.append(data['db_name'])
+        if 'base_folder' in data:
+            updates.append("base_folder = %s")
+            params.append(data['base_folder'])
+        if 'ipserver' in data:
+            updates.append("ipserver = %s")
+            params.append(data['ipserver'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(facility_id)
+        query = f"UPDATE nextris.facility_backend_config SET {', '.join(updates)} WHERE facility_id = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de backend actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/backend', methods=['DELETE'])
+@jwt_required()
+def delete_facility_backend_config(facility_id):
+    """
+    Elimina la configuración de backend de una facility
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de backend eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_backend_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración de backend no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.facility_backend_config WHERE facility_id = %s"
+        cursor.execute(query, (facility_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de backend eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# CONFIGURACIÓN WHATSAPP API POR FACILITY
+# ====================================================================
+
+@api_blueprint.route('/config/facilities/<facility_id>/whatsapp', methods=['GET'])
+@jwt_required()
+def get_facility_whatsapp_config(facility_id):
+    """
+    Obtiene la configuración de WhatsApp API de una facility
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "facility_id": "...",
+            "api_url": "...",
+            "api_token": "...",
+            "phone_number_id": "...",
+            "business_account_id": "...",
+            "webhook_verify_token": "...",
+            "is_active": true
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, facility_id, api_url, api_token, phone_number_id, 
+                   business_account_id, webhook_verify_token, is_active
+            FROM nextris.facility_whatsapp_config
+            WHERE facility_id = %s
+        """
+        cursor.execute(query, (facility_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'guid': result[0],
+                    'facility_id': result[1],
+                    'api_url': result[2],
+                    'api_token': result[3],
+                    'phone_number_id': result[4],
+                    'business_account_id': result[5],
+                    'webhook_verify_token': result[6],
+                    'is_active': result[7]
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No se encontró configuración de WhatsApp para esta facility'
+            }), 404
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/whatsapp', methods=['POST'])
+@jwt_required()
+def create_facility_whatsapp_config(facility_id):
+    """
+    Crea la configuración de WhatsApp API para una facility
+    
+    Body JSON:
+    {
+        "api_url": "string" (required),
+        "api_token": "string" (required),
+        "phone_number_id": "string" (required),
+        "business_account_id": "string" (optional),
+        "webhook_verify_token": "string" (optional),
+        "is_active": boolean (optional, default: true)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de WhatsApp creada",
+        "data": {
+            "config_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        api_url = data.get('api_url')
+        api_token = data.get('api_token')
+        phone_number_id = data.get('phone_number_id')
+        
+        if not all([api_url, api_token, phone_number_id]):
+            return jsonify({
+                'success': False,
+                'message': 'api_url, api_token y phone_number_id son requeridos'
+            }), 400
+        
+        business_account_id = data.get('business_account_id', '')
+        webhook_verify_token = data.get('webhook_verify_token', '')
+        is_active = data.get('is_active', True)
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la facility existe
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.facility_whatsapp_config(
+                guid, facility_id, api_url, api_token, phone_number_id, 
+                business_account_id, webhook_verify_token, is_active
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            new_guid, facility_id, api_url, api_token, phone_number_id,
+            business_account_id, webhook_verify_token, is_active
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de WhatsApp creada exitosamente',
+            'data': {
+                'config_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/whatsapp', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_facility_whatsapp_config(facility_id):
+    """
+    Actualiza la configuración de WhatsApp API de una facility
+    
+    Body JSON (todos opcionales):
+    {
+        "api_url": "string",
+        "api_token": "string",
+        "phone_number_id": "string",
+        "business_account_id": "string",
+        "webhook_verify_token": "string",
+        "is_active": boolean
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de WhatsApp actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_whatsapp_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración de WhatsApp no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'api_url' in data:
+            updates.append("api_url = %s")
+            params.append(data['api_url'])
+        if 'api_token' in data:
+            updates.append("api_token = %s")
+            params.append(data['api_token'])
+        if 'phone_number_id' in data:
+            updates.append("phone_number_id = %s")
+            params.append(data['phone_number_id'])
+        if 'business_account_id' in data:
+            updates.append("business_account_id = %s")
+            params.append(data['business_account_id'])
+        if 'webhook_verify_token' in data:
+            updates.append("webhook_verify_token = %s")
+            params.append(data['webhook_verify_token'])
+        if 'is_active' in data:
+            updates.append("is_active = %s")
+            params.append(data['is_active'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(facility_id)
+        query = f"UPDATE nextris.facility_whatsapp_config SET {', '.join(updates)} WHERE facility_id = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de WhatsApp actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/whatsapp', methods=['DELETE'])
+@jwt_required()
+def delete_facility_whatsapp_config(facility_id):
+    """
+    Elimina la configuración de WhatsApp API de una facility
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Configuración de WhatsApp eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.facility_whatsapp_config WHERE facility_id=%s", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración de WhatsApp no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.facility_whatsapp_config WHERE facility_id = %s"
+        cursor.execute(query, (facility_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuración de WhatsApp eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500

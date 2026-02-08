@@ -938,15 +938,17 @@ def delete_appointment(appointment_id):
 
 
 @api_blueprint.route('/institutional/locations/<location_id>/physicians', methods=['GET'])
+@api_blueprint.route('/institutional/physicians', methods=['GET'])
 @jwt_required()
-def get_physicians_by_location(location_id):
+def get_physicians_by_location(location_id=None):
     """
-    Obtiene médicos solicitantes filtrados por ubicación
+    Obtiene médicos solicitantes filtrados opcionalmente por ubicación
     
     GET /api/institutional/locations/{location_id}/physicians
+    GET /api/institutional/physicians
     
     Path Parameters:
-    - location_id (OBLIGATORIO): UUID de la ubicación
+    - location_id (OPCIONAL): UUID de la ubicación
     
     Returns:
     {
@@ -954,18 +956,14 @@ def get_physicians_by_location(location_id):
         "data": [
             {
                 "guid": "...",
-                "description": "Dr. Juan Pérez"
+                "description": "Dr. Juan Pérez",
+                "location_id": "...",
+                "location_name": "..."
             }
         ]
     }
     """
     try:
-        if not location_id:
-            return jsonify({
-                'success': False,
-                'message': 'El parámetro location_id es obligatorio'
-            }), 400
-        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -976,14 +974,24 @@ def get_physicians_by_location(location_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
+        # Consulta con JOIN para incluir información de la ubicación
         query = """
-            SELECT guid, description
-            FROM nextris.isrequestingphysician
-            WHERE location_id = %s
-            ORDER BY description
+            SELECT p.guid, p.description, p.location_id, l.name as location_name
+            FROM nextris.isrequestingphysician p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+            WHERE 1=1
         """
         
-        cursor.execute(query, (location_id,))
+        params = []
+        
+        # Agregar filtro de ubicación si se proporciona
+        if location_id:
+            query += " AND p.location_id = %s"
+            params.append(location_id)
+        
+        query += " ORDER BY p.description"
+        
+        cursor.execute(query, params)
         results = cursor.fetchall()
         
         cursor.close()
@@ -993,7 +1001,9 @@ def get_physicians_by_location(location_id):
         for row in results:
             physicians_list.append({
                 'guid': row[0],
-                'description': row[1]
+                'description': row[1],
+                'location_id': row[2],
+                'location_name': row[3]
             })
         
         return jsonify({
@@ -1009,15 +1019,17 @@ def get_physicians_by_location(location_id):
 
 
 @api_blueprint.route('/institutional/locations/<location_id>/health-insurances', methods=['GET'])
+@api_blueprint.route('/institutional/health-insurances', methods=['GET'])
 @jwt_required()
-def get_health_insurances_by_location(location_id):
+def get_health_insurances_by_location(location_id=None):
     """
-    Obtiene obras sociales (price lists) filtradas por ubicación
+    Obtiene obras sociales (price lists) filtradas opcionalmente por ubicación
     
     GET /api/institutional/locations/{location_id}/health-insurances
+    GET /api/institutional/health-insurances
     
     Path Parameters:
-    - location_id (OBLIGATORIO): UUID de la ubicación
+    - location_id (OPCIONAL): UUID de la ubicación
     
     Returns:
     {
@@ -1025,18 +1037,14 @@ def get_health_insurances_by_location(location_id):
         "data": [
             {
                 "guid": "...",
-                "description": "OSDE"
+                "description": "OSDE",
+                "location_id": "...",
+                "location_name": "..."
             }
         ]
     }
     """
     try:
-        if not location_id:
-            return jsonify({
-                'success': False,
-                'message': 'El parámetro location_id es obligatorio'
-            }), 400
-        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -1047,14 +1055,24 @@ def get_health_insurances_by_location(location_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
+        # Consulta con JOIN para incluir información de la ubicación
         query = """
-            SELECT guid, description
-            FROM nextris.ispricelist
-            WHERE location_id = %s AND isactive = 1
-            ORDER BY description
+            SELECT p.guid, p.description, p.location_id, l.name as location_name
+            FROM nextris.ispricelist p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+            WHERE p.isactive = 1
         """
         
-        cursor.execute(query, (location_id,))
+        params = []
+        
+        # Agregar filtro de ubicación si se proporciona
+        if location_id:
+            query += " AND p.location_id = %s"
+            params.append(location_id)
+        
+        query += " ORDER BY p.description"
+        
+        cursor.execute(query, params)
         results = cursor.fetchall()
         
         cursor.close()
@@ -1064,7 +1082,9 @@ def get_health_insurances_by_location(location_id):
         for row in results:
             insurances_list.append({
                 'guid': row[0],
-                'description': row[1]
+                'description': row[1],
+                'location_id': row[2],
+                'location_name': row[3]
             })
         
         return jsonify({

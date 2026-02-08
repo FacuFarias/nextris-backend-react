@@ -34,10 +34,52 @@ except KeyError:
 app = create_app(app_config)
 Migrate(app, db)
 
-# Configurar CORS para permitir peticiones desde React
+# Configurar handlers de JWT para devolver JSON en API endpoints
+from flask_jwt_extended import JWTManager
+from flask import jsonify
+from apps import jwt
+
+# Handlers personalizados para JWT
+@jwt.unauthorized_loader
+def unauthorized_callback(callback):
+    """Cuando no hay token o es inválido"""
+    return jsonify({
+        'success': False,
+        'error': 'Token de autenticación requerido',
+        'msg': 'Missing Authorization Header'
+    }), 401
+
+@jwt.invalid_token_loader
+def invalid_token_callback(callback):
+    """Cuando el token es inválido"""
+    return jsonify({
+        'success': False,
+        'error': 'Token de autenticación inválido',
+        'msg': 'Invalid token'
+    }), 422
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    """Cuando el token ha expirado"""
+    return jsonify({
+        'success': False,
+        'error': 'Token de autenticación expirado',
+        'msg': 'Token has expired'
+    }), 401
+
+@jwt.revoked_token_loader
+def revoked_token_callback(jwt_header, jwt_payload):
+    """Cuando el token ha sido revocado"""
+    return jsonify({
+        'success': False,
+        'error': 'Token de autenticación revocado',
+        'msg': 'Token has been revoked'
+    }), 401
+
+# Configurar CORS para permitir peticiones desde React y portal de pacientes
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://148.230.72.8:5173"],
+        "origins": "*",
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Type", "Authorization"],

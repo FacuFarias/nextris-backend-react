@@ -3,9 +3,11 @@
 Copyright (c) 2019 - present AppSeed.us
 """
 
-bind = '0.0.0.0:5005'
-workers = 1
+bind = '0.0.0.0:5001'
+workers = 2
 accesslog = '-'
 loglevel = 'debug'
 capture_output = True
 enable_stdio_inheritance = True
+timeout = 300
+reload = True

@@ -172,6 +172,10 @@ def get_study_types_config():
     """
     Obtiene todos los tipos de estudio con sus relaciones
     
+    Query Parameters:
+    - modality_id (OPCIONAL): Filtrar tipos de estudio por modalidad
+    - bodypart_id (OPCIONAL): Filtrar tipos de estudio por parte del cuerpo
+    
     Returns:
     {
         "success": true,
@@ -190,6 +194,10 @@ def get_study_types_config():
     }
     """
     try:
+        # Obtener parámetros opcionales
+        modality_id = request.args.get('modality_id')
+        bodypart_id = request.args.get('bodypart_id')
+        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -200,6 +208,7 @@ def get_study_types_config():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
+        # Construir query base
         query = """
             SELECT st.guid, st.code, st.description, stg.description as studygroup, 
                    ap.description as bodypart, md.externalcode as modality, 
@@ -208,10 +217,24 @@ def get_study_types_config():
             INNER JOIN nextris.isstudytypegroup stg on stg.guid=st.studygroup_id
             INNER JOIN nextris.isanatomicalpart ap on ap.guid=st.bodypart_id
             INNER JOIN nextris.ismodality md on md.guid=st.modality_id
-            ORDER BY st.description ASC
+            WHERE 1=1
         """
         
-        cursor.execute(query)
+        params = []
+        
+        # Agregar filtro de modalidad si se proporciona
+        if modality_id:
+            query += " AND st.modality_id = %s"
+            params.append(modality_id)
+        
+        # Agregar filtro de parte del cuerpo si se proporciona
+        if bodypart_id:
+            query += " AND st.bodypart_id = %s"
+            params.append(bodypart_id)
+        
+        query += " ORDER BY st.description ASC"
+        
+        cursor.execute(query, params)
         results = cursor.fetchall()
         
         cursor.close()
@@ -559,6 +582,228 @@ def get_modalities():
         }), 500
 
 
+@api_blueprint.route('/config/modalities', methods=['POST'])
+@jwt_required()
+def create_modality():
+    """
+    Crea una nueva modalidad
+    
+    Body JSON:
+    {
+        "externalcode": "string" (required),
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad creada",
+        "data": {
+            "modality_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        externalcode = data.get('externalcode')
+        description = data.get('description')
+        
+        if not all([externalcode, description]):
+            return jsonify({
+                'success': False,
+                'message': 'externalcode y description son requeridos'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.ismodality(guid, externalcode, description) 
+            VALUES (%s, %s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, externalcode, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad creada exitosamente',
+            'data': {
+                'modality_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modalities/<modality_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_modality(modality_id):
+    """
+    Actualiza una modalidad existente
+    
+    Path:
+    - modality_id: GUID de la modalidad
+    
+    Body JSON (todos opcionales):
+    {
+        "externalcode": "string",
+        "description": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.ismodality WHERE guid=%s", (modality_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Modalidad no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'externalcode' in data:
+            updates.append("externalcode = %s")
+            params.append(data['externalcode'])
+        if 'description' in data:
+            updates.append("description = %s")
+            params.append(data['description'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(modality_id)
+        query = f"UPDATE nextris.ismodality SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modalities/<modality_id>', methods=['DELETE'])
+@jwt_required()
+def delete_modality(modality_id):
+    """
+    Elimina una modalidad
+    
+    Path:
+    - modality_id: GUID de la modalidad
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Modalidad eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.ismodality WHERE guid=%s", (modality_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Modalidad no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.ismodality WHERE guid = %s"
+        cursor.execute(query, (modality_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Modalidad eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
 @api_blueprint.route('/config/body-parts', methods=['GET'])
 @jwt_required()
 def get_body_parts():
@@ -604,6 +849,213 @@ def get_body_parts():
         return jsonify({
             'success': True,
             'data': body_parts
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts', methods=['POST'])
+@jwt_required()
+def create_body_part():
+    """
+    Crea una nueva parte del cuerpo
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo creada",
+        "data": {
+            "body_part_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isanatomicalpart(guid, description) 
+            VALUES (%s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo creada exitosamente',
+            'data': {
+                'body_part_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts/<body_part_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_body_part(body_part_id):
+    """
+    Actualiza una parte del cuerpo existente
+    
+    Path:
+    - body_part_id: GUID de la parte del cuerpo
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isanatomicalpart WHERE guid=%s", (body_part_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Parte del cuerpo no encontrada'
+            }), 404
+        
+        query = "UPDATE nextris.isanatomicalpart SET description = %s WHERE guid = %s"
+        
+        cursor.execute(query, (description, body_part_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/body-parts/<body_part_id>', methods=['DELETE'])
+@jwt_required()
+def delete_body_part(body_part_id):
+    """
+    Elimina una parte del cuerpo
+    
+    Path:
+    - body_part_id: GUID de la parte del cuerpo
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Parte del cuerpo eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isanatomicalpart WHERE guid=%s", (body_part_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Parte del cuerpo no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.isanatomicalpart WHERE guid = %s"
+        cursor.execute(query, (body_part_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Parte del cuerpo eliminada exitosamente'
         }), 200
         
     except Exception as e:
@@ -667,6 +1119,213 @@ def get_study_groups():
         }), 500
 
 
+@api_blueprint.route('/config/study-groups', methods=['POST'])
+@jwt_required()
+def create_study_group():
+    """
+    Crea un nuevo grupo de estudio
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio creado",
+        "data": {
+            "study_group_id": "uuid"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isstudytypegroup(guid, description) 
+            VALUES (%s, %s)
+        """
+        
+        cursor.execute(query, (new_guid, description))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio creado exitosamente',
+            'data': {
+                'study_group_id': new_guid
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups/<study_group_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_study_group(study_group_id):
+    """
+    Actualiza un grupo de estudio existente
+    
+    Path:
+    - study_group_id: GUID del grupo de estudio
+    
+    Body JSON:
+    {
+        "description": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        description = data.get('description')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytypegroup WHERE guid=%s", (study_group_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Grupo de estudio no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.isstudytypegroup SET description = %s WHERE guid = %s"
+        
+        cursor.execute(query, (description, study_group_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/study-groups/<study_group_id>', methods=['DELETE'])
+@jwt_required()
+def delete_study_group(study_group_id):
+    """
+    Elimina un grupo de estudio
+    
+    Path:
+    - study_group_id: GUID del grupo de estudio
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytypegroup WHERE guid=%s", (study_group_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Grupo de estudio no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.isstudytypegroup WHERE guid = %s"
+        cursor.execute(query, (study_group_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio eliminado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
 # ====================================================================
 # EQUIPOS (MÁQUINAS)
 # ====================================================================
@@ -675,10 +1334,10 @@ def get_study_groups():
 @jwt_required()
 def get_equipment():
     """
-    Obtiene equipos/máquinas filtrados por ubicación y opcionalmente por modalidad
+    Obtiene equipos/máquinas filtrados opcionalmente por ubicación y/o modalidad
     
     Query Parameters:
-    - location_id (OBLIGATORIO): Filtrar equipos por ubicación
+    - location_id (OPCIONAL): Filtrar equipos por ubicación
     - modality_id (OPCIONAL): Filtrar equipos por modalidad
     
     Returns:
@@ -696,16 +1355,8 @@ def get_equipment():
     }
     """
     try:
-        # Obtener parámetro location_id (OBLIGATORIO)
+        # Obtener parámetros opcionales
         location_id = request.args.get('location_id')
-        
-        if not location_id:
-            return jsonify({
-                'success': False,
-                'message': 'El parámetro location_id es obligatorio'
-            }), 400
-        
-        # Obtener parámetro modality_id (OPCIONAL)
         modality_id = request.args.get('modality_id')
         
         config = get_db_config()
@@ -723,10 +1374,15 @@ def get_equipment():
             SELECT e.guid, e.description, e.aetitle, e.externalcode, m.description as modality
             FROM nextris.isequipment e
             LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
-            WHERE e.location_id = %s
+            WHERE 1=1
         """
         
-        params = [location_id]
+        params = []
+        
+        # Agregar filtro de ubicación si se proporciona
+        if location_id:
+            query += " AND e.location_id = %s"
+            params.append(location_id)
         
         # Agregar filtro de modalidad si se proporciona
         if modality_id:
@@ -908,7 +1564,7 @@ def delete_equipment(equipment_id):
 @jwt_required()
 def get_locations():
     """
-    Obtiene todas las ubicaciones
+    Obtiene todas las ubicaciones con todos sus datos
     
     Returns:
     {
@@ -916,9 +1572,19 @@ def get_locations():
         "data": [
             {
                 "guid": "...",
-                "description": "...",
+                "facility_id": "...",
+                "name": "...",
+                "code": "...",
                 "address": "...",
-                "phone": "..."
+                "phone": "...",
+                "status": "...",
+                "created_at": "...",
+                "updated_at": "...",
+                "id_patientdomain": "...",
+                "mail": "...",
+                "logo_path": "...",
+                "geographic_location": "...",
+                "timezone": "..."
             }
         ]
     }
@@ -934,7 +1600,14 @@ def get_locations():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        query = "SELECT guid, name, code, address, phone FROM nextris.tblocation ORDER BY name"
+        query = """
+            SELECT l.guid, l.facility_id, l.name, l.code, l.address, l.phone, l.status, 
+                   l.created_at, l.updated_at, l.id_patientdomain, l.mail, l.logo_path, 
+                   l.geographic_location, l.timezone, f.name as facility_name
+            FROM nextris.tblocation l
+            LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+            ORDER BY l.name
+        """
         cursor.execute(query)
         results = cursor.fetchall()
         
@@ -945,10 +1618,20 @@ def get_locations():
         for row in results:
             locations.append({
                 'guid': row[0],
-                'name': row[1],
-                'code': row[2],
-                'address': row[3],
-                'phone': row[4]
+                'facility_id': row[1],
+                'facility_name': row[14],
+                'name': row[2],
+                'code': row[3],
+                'address': row[4],
+                'phone': row[5],
+                'status': row[6],
+                'created_at': row[7].isoformat() if row[7] else None,
+                'updated_at': row[8].isoformat() if row[8] else None,
+                'id_patientdomain': row[9],
+                'mail': row[10],
+                'logo_path': row[11],
+                'geographic_location': row[12],
+                'timezone': row[13]
             })
         
         return jsonify({
@@ -971,9 +1654,16 @@ def create_location():
     
     Body JSON:
     {
-        "description": "string" (required),
+        "name": "string" (required),
+        "code": "string" (optional),
+        "facility_id": "uuid" (optional),
         "address": "string" (optional),
-        "phone": "string" (optional)
+        "phone": "string" (optional),
+        "status": "string" (optional, default: 'Active'),
+        "id_patientdomain": "string" (optional),
+        "mail": "string" (optional),
+        "geographic_location": "string" (optional),
+        "timezone": "string" (optional)
     }
     
     Returns:
@@ -995,7 +1685,6 @@ def create_location():
             }), 400
         
         name = data.get('name')
-        code = data.get('code', '')
         
         if not name:
             return jsonify({
@@ -1003,8 +1692,16 @@ def create_location():
                 'message': 'name es requerido'
             }), 400
         
+        # Obtener todos los campos opcionales
+        facility_id = data.get('facility_id')
+        code = data.get('code', '')
         address = data.get('address', '')
         phone = data.get('phone', '')
+        status = data.get('status', 'Active')
+        id_patientdomain = data.get('id_patientdomain', '')
+        mail = data.get('mail', '')
+        geographic_location = data.get('geographic_location', '')
+        timezone = data.get('timezone', '')
         
         config = get_db_config()
         if not config:
@@ -1019,11 +1716,18 @@ def create_location():
         new_guid = str(uuid.uuid4())
         
         query = """
-            INSERT INTO nextris.tblocation(guid, name, code, address, phone) 
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO nextris.tblocation(
+                guid, facility_id, name, code, address, phone, status,
+                created_at, updated_at, id_patientdomain, mail, 
+                geographic_location, timezone
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s)
         """
         
-        cursor.execute(query, (new_guid, name, code, address, phone))
+        cursor.execute(query, (
+            new_guid, facility_id, name, code, address, phone, status,
+            id_patientdomain, mail, geographic_location, timezone
+        ))
         
         connection.commit()
         cursor.close()
@@ -1036,6 +1740,131 @@ def create_location():
                 'location_id': new_guid
             }
         }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations/<location_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_location(location_id):
+    """
+    Actualiza una ubicación existente
+    
+    Path:
+    - location_id: GUID de la ubicación
+    
+    Body JSON (todos opcionales):
+    {
+        "name": "string",
+        "code": "string",
+        "facility_id": "uuid",
+        "address": "string",
+        "phone": "string",
+        "status": "string",
+        "id_patientdomain": "string",
+        "mail": "string",
+        "geographic_location": "string",
+        "timezone": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Ubicación actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'name' in data:
+            updates.append("name = %s")
+            params.append(data['name'])
+        if 'code' in data:
+            updates.append("code = %s")
+            params.append(data['code'])
+        if 'facility_id' in data:
+            updates.append("facility_id = %s")
+            params.append(data['facility_id'])
+        if 'address' in data:
+            updates.append("address = %s")
+            params.append(data['address'])
+        if 'phone' in data:
+            updates.append("phone = %s")
+            params.append(data['phone'])
+        if 'status' in data:
+            updates.append("status = %s")
+            params.append(data['status'])
+        if 'id_patientdomain' in data:
+            updates.append("id_patientdomain = %s")
+            params.append(data['id_patientdomain'])
+        if 'mail' in data:
+            updates.append("mail = %s")
+            params.append(data['mail'])
+        if 'geographic_location' in data:
+            updates.append("geographic_location = %s")
+            params.append(data['geographic_location'])
+        if 'timezone' in data:
+            updates.append("timezone = %s")
+            params.append(data['timezone'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        # Agregar updated_at
+        updates.append("updated_at = NOW()")
+        
+        params.append(location_id)
+        query = f"UPDATE nextris.tblocation SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación actualizada exitosamente'
+        }), 200
         
     except Exception as e:
         return jsonify({
@@ -1107,7 +1936,7 @@ def delete_location(location_id):
 @jwt_required()
 def get_facilities():
     """
-    Obtiene todas las instituciones/facilities
+    Obtiene todas las instituciones/facilities con sus configuraciones
     
     Returns:
     {
@@ -1119,7 +1948,10 @@ def get_facilities():
                 "code": "...",
                 "email": "...",
                 "contact_person": "...",
-                "status": "..."
+                "status": "...",
+                "smtp_config": {...},
+                "backend_config": {...},
+                "whatsapp_config": {...}
             }
         ]
     }
@@ -1136,7 +1968,11 @@ def get_facilities():
         cursor = connection.cursor()
         
         query = """
-            SELECT guid, name, code, email, contact_person, status
+            SELECT guid, name, code, email, contact_person, status,
+                   smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                   db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                   whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id, 
+                   whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
             FROM nextris.tbfacility
             ORDER BY name
         """
@@ -1154,7 +1990,33 @@ def get_facilities():
                 'code': row[2],
                 'email': row[3],
                 'contact_person': row[4],
-                'status': row[5]
+                'status': row[5],
+                'smtp_config': {
+                    'smtp_server': row[6],
+                    'smtp_port': row[7],
+                    'smtp_user': row[8],
+                    'smtp_password': row[9],
+                    'smtp_from': row[10],
+                    'smtp_from_name': row[11],
+                    'use_tls': row[12]
+                },
+                'backend_config': {
+                    'db_user': row[13],
+                    'db_password': row[14],
+                    'db_host': row[15],
+                    'db_port': row[16],
+                    'db_name': row[17],
+                    'base_folder': row[18],
+                    'ipserver': row[19]
+                },
+                'whatsapp_config': {
+                    'api_url': row[20],
+                    'api_token': row[21],
+                    'phone_number_id': row[22],
+                    'business_account_id': row[23],
+                    'webhook_verify_token': row[24],
+                    'is_active': row[25]
+                }
             })
         
         return jsonify({
@@ -1225,6 +2087,32 @@ def create_facility():
         phone = data.get('phone', '')
         status = data.get('status', 'Active')
         
+        # Configuración SMTP (opcional)
+        smtp_server = data.get('smtp_server')
+        smtp_port = data.get('smtp_port', 587)
+        smtp_user = data.get('smtp_user')
+        smtp_password = data.get('smtp_password')
+        smtp_from = data.get('smtp_from')
+        smtp_from_name = data.get('smtp_from_name')
+        use_tls = data.get('use_tls', True)
+        
+        # Configuración Backend (opcional)
+        db_user = data.get('db_user')
+        db_password = data.get('db_password')
+        db_host = data.get('db_host')
+        db_port = data.get('db_port', 5432)
+        db_name = data.get('db_name')
+        base_folder = data.get('base_folder')
+        ipserver = data.get('ipserver')
+        
+        # Configuración WhatsApp (opcional)
+        whatsapp_api_url = data.get('whatsapp_api_url')
+        whatsapp_api_token = data.get('whatsapp_api_token')
+        whatsapp_phone_number_id = data.get('whatsapp_phone_number_id')
+        whatsapp_business_account_id = data.get('whatsapp_business_account_id')
+        whatsapp_webhook_verify_token = data.get('whatsapp_webhook_verify_token')
+        whatsapp_is_active = data.get('whatsapp_is_active', False)
+        
         config = get_db_config()
         if not config:
             return jsonify({
@@ -1240,14 +2128,25 @@ def create_facility():
         query = """
             INSERT INTO nextris.tbfacility(
                 guid, name, code, email, contact_person, description, 
-                address, city, country, phone, status
+                address, city, country, phone, status,
+                smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
             ) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s)
         """
         
         cursor.execute(query, (
             new_guid, name, code, email, contact_person, description,
-            address, city, country, phone, status
+            address, city, country, phone, status,
+            smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+            db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+            whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+            whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
         ))
         
         connection.commit()
@@ -1362,6 +2261,72 @@ def update_facility(facility_id):
             updates.append("status = %s")
             params.append(data['status'])
         
+        # Configuración SMTP
+        if 'smtp_server' in data:
+            updates.append("smtp_server = %s")
+            params.append(data['smtp_server'])
+        if 'smtp_port' in data:
+            updates.append("smtp_port = %s")
+            params.append(data['smtp_port'])
+        if 'smtp_user' in data:
+            updates.append("smtp_user = %s")
+            params.append(data['smtp_user'])
+        if 'smtp_password' in data:
+            updates.append("smtp_password = %s")
+            params.append(data['smtp_password'])
+        if 'smtp_from' in data:
+            updates.append("smtp_from = %s")
+            params.append(data['smtp_from'])
+        if 'smtp_from_name' in data:
+            updates.append("smtp_from_name = %s")
+            params.append(data['smtp_from_name'])
+        if 'use_tls' in data:
+            updates.append("use_tls = %s")
+            params.append(data['use_tls'])
+        
+        # Configuración Backend
+        if 'db_user' in data:
+            updates.append("db_user = %s")
+            params.append(data['db_user'])
+        if 'db_password' in data:
+            updates.append("db_password = %s")
+            params.append(data['db_password'])
+        if 'db_host' in data:
+            updates.append("db_host = %s")
+            params.append(data['db_host'])
+        if 'db_port' in data:
+            updates.append("db_port = %s")
+            params.append(data['db_port'])
+        if 'db_name' in data:
+            updates.append("db_name = %s")
+            params.append(data['db_name'])
+        if 'base_folder' in data:
+            updates.append("base_folder = %s")
+            params.append(data['base_folder'])
+        if 'ipserver' in data:
+            updates.append("ipserver = %s")
+            params.append(data['ipserver'])
+        
+        # Configuración WhatsApp
+        if 'whatsapp_api_url' in data:
+            updates.append("whatsapp_api_url = %s")
+            params.append(data['whatsapp_api_url'])
+        if 'whatsapp_api_token' in data:
+            updates.append("whatsapp_api_token = %s")
+            params.append(data['whatsapp_api_token'])
+        if 'whatsapp_phone_number_id' in data:
+            updates.append("whatsapp_phone_number_id = %s")
+            params.append(data['whatsapp_phone_number_id'])
+        if 'whatsapp_business_account_id' in data:
+            updates.append("whatsapp_business_account_id = %s")
+            params.append(data['whatsapp_business_account_id'])
+        if 'whatsapp_webhook_verify_token' in data:
+            updates.append("whatsapp_webhook_verify_token = %s")
+            params.append(data['whatsapp_webhook_verify_token'])
+        if 'whatsapp_is_active' in data:
+            updates.append("whatsapp_is_active = %s")
+            params.append(data['whatsapp_is_active'])
+        
         if not updates:
             cursor.close()
             connection.close()
@@ -1437,6 +2402,2842 @@ def delete_facility(facility_id):
         return jsonify({
             'success': True,
             'message': 'Facility eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# AGENDAS DE EQUIPOS
+# ====================================================================
+
+@api_blueprint.route('/config/equipment/<equipment_id>/schedule', methods=['GET'])
+@jwt_required()
+def get_equipment_schedule(equipment_id):
+    """
+    Obtiene la agenda de un equipo específico
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "day": 1,
+                "time_from": "08:00",
+                "time_to": "17:00"
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT guid, day, timefrom, timeto
+            FROM nextris.isagendaequip 
+            WHERE idequipment = %s
+            ORDER BY day, timefrom
+        """
+        cursor.execute(query, (equipment_id,))
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        schedule = []
+        for row in results:
+            schedule.append({
+                'guid': row[0],
+                'day': row[1],
+                'time_from': row[2].strftime('%H:%M') if row[2] else None,
+                'time_to': row[3].strftime('%H:%M') if row[3] else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': schedule
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/equipment/<equipment_id>/schedule', methods=['POST'])
+@jwt_required()
+def create_equipment_schedule(equipment_id):
+    """
+    Agrega un día de agenda para un equipo
+    
+    Body JSON:
+    {
+        "day": number (required, 0-6 donde 0=Domingo),
+        "time_from": "HH:MM" (required),
+        "time_to": "HH:MM" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Agenda creada",
+        "data": {
+            "schedule_id": "uuid",
+            "day": 1,
+            "time_from": "08:00",
+            "time_to": "17:00"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        day = data.get('day')
+        time_from = data.get('time_from')
+        time_to = data.get('time_to')
+        
+        if day is None or not time_from or not time_to:
+            return jsonify({
+                'success': False,
+                'message': 'day, time_from y time_to son requeridos'
+            }), 400
+        
+        # Validar día (0-6)
+        if not isinstance(day, int) or day < 0 or day > 6:
+            return jsonify({
+                'success': False,
+                'message': 'day debe ser un número entre 0 (Domingo) y 6 (Sábado)'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el equipo existe
+        cursor.execute("SELECT 1 FROM nextris.isequipment WHERE guid=%s", (equipment_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Equipo no encontrado'
+            }), 404
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isagendaequip (guid, idequipment, day, timefrom, timeto)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING guid, day, timefrom, timeto
+        """
+        
+        cursor.execute(query, (new_guid, equipment_id, day, time_from, time_to))
+        result = cursor.fetchone()
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Agenda creada exitosamente',
+            'data': {
+                'schedule_id': result[0],
+                'day': result[1],
+                'time_from': result[2].strftime('%H:%M') if result[2] else None,
+                'time_to': result[3].strftime('%H:%M') if result[3] else None
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/equipment/<equipment_id>/schedule/<schedule_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_equipment_schedule(equipment_id, schedule_id):
+    """
+    Actualiza un día de agenda de un equipo
+    
+    Body JSON (todos opcionales):
+    {
+        "day": number,
+        "time_from": "HH:MM",
+        "time_to": "HH:MM"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Agenda actualizada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute(
+            "SELECT 1 FROM nextris.isagendaequip WHERE guid=%s AND idequipment=%s", 
+            (schedule_id, equipment_id)
+        )
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Agenda no encontrada'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'day' in data:
+            if not isinstance(data['day'], int) or data['day'] < 0 or data['day'] > 6:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'day debe ser un número entre 0 y 6'
+                }), 400
+            updates.append("day = %s")
+            params.append(data['day'])
+        
+        if 'time_from' in data:
+            updates.append("timefrom = %s")
+            params.append(data['time_from'])
+        
+        if 'time_to' in data:
+            updates.append("timeto = %s")
+            params.append(data['time_to'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(schedule_id)
+        query = f"UPDATE nextris.isagendaequip SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Agenda actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/equipment/<equipment_id>/schedule/<schedule_id>', methods=['DELETE'])
+@jwt_required()
+def delete_equipment_schedule(equipment_id, schedule_id):
+    """
+    Elimina un día de agenda de un equipo
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Agenda eliminada"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute(
+            "SELECT 1 FROM nextris.isagendaequip WHERE guid=%s AND idequipment=%s", 
+            (schedule_id, equipment_id)
+        )
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Agenda no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.isagendaequip WHERE guid = %s"
+        cursor.execute(query, (schedule_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Agenda eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# GESTIÓN DE USUARIOS
+# ====================================================================
+
+@api_blueprint.route('/config/users', methods=['GET'])
+@jwt_required()
+def get_config_users():
+    """
+    Obtiene todos los usuarios del sistema
+    
+    Query Parameters:
+    - include_inactive: true/false (opcional, default: false)
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "username": "...",
+                "role": "...",
+                "name": "...",
+                "surname": "...",
+                "national_number": "...",
+                "email": "...",
+                "is_active": true
+            }
+        ]
+    }
+    """
+    try:
+        include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        if include_inactive:
+            query = """
+                SELECT u.guid, u.username, r.description, u.name, u.surname, 
+                       u.nationalnumber, u.mail, u.isactive
+                FROM nextris.tbuser u
+                INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                ORDER BY u.isactive DESC, u.username
+            """
+        else:
+            query = """
+                SELECT u.guid, u.username, r.description, u.name, u.surname, 
+                       u.nationalnumber, u.mail, u.isactive
+                FROM nextris.tbuser u
+                INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                WHERE u.isactive = 1
+                ORDER BY u.username
+            """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        users = []
+        for row in results:
+            users.append({
+                'guid': row[0],
+                'username': row[1],
+                'role': row[2],
+                'name': row[3],
+                'surname': row[4],
+                'national_number': row[5],
+                'email': row[6],
+                'is_active': bool(row[7])
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': users
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users', methods=['POST'])
+@jwt_required()
+def create_config_user():
+    """
+    Crea un nuevo usuario
+    
+    Body JSON:
+    {
+        "username": "string" (required),
+        "email": "string" (required),
+        "name": "string" (required),
+        "surname": "string" (required),
+        "national_number": "string" (optional),
+        "role_id": "uuid" (required),
+        "password": "string" (optional, default: "1234")
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Usuario creado",
+        "data": {
+            "user_id": "uuid",
+            "username": "...",
+            "default_password": "1234"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        username = data.get('username')
+        email = data.get('email')
+        name = data.get('name')
+        surname = data.get('surname')
+        role_id = data.get('role_id')
+        
+        if not all([username, email, name, surname, role_id]):
+            return jsonify({
+                'success': False,
+                'message': 'username, email, name, surname y role_id son requeridos'
+            }), 400
+        
+        national_number = data.get('national_number', '')
+        password = data.get('password', '1234')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar si el username ya existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE username = %s", (username,))
+        if cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El nombre de usuario ya existe'
+            }), 400
+        
+        # Verificar que el rol existe
+        cursor.execute("SELECT 1 FROM nextris.isrole WHERE guid = %s", (role_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Rol no encontrado'
+            }), 404
+        
+        # Hashear contraseña
+        from werkzeug.security import generate_password_hash
+        password_hash = generate_password_hash(password)
+        
+        new_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.tbuser(
+                guid, username, mail, password, name, surname, 
+                nationalnumber, idrole, isactive, first_login
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, 1)
+            RETURNING guid, username
+        """
+        
+        cursor.execute(query, (
+            new_guid, username, email, password_hash, name, surname,
+            national_number, role_id
+        ))
+        
+        result = cursor.fetchone()
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario creado exitosamente',
+            'data': {
+                'user_id': result[0],
+                'username': result[1],
+                'default_password': password
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_config_user(user_id):
+    """
+    Actualiza un usuario existente
+    
+    Body JSON (todos opcionales):
+    {
+        "username": "string",
+        "email": "string",
+        "name": "string",
+        "surname": "string",
+        "national_number": "string",
+        "role_id": "uuid"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Usuario actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el usuario existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        # Construir query dinámicamente
+        updates = []
+        params = []
+        
+        if 'username' in data:
+            # Verificar que el nuevo username no esté en uso por otro usuario
+            cursor.execute(
+                "SELECT 1 FROM nextris.tbuser WHERE username = %s AND guid != %s",
+                (data['username'], user_id)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'El nombre de usuario ya está en uso'
+                }), 400
+            updates.append("username = %s")
+            params.append(data['username'])
+        
+        if 'email' in data:
+            updates.append("mail = %s")
+            params.append(data['email'])
+        
+        if 'name' in data:
+            updates.append("name = %s")
+            params.append(data['name'])
+        
+        if 'surname' in data:
+            updates.append("surname = %s")
+            params.append(data['surname'])
+        
+        if 'national_number' in data:
+            updates.append("nationalnumber = %s")
+            params.append(data['national_number'])
+        
+        if 'role_id' in data:
+            # Verificar que el rol existe
+            cursor.execute("SELECT 1 FROM nextris.isrole WHERE guid = %s", (data['role_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Rol no encontrado'
+                }), 404
+            updates.append("idrole = %s")
+            params.append(data['role_id'])
+        
+        if not updates:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+        
+        params.append(user_id)
+        query = f"UPDATE nextris.tbuser SET {', '.join(updates)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>/deactivate', methods=['POST'])
+@jwt_required()
+def deactivate_user(user_id):
+    """
+    Desactiva un usuario (no lo elimina)
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Usuario desactivado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.tbuser SET isactive = 0 WHERE guid = %s"
+        cursor.execute(query, (user_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario desactivado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>/activate', methods=['POST'])
+@jwt_required()
+def activate_user(user_id):
+    """
+    Activa un usuario previamente desactivado
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Usuario activado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.tbuser SET isactive = 1 WHERE guid = %s"
+        cursor.execute(query, (user_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario activado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>/reset-password', methods=['POST'])
+@jwt_required()
+def reset_user_password(user_id):
+    """
+    Resetea la contraseña de un usuario
+    
+    Body JSON:
+    {
+        "new_password": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Contraseña reseteada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'new_password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'new_password es requerido'
+            }), 400
+        
+        new_password = data.get('new_password')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el usuario existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        # Hashear la nueva contraseña
+        from werkzeug.security import generate_password_hash
+        password_hash = generate_password_hash(new_password)
+        
+        # Actualizar contraseña y marcar como primer login
+        query = """
+            UPDATE nextris.tbuser 
+            SET password = %s, first_login = 1 
+            WHERE guid = %s
+        """
+        cursor.execute(query, (password_hash, user_id))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña reseteada exitosamente. El usuario deberá cambiarla en su primer inicio de sesión.'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>', methods=['DELETE'])
+@jwt_required()
+def delete_config_user(user_id):
+    """
+    Elimina permanentemente un usuario (usar con precaución)
+    Recomendado usar deactivate en su lugar
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Usuario eliminado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.tbuser WHERE guid = %s"
+        cursor.execute(query, (user_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario eliminado permanentemente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# ROLES
+# ====================================================================
+
+@api_blueprint.route('/config/roles', methods=['GET'])
+@jwt_required()
+def get_roles():
+    """
+    Obtiene todos los roles del sistema
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = "SELECT guid, description FROM nextris.isrole ORDER BY description"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        roles = []
+        for row in results:
+            roles.append({
+                'guid': row[0],
+                'description': row[1]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': roles
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# GESTIÓN DE PACIENTES
+# ====================================================================
+
+@api_blueprint.route('/config/patients', methods=['GET'])
+@jwt_required()
+def get_config_patients():
+    """
+    Obtiene todos los pacientes del sistema
+    
+    Query Parameters:
+    - include_inactive: true/false (opcional, default: false)
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "name": "...",
+                "national_code": "...",
+                "birthdate": "...",
+                "username": "...",
+                "status": "...",
+                "last_login": "..."
+            }
+        ]
+    }
+    """
+    try:
+        include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        if include_inactive:
+            query = """
+                SELECT p.guid, CONCAT(dp.surname, ' ', dp.name) as name, 
+                       dp.nationalcode, dp.birthdate, p.username, p.status, p.lastlogin
+                FROM nextris.tbuser_patient as p
+                LEFT JOIN nextris.datapatient dp on dp.guid=p.datapatient_id
+                ORDER BY p.guid ASC
+            """
+        else:
+            query = """
+                SELECT p.guid, CONCAT(dp.surname, ' ', dp.name) as name, 
+                       dp.nationalcode, dp.birthdate, p.username, p.status, p.lastlogin
+                FROM nextris.tbuser_patient as p
+                LEFT JOIN nextris.datapatient dp on dp.guid=p.datapatient_id
+                WHERE p.status = 'Active'
+                ORDER BY p.guid ASC
+            """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        patients = []
+        for row in results:
+            patients.append({
+                'guid': row[0],
+                'name': row[1],
+                'national_code': row[2],
+                'birthdate': row[3].strftime('%d/%m/%Y') if row[3] else None,
+                'username': row[4],
+                'status': row[5],
+                'last_login': row[6].isoformat() if row[6] else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': patients
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients/<patient_id>', methods=['GET'])
+@jwt_required()
+def get_config_patient(patient_id):
+    """
+    Obtiene los datos completos de un paciente
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "patient_id": "...",
+            "username": "...",
+            "status": "...",
+            "name": "...",
+            "surname": "...",
+            "national_code": "...",
+            "birthdate": "...",
+            "patient_id_number": "...",
+            "sex_code": "...",
+            "phone": "...",
+            "email": "..."
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener datos de tbuser_patient
+        user_query = """
+            SELECT username, datapatient_id, status
+            FROM nextris.tbuser_patient
+            WHERE guid = %s
+        """
+        cursor.execute(user_query, (patient_id,))
+        user_result = cursor.fetchone()
+        
+        if not user_result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        username = user_result[0]
+        datapatient_id = user_result[1]
+        status = user_result[2]
+        
+        # Obtener datos de datapatient
+        patient_query = """
+            SELECT name, surname, nationalcode, birthdate, patientid, 
+                   sexcode, phone, email
+            FROM nextris.datapatient
+            WHERE guid = %s
+        """
+        cursor.execute(patient_query, (datapatient_id,))
+        patient_result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        if not patient_result:
+            return jsonify({
+                'success': False,
+                'message': 'Datos del paciente no encontrados'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'patient_id': patient_id,
+                'username': username,
+                'status': status,
+                'name': patient_result[0],
+                'surname': patient_result[1],
+                'national_code': patient_result[2],
+                'birthdate': patient_result[3].strftime('%Y-%m-%d') if patient_result[3] else None,
+                'patient_id_number': patient_result[4],  # CUIL
+                'sex_code': patient_result[5],
+                'phone': patient_result[6],
+                'email': patient_result[7]
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients', methods=['POST'])
+@jwt_required()
+def create_config_patient():
+    """
+    Crea un nuevo paciente
+    
+    Body JSON:
+    {
+        "name": "string" (required),
+        "surname": "string" (required),
+        "national_code": "string" (required),
+        "birthdate": "YYYY-MM-DD" (required),
+        "sex_code": "string" (required),
+        "patient_id_number": "string" (optional, CUIL),
+        "phone": "string" (optional),
+        "email": "string" (optional),
+        "username": "string" (optional, se genera automáticamente si no se proporciona),
+        "health_card": "string" (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Paciente creado",
+        "data": {
+            "patient_id": "uuid",
+            "username": "...",
+            "default_password": "next"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        name = data.get('name')
+        surname = data.get('surname')
+        national_code = data.get('national_code')
+        birthdate = data.get('birthdate')
+        sex_code = data.get('sex_code')
+        
+        if not all([name, surname, national_code, birthdate, sex_code]):
+            return jsonify({
+                'success': False,
+                'message': 'name, surname, national_code, birthdate y sex_code son requeridos'
+            }), 400
+        
+        patient_id_number = data.get('patient_id_number', '')
+        phone = data.get('phone', '')
+        email = data.get('email', '')
+        health_card = data.get('health_card', '')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Insertar en datapatient
+        datapatient_guid = str(uuid.uuid4())
+        
+        insert_datapatient = """
+            INSERT INTO nextris.datapatient(
+                guid, surname, name, nationalcode, birthdate, patientid, 
+                sexcode, phone, email, healthcard
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING guid
+        """
+        
+        cursor.execute(insert_datapatient, (
+            datapatient_guid, surname, name, national_code, birthdate, 
+            patient_id_number, sex_code, phone, email, health_card
+        ))
+        
+        # Generar username
+        custom_username = data.get('username', '').strip()
+        
+        if custom_username:
+            base_username = custom_username.lower().replace(' ', '')
+        else:
+            # Generar automáticamente: primera letra del nombre + apellido
+            base_username = (name[0] + surname).lower().replace(' ', '')
+        
+        # Verificar si el username ya existe
+        cursor.execute(
+            "SELECT COUNT(*) FROM nextris.tbuser_patient WHERE username LIKE %s",
+            (f"{base_username}%",)
+        )
+        count = cursor.fetchone()[0]
+        
+        if count > 0:
+            # Buscar el siguiente número disponible
+            for i in range(1, 100):
+                test_username = f"{base_username}{i:02d}"
+                cursor.execute(
+                    "SELECT COUNT(*) FROM nextris.tbuser_patient WHERE username = %s",
+                    (test_username,)
+                )
+                if cursor.fetchone()[0] == 0:
+                    username = test_username
+                    break
+            else:
+                username = f"{base_username}{count + 1:02d}"
+        else:
+            username = base_username
+        
+        # Hashear contraseña
+        from werkzeug.security import generate_password_hash
+        password_hash = generate_password_hash('next')
+        
+        # Insertar en tbuser_patient
+        user_patient_guid = str(uuid.uuid4())
+        
+        insert_user_patient = """
+            INSERT INTO nextris.tbuser_patient (
+                guid, username, password, status, datapatient_id
+            ) VALUES (%s, %s, %s, %s, %s)
+            RETURNING guid
+        """
+        
+        cursor.execute(insert_user_patient, (
+            user_patient_guid, username, password_hash, 'Active', datapatient_guid
+        ))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente creado exitosamente',
+            'data': {
+                'patient_id': user_patient_guid,
+                'username': username,
+                'default_password': 'next'
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients/<patient_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_config_patient(patient_id):
+    """
+    Actualiza un paciente existente
+    
+    Body JSON (todos opcionales):
+    {
+        "username": "string",
+        "name": "string",
+        "surname": "string",
+        "national_code": "string",
+        "birthdate": "YYYY-MM-DD",
+        "patient_id_number": "string",
+        "sex_code": "string",
+        "phone": "string",
+        "email": "string"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Paciente actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Obtener datapatient_id
+        cursor.execute(
+            "SELECT datapatient_id FROM nextris.tbuser_patient WHERE guid = %s",
+            (patient_id,)
+        )
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        datapatient_id = result[0]
+        
+        # Actualizar username si se proporciona
+        if 'username' in data:
+            cursor.execute(
+                "UPDATE nextris.tbuser_patient SET username = %s WHERE guid = %s",
+                (data['username'], patient_id)
+            )
+        
+        # Actualizar datos del paciente
+        patient_updates = []
+        patient_params = []
+        
+        if 'name' in data:
+            patient_updates.append("name = %s")
+            patient_params.append(data['name'])
+        
+        if 'surname' in data:
+            patient_updates.append("surname = %s")
+            patient_params.append(data['surname'])
+        
+        if 'national_code' in data:
+            patient_updates.append("nationalcode = %s")
+            patient_params.append(data['national_code'])
+        
+        if 'birthdate' in data:
+            patient_updates.append("birthdate = %s")
+            patient_params.append(data['birthdate'])
+        
+        if 'patient_id_number' in data:
+            patient_updates.append("patientid = %s")
+            patient_params.append(data['patient_id_number'])
+        
+        if 'sex_code' in data:
+            patient_updates.append("sexcode = %s")
+            patient_params.append(data['sex_code'])
+        
+        if 'phone' in data:
+            patient_updates.append("phone = %s")
+            patient_params.append(data['phone'])
+        
+        if 'email' in data:
+            patient_updates.append("email = %s")
+            patient_params.append(data['email'])
+        
+        if patient_updates:
+            patient_params.append(datapatient_id)
+            query = f"UPDATE nextris.datapatient SET {', '.join(patient_updates)} WHERE guid = %s"
+            cursor.execute(query, patient_params)
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients/<patient_id>/deactivate', methods=['POST'])
+@jwt_required()
+def deactivate_patient(patient_id):
+    """
+    Desactiva un paciente
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Paciente desactivado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser_patient WHERE guid=%s", (patient_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.tbuser_patient SET status = 'Inactive' WHERE guid = %s"
+        cursor.execute(query, (patient_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente desactivado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients/<patient_id>/activate', methods=['POST'])
+@jwt_required()
+def activate_patient(patient_id):
+    """
+    Activa un paciente previamente desactivado
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Paciente activado"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser_patient WHERE guid=%s", (patient_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        query = "UPDATE nextris.tbuser_patient SET status = 'Active' WHERE guid = %s"
+        cursor.execute(query, (patient_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente activado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/patients/<patient_id>/reset-password', methods=['POST'])
+@jwt_required()
+def reset_patient_password(patient_id):
+    """
+    Resetea la contraseña de un paciente
+    
+    Body JSON:
+    {
+        "new_password": "string" (required)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Contraseña reseteada"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'new_password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'new_password es requerido'
+            }), 400
+        
+        new_password = data.get('new_password')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el paciente existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser_patient WHERE guid=%s", (patient_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Paciente no encontrado'
+            }), 404
+        
+        # Hashear la nueva contraseña
+        from werkzeug.security import generate_password_hash
+        password_hash = generate_password_hash(new_password)
+        
+        query = "UPDATE nextris.tbuser_patient SET password = %s WHERE guid = %s"
+        cursor.execute(query, (password_hash, patient_id))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña reseteada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# GESTIÓN DE MÉDICOS SOLICITANTES (REQUESTING PHYSICIANS)
+# ====================================================================
+
+@api_blueprint.route('/config/requesting-physicians', methods=['GET'])
+@jwt_required()
+def get_requesting_physicians():
+    """
+    Obtiene todos los médicos solicitantes
+    
+    Query Parameters:
+    - location_id: filtrar por localización (opcional)
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "description": "...",
+                "phone": "...",
+                "mail": "...",
+                "note": "...",
+                "location_id": "...",
+                "location_name": "..."
+            }
+        ]
+    }
+    """
+    try:
+        location_id = request.args.get('location_id')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT 
+                p.guid,
+                p.description,
+                p.phone,
+                p.mail,
+                p.note,
+                p.location_id,
+                l.name as location_name
+            FROM nextris.isrequestingphysician p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+        """
+        
+        params = []
+        if location_id:
+            query += " WHERE p.location_id = %s"
+            params.append(location_id)
+        
+        query += " ORDER BY p.description"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        physicians = []
+        for row in rows:
+            physicians.append({
+                'guid': row[0],
+                'description': row[1],
+                'phone': row[2],
+                'mail': row[3],
+                'note': row[4],
+                'location_id': row[5],
+                'location_name': row[6]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': physicians
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/requesting-physicians/<physician_id>', methods=['GET'])
+@jwt_required()
+def get_requesting_physician(physician_id):
+    """
+    Obtiene un médico solicitante por ID
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "description": "...",
+            "phone": "...",
+            "mail": "...",
+            "note": "...",
+            "location_id": "...",
+            "location_name": "..."
+        }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT 
+                p.guid,
+                p.description,
+                p.phone,
+                p.mail,
+                p.note,
+                p.location_id,
+                l.name as location_name
+            FROM nextris.isrequestingphysician p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+            WHERE p.guid = %s
+        """
+        
+        cursor.execute(query, (physician_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Médico solicitante no encontrado'
+            }), 404
+        
+        physician = {
+            'guid': row[0],
+            'description': row[1],
+            'phone': row[2],
+            'mail': row[3],
+            'note': row[4],
+            'location_id': row[5],
+            'location_name': row[6]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': physician
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/requesting-physicians', methods=['POST'])
+@jwt_required()
+def create_requesting_physician():
+    """
+    Crea un nuevo médico solicitante
+    
+    Request Body:
+    {
+        "description": "Dr. Juan Pérez",  // requerido
+        "phone": "+1234567890",           // opcional
+        "mail": "juan.perez@example.com", // opcional
+        "note": "Especialidad",           // opcional
+        "location_id": "guid"             // opcional
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "description": "...",
+            ...
+        },
+        "message": "Médico solicitante creado exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'description' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'description es requerido'
+            }), 400
+        
+        description = data.get('description', '').strip()
+        phone = data.get('phone', '').strip()
+        mail = data.get('mail', '').strip()
+        note = data.get('note', '').strip()
+        location_id = data.get('location_id')
+        
+        if not description:
+            return jsonify({
+                'success': False,
+                'message': 'description no puede estar vacío'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar si el location_id existe (si se proporciona)
+        if location_id:
+            cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'La localización especificada no existe'
+                }), 400
+        
+        # Generar GUID
+        import uuid
+        physician_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isrequestingphysician 
+            (guid, description, phone, mail, note, location_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            physician_guid,
+            description,
+            phone if phone else None,
+            mail if mail else None,
+            note if note else None,
+            location_id if location_id else None
+        ))
+        
+        connection.commit()
+        
+        # Obtener el médico creado con información de localización
+        cursor.execute("""
+            SELECT 
+                p.guid,
+                p.description,
+                p.phone,
+                p.mail,
+                p.note,
+                p.location_id,
+                l.name as location_name
+            FROM nextris.isrequestingphysician p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+            WHERE p.guid = %s
+        """, (physician_guid,))
+        
+        row = cursor.fetchone()
+        physician = {
+            'guid': row[0],
+            'description': row[1],
+            'phone': row[2],
+            'mail': row[3],
+            'note': row[4],
+            'location_id': row[5],
+            'location_name': row[6]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': physician,
+            'message': 'Médico solicitante creado exitosamente'
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/requesting-physicians/<physician_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_requesting_physician(physician_id):
+    """
+    Actualiza un médico solicitante existente
+    
+    Request Body:
+    {
+        "description": "Dr. Juan Pérez",  // opcional
+        "phone": "+1234567890",           // opcional
+        "mail": "juan.perez@example.com", // opcional
+        "note": "Especialidad",           // opcional
+        "location_id": "guid"             // opcional (null para quitar)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "guid": "...",
+            "description": "...",
+            ...
+        },
+        "message": "Médico solicitante actualizado exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron datos para actualizar'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el médico existe
+        cursor.execute("SELECT 1 FROM nextris.isrequestingphysician WHERE guid=%s", (physician_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Médico solicitante no encontrado'
+            }), 404
+        
+        # Verificar location_id si se proporciona
+        if 'location_id' in data and data['location_id']:
+            cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (data['location_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'La localización especificada no existe'
+                }), 400
+        
+        # Construir query de actualización
+        update_fields = []
+        params = []
+        
+        if 'description' in data:
+            update_fields.append("description = %s")
+            params.append(data['description'].strip())
+        
+        if 'phone' in data:
+            update_fields.append("phone = %s")
+            params.append(data['phone'].strip() if data['phone'] else None)
+        
+        if 'mail' in data:
+            update_fields.append("mail = %s")
+            params.append(data['mail'].strip() if data['mail'] else None)
+        
+        if 'note' in data:
+            update_fields.append("note = %s")
+            params.append(data['note'].strip() if data['note'] else None)
+        
+        if 'location_id' in data:
+            update_fields.append("location_id = %s")
+            params.append(data['location_id'] if data['location_id'] else None)
+        
+        if not update_fields:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron campos válidos para actualizar'
+            }), 400
+        
+        params.append(physician_id)
+        query = f"UPDATE nextris.isrequestingphysician SET {', '.join(update_fields)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        # Obtener el médico actualizado
+        cursor.execute("""
+            SELECT 
+                p.guid,
+                p.description,
+                p.phone,
+                p.mail,
+                p.note,
+                p.location_id,
+                l.name as location_name
+            FROM nextris.isrequestingphysician p
+            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
+            WHERE p.guid = %s
+        """, (physician_id,))
+        
+        row = cursor.fetchone()
+        physician = {
+            'guid': row[0],
+            'description': row[1],
+            'phone': row[2],
+            'mail': row[3],
+            'note': row[4],
+            'location_id': row[5],
+            'location_name': row[6]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': physician,
+            'message': 'Médico solicitante actualizado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/requesting-physicians/<physician_id>', methods=['DELETE'])
+@jwt_required()
+def delete_requesting_physician(physician_id):
+    """
+    Elimina un médico solicitante
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Médico solicitante eliminado exitosamente"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el médico existe
+        cursor.execute("SELECT 1 FROM nextris.isrequestingphysician WHERE guid=%s", (physician_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Médico solicitante no encontrado'
+            }), 404
+        
+        query = "DELETE FROM nextris.isrequestingphysician WHERE guid = %s"
+        cursor.execute(query, (physician_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Médico solicitante eliminado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# GESTIÓN DE AGENDAS DE MÉDICOS
+# ====================================================================
+
+@api_blueprint.route('/config/physician-schedules', methods=['GET'])
+@jwt_required()
+def get_physician_schedules():
+    """
+    Obtiene todas las agendas de médicos
+    
+    Query Parameters:
+    - physician_id: filtrar por médico (opcional)
+    - location_id: filtrar por localización (opcional)
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "physician_id": "...",
+                "physician_name": "...",
+                "day": "Lunes",
+                "time_from": "08:00",
+                "time_to": "12:00",
+                "init_day": "2024-01-01",
+                "finish_day": "2024-12-31",
+                "location_id": "...",
+                "location_name": "..."
+            }
+        ]
+    }
+    """
+    try:
+        physician_id = request.args.get('physician_id')
+        location_id = request.args.get('location_id')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT 
+                a.guid,
+                a.idmed as physician_id,
+                CONCAT(u.name, ' ', u.surname) as physician_name,
+                a.day,
+                a.timefrom,
+                a.timeto,
+                a.initday,
+                a.finishday,
+                a.location_id,
+                l.name as location_name
+            FROM nextris.isagendameditem a
+            LEFT JOIN nextris.tbuser u ON a.idmed = u.guid
+            LEFT JOIN nextris.tblocation l ON a.location_id = l.guid
+            WHERE 1=1
+        """
+        
+        params = []
+        if physician_id:
+            query += " AND a.idmed = %s"
+            params.append(physician_id)
+        
+        if location_id:
+            query += " AND a.location_id = %s"
+            params.append(location_id)
+        
+        query += " ORDER BY u.name, u.surname, a.day, a.timefrom"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        schedules = []
+        for row in rows:
+            schedules.append({
+                'guid': row[0],
+                'physician_id': row[1],
+                'physician_name': row[2],
+                'day': row[3],
+                'time_from': str(row[4]) if row[4] else None,
+                'time_to': str(row[5]) if row[5] else None,
+                'init_day': str(row[6]) if row[6] else None,
+                'finish_day': str(row[7]) if row[7] else None,
+                'location_id': row[8],
+                'location_name': row[9]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': schedules
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/physician-schedules', methods=['POST'])
+@jwt_required()
+def create_physician_schedule():
+    """
+    Crea una nueva agenda para un médico
+    
+    Request Body:
+    {
+        "physician_id": "guid",    // requerido
+        "day": "Lunes",            // requerido
+        "time_from": "08:00",      // requerido
+        "time_to": "12:00",        // requerido
+        "init_day": "2024-01-01",  // opcional
+        "finish_day": "2024-12-31",// opcional
+        "location_id": "guid"      // opcional
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {...},
+        "message": "Agenda creada exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        required_fields = ['physician_id', 'day', 'time_from', 'time_to']
+        for field in required_fields:
+            if not data or field not in data:
+                return jsonify({
+                    'success': False,
+                    'message': f'{field} es requerido'
+                }), 400
+        
+        physician_id = data.get('physician_id')
+        day = data.get('day', '').strip()
+        time_from = data.get('time_from', '').strip()
+        time_to = data.get('time_to', '').strip()
+        init_day = data.get('init_day')
+        finish_day = data.get('finish_day')
+        location_id = data.get('location_id')
+        
+        # Validar día de la semana
+        valid_days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+        if day not in valid_days:
+            return jsonify({
+                'success': False,
+                'message': f'Día inválido. Debe ser uno de: {", ".join(valid_days)}'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el médico existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (physician_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Médico no encontrado'
+            }), 404
+        
+        # Verificar location_id si se proporciona
+        if location_id:
+            cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'La localización especificada no existe'
+                }), 400
+        
+        # Generar GUID
+        import uuid
+        schedule_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.isagendameditem 
+            (guid, idmed, day, timefrom, timeto, initday, finishday, location_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, (
+            schedule_guid,
+            physician_id,
+            day,
+            time_from,
+            time_to,
+            init_day if init_day else None,
+            finish_day if finish_day else None,
+            location_id if location_id else None
+        ))
+        
+        connection.commit()
+        
+        # Obtener la agenda creada
+        cursor.execute("""
+            SELECT 
+                a.guid,
+                a.idmed as physician_id,
+                CONCAT(u.name, ' ', u.surname) as physician_name,
+                a.day,
+                a.timefrom,
+                a.timeto,
+                a.initday,
+                a.finishday,
+                a.location_id,
+                l.name as location_name
+            FROM nextris.isagendameditem a
+            LEFT JOIN nextris.tbuser u ON a.idmed = u.guid
+            LEFT JOIN nextris.tblocation l ON a.location_id = l.guid
+            WHERE a.guid = %s
+        """, (schedule_guid,))
+        
+        row = cursor.fetchone()
+        schedule = {
+            'guid': row[0],
+            'physician_id': row[1],
+            'physician_name': row[2],
+            'day': row[3],
+            'time_from': str(row[4]) if row[4] else None,
+            'time_to': str(row[5]) if row[5] else None,
+            'init_day': str(row[6]) if row[6] else None,
+            'finish_day': str(row[7]) if row[7] else None,
+            'location_id': row[8],
+            'location_name': row[9]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': schedule,
+            'message': 'Agenda creada exitosamente'
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/physician-schedules/<schedule_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_physician_schedule(schedule_id):
+    """
+    Actualiza una agenda de médico existente
+    
+    Request Body:
+    {
+        "day": "Lunes",            // opcional
+        "time_from": "08:00",      // opcional
+        "time_to": "12:00",        // opcional
+        "init_day": "2024-01-01",  // opcional
+        "finish_day": "2024-12-31",// opcional
+        "location_id": "guid"      // opcional
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {...},
+        "message": "Agenda actualizada exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron datos para actualizar'
+            }), 400
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la agenda existe
+        cursor.execute("SELECT 1 FROM nextris.isagendameditem WHERE guid=%s", (schedule_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Agenda no encontrada'
+            }), 404
+        
+        # Validar día si se proporciona
+        if 'day' in data:
+            valid_days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+            if data['day'] not in valid_days:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': f'Día inválido. Debe ser uno de: {", ".join(valid_days)}'
+                }), 400
+        
+        # Verificar location_id si se proporciona
+        if 'location_id' in data and data['location_id']:
+            cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (data['location_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'La localización especificada no existe'
+                }), 400
+        
+        # Construir query de actualización
+        update_fields = []
+        params = []
+        
+        if 'day' in data:
+            update_fields.append("day = %s")
+            params.append(data['day'])
+        
+        if 'time_from' in data:
+            update_fields.append("timefrom = %s")
+            params.append(data['time_from'])
+        
+        if 'time_to' in data:
+            update_fields.append("timeto = %s")
+            params.append(data['time_to'])
+        
+        if 'init_day' in data:
+            update_fields.append("initday = %s")
+            params.append(data['init_day'] if data['init_day'] else None)
+        
+        if 'finish_day' in data:
+            update_fields.append("finishday = %s")
+            params.append(data['finish_day'] if data['finish_day'] else None)
+        
+        if 'location_id' in data:
+            update_fields.append("location_id = %s")
+            params.append(data['location_id'] if data['location_id'] else None)
+        
+        if not update_fields:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron campos válidos para actualizar'
+            }), 400
+        
+        params.append(schedule_id)
+        query = f"UPDATE nextris.isagendameditem SET {', '.join(update_fields)} WHERE guid = %s"
+        
+        cursor.execute(query, params)
+        connection.commit()
+        
+        # Obtener la agenda actualizada
+        cursor.execute("""
+            SELECT 
+                a.guid,
+                a.idmed as physician_id,
+                CONCAT(u.name, ' ', u.surname) as physician_name,
+                a.day,
+                a.timefrom,
+                a.timeto,
+                a.initday,
+                a.finishday,
+                a.location_id,
+                l.name as location_name
+            FROM nextris.isagendameditem a
+            LEFT JOIN nextris.tbuser u ON a.idmed = u.guid
+            LEFT JOIN nextris.tblocation l ON a.location_id = l.guid
+            WHERE a.guid = %s
+        """, (schedule_id,))
+        
+        row = cursor.fetchone()
+        schedule = {
+            'guid': row[0],
+            'physician_id': row[1],
+            'physician_name': row[2],
+            'day': row[3],
+            'time_from': str(row[4]) if row[4] else None,
+            'time_to': str(row[5]) if row[5] else None,
+            'init_day': str(row[6]) if row[6] else None,
+            'finish_day': str(row[7]) if row[7] else None,
+            'location_id': row[8],
+            'location_name': row[9]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': schedule,
+            'message': 'Agenda actualizada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/physician-schedules/<schedule_id>', methods=['DELETE'])
+@jwt_required()
+def delete_physician_schedule(schedule_id):
+    """
+    Elimina una agenda de médico
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Agenda eliminada exitosamente"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la agenda existe
+        cursor.execute("SELECT 1 FROM nextris.isagendameditem WHERE guid=%s", (schedule_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Agenda no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.isagendameditem WHERE guid = %s"
+        cursor.execute(query, (schedule_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Agenda eliminada exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# GESTIÓN DE GRUPOS DE ESTUDIO POR MÉDICO
+# ====================================================================
+
+@api_blueprint.route('/config/physicians/<physician_id>/study-groups', methods=['GET'])
+@jwt_required()
+def get_physician_study_groups(physician_id):
+    """
+    Obtiene los grupos de estudio que lee un médico
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            {
+                "guid": "...",
+                "studygroup_id": "...",
+                "studygroup_name": "..."
+            }
+        ]
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        query = """
+            SELECT 
+                r.guid,
+                r.studygroup_id,
+                g.description as studygroup_name
+            FROM nextris.rel_medico_studygroup r
+            LEFT JOIN nextris.isstudytypegroup g ON r.studygroup_id = g.guid
+            WHERE r.med_id = %s
+            ORDER BY g.description
+        """
+        
+        cursor.execute(query, (physician_id,))
+        rows = cursor.fetchall()
+        
+        study_groups = []
+        for row in rows:
+            study_groups.append({
+                'guid': row[0],
+                'studygroup_id': row[1],
+                'studygroup_name': row[2]
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': study_groups
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/physicians/<physician_id>/study-groups', methods=['POST'])
+@jwt_required()
+def add_physician_study_group(physician_id):
+    """
+    Agrega un grupo de estudio a un médico
+    
+    Request Body:
+    {
+        "studygroup_id": "guid"  // requerido
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {...},
+        "message": "Grupo de estudio agregado exitosamente"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'studygroup_id' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'studygroup_id es requerido'
+            }), 400
+        
+        studygroup_id = data.get('studygroup_id')
+        
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que el médico existe
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (physician_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Médico no encontrado'
+            }), 404
+        
+        # Verificar que el grupo de estudio existe
+        cursor.execute("SELECT 1 FROM nextris.isstudytypegroup WHERE guid=%s", (studygroup_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Grupo de estudio no encontrado'
+            }), 404
+        
+        # Verificar que la relación no existe ya
+        cursor.execute(
+            "SELECT 1 FROM nextris.rel_medico_studygroup WHERE med_id=%s AND studygroup_id=%s",
+            (physician_id, studygroup_id)
+        )
+        if cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El médico ya tiene asignado este grupo de estudio'
+            }), 400
+        
+        # Generar GUID
+        import uuid
+        relation_guid = str(uuid.uuid4())
+        
+        query = """
+            INSERT INTO nextris.rel_medico_studygroup 
+            (guid, med_id, studygroup_id)
+            VALUES (%s, %s, %s)
+        """
+        
+        cursor.execute(query, (relation_guid, physician_id, studygroup_id))
+        connection.commit()
+        
+        # Obtener la relación creada
+        cursor.execute("""
+            SELECT 
+                r.guid,
+                r.studygroup_id,
+                g.description as studygroup_name
+            FROM nextris.rel_medico_studygroup r
+            LEFT JOIN nextris.isstudytypegroup g ON r.studygroup_id = g.guid
+            WHERE r.guid = %s
+        """, (relation_guid,))
+        
+        row = cursor.fetchone()
+        relation = {
+            'guid': row[0],
+            'studygroup_id': row[1],
+            'studygroup_name': row[2]
+        }
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'data': relation,
+            'message': 'Grupo de estudio agregado exitosamente'
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/physicians/<physician_id>/study-groups/<relation_id>', methods=['DELETE'])
+@jwt_required()
+def remove_physician_study_group(physician_id, relation_id):
+    """
+    Elimina un grupo de estudio de un médico
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Grupo de estudio eliminado exitosamente"
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Verificar que la relación existe y pertenece al médico
+        cursor.execute(
+            "SELECT 1 FROM nextris.rel_medico_studygroup WHERE guid=%s AND med_id=%s",
+            (relation_id, physician_id)
+        )
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Relación no encontrada'
+            }), 404
+        
+        query = "DELETE FROM nextris.rel_medico_studygroup WHERE guid = %s"
+        cursor.execute(query, (relation_id,))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Grupo de estudio eliminado exitosamente'
         }), 200
         
     except Exception as e:

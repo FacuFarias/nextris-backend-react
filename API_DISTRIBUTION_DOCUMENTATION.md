@@ -362,7 +362,7 @@ El email se actualiza en el campo `patient_email` de la tabla `tborder` (asociad
 
 ## 4. Visualizar Informe PDF
 
-Permite visualizar o descargar el informe PDF de un examen.
+Permite visualizar el informe PDF de un examen en el navegador.
 
 **Endpoint:** `GET /examinations/<exam_id>/report/view`
 
@@ -373,27 +373,16 @@ Permite visualizar o descargar el informe PDF de un examen.
 |-----------|------|-------------|
 | exam_id | UUID | ID único del examen |
 
-**Parámetros de Query:**
-| Parámetro | Tipo | Requerido | Descripción |
-|-----------|------|-----------|-------------|
-| download | boolean | No | Si es `true`, descarga el PDF. Si es `false` o no está presente, lo visualiza en el navegador |
-
 **Ejemplo de Request:**
 ```bash
-# Visualizar en navegador
 GET /api/examinations/123e4567-e89b-12d3-a456-426614174000/report/view
-Authorization: Bearer <token>
-
-# Descargar archivo
-GET /api/examinations/123e4567-e89b-12d3-a456-426614174000/report/view?download=true
 Authorization: Bearer <token>
 ```
 
 **Response 200 - Success:**
 - Retorna el archivo PDF directamente
 - Content-Type: `application/pdf`
-- Si `download=true`: incluye header `Content-Disposition: attachment; filename="informe_<exam_id>.pdf"`
-- Si `download=false` o no especificado: el navegador intenta visualizar el PDF inline
+- El navegador abrirá el PDF en una nueva pestaña para visualización
 
 **Response 404 - No encontrado:**
 ```json
@@ -419,7 +408,7 @@ Authorization: Bearer <token>
 
 **Notas:**
 - El archivo PDF debe existir en la ruta especificada en `tbreport.pdfpath`
-- El parámetro `download` es opcional y por defecto es `false`
+- El PDF se abre directamente en el navegador, no se descarga
 - Si el archivo no existe físicamente aunque esté registrado en la BD, retorna 404
 
 ---

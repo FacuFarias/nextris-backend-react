@@ -613,6 +613,7 @@ def create_admission_order():
             SELECT MAX(CAST(SUBSTRING(admisionnumber, 4) AS INTEGER)) 
             FROM nextris.tbexamination 
             WHERE admisionnumber LIKE 'ADM%'
+              AND SUBSTRING(admisionnumber, 4) ~ '^[0-9]+$'
         """)
         last_adm = cursor.fetchone()[0] or 0
         
@@ -620,6 +621,7 @@ def create_admission_order():
             SELECT MAX(CAST(SUBSTRING(localacc, 4) AS INTEGER)) 
             FROM nextris.tbexamination 
             WHERE localacc LIKE 'ACC%'
+              AND SUBSTRING(localacc, 4) ~ '^[0-9]+$'
         """)
         last_acc = cursor.fetchone()[0] or 0
         

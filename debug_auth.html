@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Auth - Verificar Token JWT</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #667eea;
+            margin-top: 30px;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border-left: 4px solid #667eea;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .warning {
+            color: #ffc107;
+            font-weight: bold;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        button.danger {
+            background: #dc3545;
+        }
+        button.danger:hover {
+            background: #c82333;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .code {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Diagnóstico de Autenticación JWT</h1>
+        
+        <div class="info-box">
+            <strong>ℹ️ Información:</strong> Esta página te ayudará a diagnosticar problemas con el token JWT en localStorage.
+        </div>
+
+        <h2>1. Estado del localStorage</h2>
+        <div id="localStorageStatus"></div>
+
+        <h2>2. Estructura de authData</h2>
+        <div id="authDataStructure"></div>
+
+        <h2>3. Validación del Token</h2>
+        <div id="tokenValidation"></div>
+
+        <h2>4. Prueba de API</h2>
+        <button onclick="testAPI()">🧪 Probar GET /api/dicom/unlinked-studies</button>
+        <div id="apiTest"></div>
+
+        <h2>5. Acciones</h2>
+        <button onclick="fixAuthData()">🔧 Reparar authData</button>
+        <button onclick="clearAuth()" class="danger">🗑️ Limpiar localStorage</button>
+        <div id="actions"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://148.230.72.8:5001/api';
+
+        function displayResult(elementId, content) {
+            document.getElementById(elementId).innerHTML = content;
+        }
+
+        function checkLocalStorage() {
+            console.log('=== CHECKING LOCALSTORAGE ===');
+            
+            let html = '<h3>Claves encontradas en localStorage:</h3><ul>';
+            let hasAuthData = false;
+            let hasAccessToken = false;
+            let hasRefreshToken = false;
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                html += `<li><span class="code">${key}</span></li>`;
+                
+                if (key === 'authData') hasAuthData = true;
+                if (key === 'access_token') hasAccessToken = true;
+                if (key === 'refresh_token') hasRefreshToken = true;
+            }
+            html += '</ul>';
+            
+            if (hasAuthData) {
+                html += '<p class="success">✅ Se encontró la clave "authData"</p>';
+            } else {
+                html += '<p class="error">❌ NO se encontró la clave "authData"</p>';
+            }
+            
+            if (hasAccessToken || hasRefreshToken) {
+                html += '<p class="warning">⚠️ Se encontraron claves access_token/refresh_token separadas (posible conflicto)</p>';
+            }
+            
+            displayResult('localStorageStatus', html);
+        }
+
+        function checkAuthDataStructure() {
+            const authData = localStorage.getItem('authData');
+            
+            if (!authData) {
+                displayResult('authDataStructure', '<p class="error">❌ No existe "authData" en localStorage</p>');
+                return null;
+            }
+            
+            try {
+                const parsed = JSON.parse(authData);
+                console.log('authData parsed:', parsed);
+                
+                let html = '<h3>Contenido de authData:</h3>';
+                html += `<pre>${JSON.stringify(parsed, null, 2)}</pre>`;
+                
+                // Validar estructura
+                html += '<h3>Validación de estructura:</h3><ul>';
+                
+                if (parsed.access_token) {
+                    html += `<li class="success">✅ Tiene access_token (${parsed.access_token.substring(0, 30)}...)</li>`;
+                } else {
+                    html += '<li class="error">❌ NO tiene access_token</li>';
+                }
+                
+                if (parsed.refresh_token) {
+                    html += `<li class="success">✅ Tiene refresh_token (${parsed.refresh_token.substring(0, 30)}...)</li>`;
+                } else {
+                    html += '<li class="error">❌ NO tiene refresh_token</li>';
+                }
+                
+                if (parsed.user) {
+                    html += '<li class="success">✅ Tiene información de usuario</li>';
+                    html += `<ul><li>Username: ${parsed.user.username || 'N/A'}</li>`;
+                    html += `<li>User Type: ${parsed.user.user_type || 'N/A'}</li>`;
+                    html += `<li>ID: ${parsed.user.id || 'N/A'}</li></ul>`;
+                } else {
+                    html += '<li class="error">❌ NO tiene información de usuario</li>';
+                }
+                
+                html += '</ul>';
+                
+                displayResult('authDataStructure', html);
+                return parsed;
+                
+            } catch (e) {
+                displayResult('authDataStructure', `<p class="error">❌ Error al parsear authData: ${e.message}</p>`);
+                return null;
+            }
+        }
+
+        function validateToken() {
+            const authData = localStorage.getItem('authData');
+            
+            if (!authData) {
+                displayResult('tokenValidation', '<p class="error">❌ No hay token para validar</p>');
+                return;
+            }
+            
+            try {
+                const parsed = JSON.parse(authData);
+                const token = parsed.access_token;
+                
+                if (!token) {
+                    displayResult('tokenValidation', '<p class="error">❌ No se encontró access_token en authData</p>');
+                    return;
+                }
+                
+                // Decodificar JWT (solo la parte del payload, sin validar firma)
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    displayResult('tokenValidation', '<p class="error">❌ Token JWT inválido (no tiene 3 partes)</p>');
+                    return;
+                }
+                
+                const payload = JSON.parse(atob(parts[1]));
+                console.log('Token payload:', payload);
+                
+                let html = '<h3>Contenido del token:</h3>';
+                html += `<pre>${JSON.stringify(payload, null, 2)}</pre>`;
+                
+                // Verificar expiración
+                if (payload.exp) {
+                    const expDate = new Date(payload.exp * 1000);
+                    const now = new Date();
+                    
+                    html += '<h3>Expiración:</h3>';
+                    html += `<p>Expira: ${expDate.toLocaleString()}</p>`;
+                    
+                    if (expDate > now) {
+                        const minutesLeft = Math.floor((expDate - now) / 1000 / 60);
+                        html += `<p class="success">✅ Token válido (expira en ${minutesLeft} minutos)</p>`;
+                    } else {
+                        html += '<p class="error">❌ Token EXPIRADO</p>';
+                    }
+                } else {
+                    html += '<p class="warning">⚠️ Token no tiene fecha de expiración</p>';
+                }
+                
+                displayResult('tokenValidation', html);
+                
+            } catch (e) {
+                displayResult('tokenValidation', `<p class="error">❌ Error al validar token: ${e.message}</p>`);
+            }
+        }
+
+        async function testAPI() {
+            displayResult('apiTest', '<p>🔄 Probando conexión con API...</p>');
+            
+            const authData = localStorage.getItem('authData');
+            
+            if (!authData) {
+                displayResult('apiTest', '<p class="error">❌ No hay authData en localStorage</p>');
+                return;
+            }
+            
+            try {
+                const parsed = JSON.parse(authData);
+                const token = parsed.access_token;
+                
+                if (!token) {
+                    displayResult('apiTest', '<p class="error">❌ No hay access_token en authData</p>');
+                    return;
+                }
+                
+                console.log('Testing API with token:', token.substring(0, 30) + '...');
+                
+                const response = await fetch(`${API_URL}/dicom/unlinked-studies?location_id=1a5caedd-5a62-4ae1-ac2f-8f19c0bdae91`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('API Response status:', response.status);
+                
+                const data = await response.json();
+                console.log('API Response data:', data);
+                
+                let html = '<h3>Resultado de la prueba:</h3>';
+                html += `<p><strong>Status:</strong> ${response.status} ${response.statusText}</p>`;
+                
+                if (response.ok) {
+                    html += '<p class="success">✅ API respondió correctamente</p>';
+                    html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    html += `<p class="error">❌ API respondió con error</p>`;
+                    html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+                
+                displayResult('apiTest', html);
+                
+            } catch (e) {
+                displayResult('apiTest', `<p class="error">❌ Error en la prueba: ${e.message}</p>`);
+            }
+        }
+
+        function fixAuthData() {
+            // Verificar si hay tokens en claves separadas
+            const separateAccessToken = localStorage.getItem('access_token');
+            const separateRefreshToken = localStorage.getItem('refresh_token');
+            const separateUser = localStorage.getItem('user');
+            
+            if (separateAccessToken || separateRefreshToken) {
+                // Consolidar en authData
+                const authData = {
+                    access_token: separateAccessToken,
+                    refresh_token: separateRefreshToken,
+                    user: separateUser ? JSON.parse(separateUser) : {}
+                };
+                
+                localStorage.setItem('authData', JSON.stringify(authData));
+                
+                // Limpiar claves separadas
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('user');
+                
+                displayResult('actions', '<p class="success">✅ authData reparado. Recarga la página.</p>');
+                
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                displayResult('actions', '<p class="warning">⚠️ No se encontraron tokens separados para consolidar</p>');
+            }
+        }
+
+        function clearAuth() {
+            if (confirm('¿Seguro que quieres limpiar TODA la información de autenticación?\n\nDeberás volver a hacer login.')) {
+                localStorage.removeItem('authData');
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('user');
+                
+                displayResult('actions', '<p class="success">✅ localStorage limpiado. Redirigiendo a login...</p>');
+                
+                setTimeout(() => {
+                    window.location.href = 'http://148.230.72.8:5173/';
+                }, 2000);
+            }
+        }
+
+        // Ejecutar diagnóstico al cargar
+        window.onload = function() {
+            checkLocalStorage();
+            checkAuthDataStructure();
+            validateToken();
+        };
+    </script>
+</body>
+</html>

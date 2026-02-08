@@ -125,31 +125,56 @@ def draw_text_section(c, title, content, y_pos, max_width):
     
     return y_pos - 10  # Espacio adicional entre secciones
 
-def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs'):
+def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_filename=None):
     """
-    Genera un PDF completo del reporte con firma digital
-    Esta función está específicamente en el controlador de reportes
+    Genera un PDF completo del reporte con firma digital.
+    
+    Args:
+        report_id: ID del reporte/examen
+        output_dir: Directorio donde se guardará el PDF
+        pdf_filename: Nombre personalizado del archivo PDF (opcional)
     """
+    print(f"[PDF_GEN] Iniciando generación de PDF para report_id: {report_id}")
+    print(f"[PDF_GEN] output_dir: {output_dir}, pdf_filename: {pdf_filename}")
+    
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import letter
         from reportlab.lib.units import inch
+        import psycopg2
         
-        # Consulta para obtener datos del reporte incluyendo userid
+        # Configuración de base de datos
+        config = {
+            'host': 'localhost',
+            'database': 'pacsdb',
+            'user': 'pacs',
+            'password': 'pacs'
+        }
+        
+        # Conectar a la base de datos
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        
+        # Consulta para obtener datos del reporte incluyendo iduser
         query = """
-            SELECT p.surname, p.name, st.description, rep.date, rep.idreferringphysician, 
-                   rep.findings, rep.techniques, rep.impressions, rep.conclusions, rep.userid
+            SELECT p.Surname, p.Name, st.Description, rep.Date, rep.idreferringphysician, 
+                   rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
             FROM nextris.tbreport rep
-            LEFT JOIN nextris.tbexamination tbex ON tbex.guid = rep.idexamination
-            LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.guid
-            LEFT JOIN nextris.datapatient p ON p.patientid = rep.idpatient
-            WHERE rep.idexamination = %s
+            LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
+            LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.Guid
+            LEFT JOIN nextris.datapatient p ON p.guid = rep.IdPatient
+            WHERE rep.IdExamination = %s
         """
         
-        result = DatabaseService.execute_query(query, (report_id,))
+        print(f"[PDF_GEN] Ejecutando query para obtener datos del reporte...")
+        cursor.execute(query, (report_id,))
+        result = cursor.fetchall()
+        print(f"[PDF_GEN] Resultado de query: {result is not None}, registros: {len(result) if result else 0}")
         
         if not result:
             print(f"[ERROR] No se encontraron datos para el reporte: {report_id}")
+            cursor.close()
+            connection.close()
             return None
             
         data = result[0]
@@ -159,13 +184,19 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs'):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         
-        pdf_filename = os.path.join(output_dir, f"r_{report_id}.pdf")
-        c = canvas.Canvas(pdf_filename, pagesize=letter)
+        # Usar nombre personalizado o el predeterminado
+        if pdf_filename:
+            pdf_file_path = os.path.join(output_dir, pdf_filename)
+        else:
+            pdf_file_path = os.path.join(output_dir, f"r_{report_id}.pdf")
+            
+        c = canvas.Canvas(pdf_file_path, pagesize=letter)
         width, height = letter
 
         # Obtener datos institucionales
         inst_query = "SELECT name, address, phone, mail, logo_path FROM nextris.isbasicinformation ORDER BY guid ASC LIMIT 1"
-        inst_result = DatabaseService.execute_query(inst_query)
+        cursor.execute(inst_query)
+        inst_result = cursor.fetchall()
         
         if inst_result:
             institucion = inst_result[0]
@@ -287,11 +318,18 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs'):
                 print(f"[INFO] No se encontró firma habilitada para el usuario: {userid}")
 
         c.save()
-        print(f"[SUCCESS] PDF generado con firma: {pdf_filename}")
-        return pdf_filename
+        
+        # Cerrar conexión
+        cursor.close()
+        connection.close()
+        
+        print(f"[SUCCESS] PDF generado con firma: {pdf_file_path}")
+        return pdf_file_path
         
     except Exception as e:
         print(f"[ERROR] Error generando PDF con firma: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 @report_bp.route('/plantilla/<guid>', methods=['GET'])

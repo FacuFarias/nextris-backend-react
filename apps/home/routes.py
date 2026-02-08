@@ -43,6 +43,7 @@ from apps.home.utils import get_segment
 
 # Importar controladores para registrar sus rutas
 from apps.home.controllers import patient_controller
+from apps.home.controllers import upload_studies  # Controlador de carga de estudios DICOM
 
 from flask import render_template, request
 from flask_login import login_required
@@ -579,14 +580,35 @@ def write_env_file(updates: dict):
 
 @blueprint.errorhandler(403)
 def access_forbidden(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'success': False,
+            'error': 'Acceso no autorizado',
+            'msg': 'Access forbidden'
+        }), 403
     return render_template('home/page-403.html'), 403
 
 @blueprint.errorhandler(404)
 def not_found_error(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'success': False,
+            'error': 'Recurso no encontrado',
+            'msg': 'Resource not found'
+        }), 404
     return render_template('home/page-404.html'), 404
 
 @blueprint.errorhandler(500)
 def internal_error(error):
+    # Si es una petición API, devolver JSON en lugar de HTML
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'success': False,
+            'error': 'Error interno del servidor',
+            'msg': 'Internal server error'
+        }), 500
     return render_template('home/page-500.html'), 500
 
 # === RUTAS DE REDIRECCIÓN ===
@@ -638,6 +660,9 @@ def validate_template_access(template, user_type):
         
         # Ejecución - Solo Tecnico y Sysadmin
         'ejecucion.html': ['ejecucion'],
+        
+        # Cargar Estudio - Solo Tecnico y Sysadmin
+        'cargar_estudio.html': ['ejecucion'],
         
         # Redacción - Solo Medico y Sysadmin
         'redaccion_informe.html': ['redaccion'],
