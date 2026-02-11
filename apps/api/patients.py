@@ -41,7 +41,8 @@ def get_patients():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 1000, type=int)
         search = request.args.get('search', '')
-        
+        hide_without_studies = request.args.get('hide_without_studies', 'false').lower() == 'true'
+
         if page < 1:
             page = 1
         if per_page < 1 or per_page > 1000:
@@ -76,49 +77,49 @@ def get_patients():
         search_pattern = f'%{search}%'
         offset = (page - 1) * per_page
         
+        # Cláusula HAVING para filtrar pacientes sin estudios
+        having_clause = "HAVING COUNT(tbex.guid) > 0" if hide_without_studies else ""
+
         # Contar total de resultados
-        count_query = """
-            SELECT COUNT(*)
-            FROM nextris.datapatient dp
-            WHERE dp.id_patientdomain = ANY(%s)
-            AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
+        count_query = f"""
+            SELECT COUNT(*) FROM (
+                SELECT dp.guid
+                FROM nextris.datapatient dp
+                LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
+                WHERE dp.id_patientdomain = ANY(%s)
+                AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
+                GROUP BY dp.guid
+                {having_clause}
+            ) sub
         """
         cursor.execute(count_query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern))
         total = cursor.fetchone()[0]
-        
-        # Obtener pacientes con conteo de estudios reportados
-        query = """
-            SELECT 
+
+        # Obtener pacientes con conteo de estudios
+        query = f"""
+            SELECT
                 dp.guid,
                 dp.name,
-                dp.surname, 
-                dp.nationalcode, 
-                dp.sexcode, 
+                dp.surname,
+                dp.nationalcode,
+                dp.sexcode,
                 dp.birthdate,
                 dp.phone,
                 dp.email,
                 dp.patientid,
-                COALESCE(COUNT(CASE 
-                    WHEN tbex.isreported = 1 
-                    AND EXISTS (
-                        SELECT 1 
-                        FROM nextris.rel_user_location rul 
-                        WHERE rul.user_id = %s 
-                        AND rul.location_id = tbex.location_id
-                    ) 
-                    THEN 1 
-                END), 0) as study_count
+                COUNT(tbex.guid) as study_count
             FROM nextris.datapatient dp
-            LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.patientid
+            LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
             WHERE dp.id_patientdomain = ANY(%s)
             AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
-            GROUP BY dp.guid, dp.name, dp.surname, dp.nationalcode, dp.sexcode, 
+            GROUP BY dp.guid, dp.name, dp.surname, dp.nationalcode, dp.sexcode,
                      dp.birthdate, dp.phone, dp.email, dp.patientid
+            {having_clause}
             ORDER BY dp.surname, dp.name
             LIMIT %s OFFSET %s
         """
-        
-        cursor.execute(query, (user_id, user_domains, search_pattern, search_pattern, search_pattern, search_pattern, per_page, offset))
+
+        cursor.execute(query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern, per_page, offset))
         
         patients = []
         for row in cursor.fetchall():
@@ -1105,12 +1106,12 @@ def get_patient_history(guid):
                 CONCAT(us_referring.name,' ',us_referring.surname) as medico_referente
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
-            LEFT JOIN nextris.datapatient data on data.patientid=ex.idpatient
+            LEFT JOIN nextris.datapatient data on data.guid=ex.idpatient
             LEFT JOIN nextris.tbreport rep on rep.idexamination=ex.guid
             LEFT JOIN nextris.tbuser us_reporter on us_reporter.guid=rep.idreporterphysician
             LEFT JOIN nextris.tbuser us_referring on us_referring.guid=rep.idreferringphysician
             LEFT JOIN nextris.ismodality mod on mod.guid=st.modality_id
-            WHERE data.guid = %s and ex.isreported=1
+            WHERE data.guid = %s
             ORDER BY ex.createdon DESC
         """
         
@@ -1157,20 +1158,6 @@ def get_patient_history_for_report(guid):
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener patientid
-        cursor.execute("SELECT patientid FROM nextris.datapatient WHERE guid = %s", (guid,))
-        result = cursor.fetchone()
-        
-        if not result:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': []
-            }), 200
-        
-        patient_id = result[0]
-        
         cursor.execute("""
             SELECT ex.guid, st.description AS estudio, ex.reportdate
             FROM nextris.tbexamination ex
@@ -1178,7 +1165,7 @@ def get_patient_history_for_report(guid):
             WHERE ex.idpatient = %s AND ex.isreported = 1
             ORDER BY ex.reportdate DESC
             LIMIT 10
-        """, (patient_id,))
+        """, (guid,))
         
         history = []
         for row in cursor.fetchall():

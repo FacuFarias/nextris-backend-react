@@ -361,7 +361,7 @@ def get_patients():
             FROM nextris.datapatient dp
             INNER JOIN nextris.rel_user_patientdomain rup 
                 ON dp.id_patientdomain = rup.patientdomain_id
-            LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.patientid
+            LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
             WHERE rup.user_id = %s
             GROUP BY dp.Guid, dp.Name, dp.Surname, dp.NationalCode, dp.SexCode, 
                      dp.BirthDate, dp.phone, dp.email, dp.patientid
