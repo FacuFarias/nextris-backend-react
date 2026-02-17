@@ -387,9 +387,9 @@ def create_admission_from_appointment(appointment_guid):
             INSERT INTO nextris.tbexamination (
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
-                idrequestingphysician, isadmitted
+                idrequestingphysician, isadmitted, location_id
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, 1
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -398,7 +398,8 @@ def create_admission_from_appointment(appointment_guid):
             final_equipment_id,
             new_admission,
             new_accession,
-            physician_id
+            physician_id,
+            location_id
         ))
         
         examination_guid = cursor.fetchone()[0]
@@ -522,6 +523,7 @@ def create_admission_order():
             "study_type_id": "uuid-del-tipo-de-estudio",
             "equipment_id": "uuid-del-equipo",
             "physician_id": "uuid-del-medico-solicitante" (opcional),
+            "referring_physician_id": "uuid-del-radiologo-firmante" (opcional),
             "insurance_id": "uuid-de-la-obra-social" (opcional),
             "severity": "normal" | "urgent" (opcional, default: "normal")
         }
@@ -687,9 +689,9 @@ def create_admission_order():
             INSERT INTO nextris.tbexamination (
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
-                idseverity, idrequestingphysician, idpricelist, isadmitted
+                idseverity, idrequestingphysician, idreferringphysician, idpricelist, isadmitted, location_id
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s, 1
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -700,7 +702,9 @@ def create_admission_order():
             accession_number,
             severity_id,
             exam_data.get('physician_id'),
-            exam_data.get('insurance_id')
+            exam_data.get('referring_physician_id'),
+            exam_data.get('insurance_id'),
+            location_id
         ))
         
         exam_guid = cursor.fetchone()[0]

@@ -11,6 +11,7 @@ from apps.api import api_blueprint
 import uuid
 import os
 import smtplib
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -131,7 +132,8 @@ def get_examinations_for_distribution():
                 COALESCE(e.isreported, 0) as isreported,
                 COALESCE(e.isexecuted, 0) as isexecuted,
                 COALESCE(e.ispublicated, 0) as ispublicated,
-                e.localacc as accession_number
+                e.localacc as accession_number,
+                COALESCE(dp.phone, '') as phone
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
@@ -181,7 +183,8 @@ def get_examinations_for_distribution():
                 'isreported': bool(row[10]),
                 'isexecuted': bool(row[11]),
                 'ispublicated': bool(row[12]),
-                'accession_number': row[13] or ''
+                'accession_number': row[13] or '',
+                'phone': row[14] or ''
             })
         
         return jsonify({
@@ -570,10 +573,10 @@ def view_examination_report(exam_id):
 def get_dicom_viewer_info(exam_id):
     """
     Obtiene la información necesaria para abrir el visor DICOM
-    
+
     Path:
     - exam_id: GUID del examen
-    
+
     Returns:
     {
         "success": true,
@@ -595,13 +598,13 @@ def get_dicom_viewer_info(exam_id):
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        
+
         # Obtener información del examen para el visor DICOM
         query = """
-            SELECT 
+            SELECT
                 e.guid,
                 e.studyinstanceuid,
                 CONCAT(dp.surname, ', ', dp.name) as patient_name,
@@ -613,33 +616,33 @@ def get_dicom_viewer_info(exam_id):
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             WHERE e.guid = %s
         """
-        
+
         cursor.execute(query, (exam_id,))
         result = cursor.fetchone()
-        
+
         cursor.close()
         connection.close()
-        
+
         if not result:
             return jsonify({
                 'success': False,
                 'message': 'Examen no encontrado'
             }), 404
-        
+
         study_uid = result[1]
-        
+
         if not study_uid:
             return jsonify({
                 'success': False,
                 'message': 'Este examen no tiene Study UID asociado'
             }), 404
-        
+
         # Construir URL del visor
         viewer_url = f"/viewer?studyUID={study_uid}"
-        
+
         # Verificar si existen imágenes (opcional, basado en la existencia de archivos)
         has_images = True  # Por defecto asumimos que sí hay imágenes si tiene study_uid
-        
+
         return jsonify({
             'success': True,
             'data': {
@@ -653,7 +656,388 @@ def get_dicom_viewer_info(exam_id):
                 'has_images': has_images
             }
         }), 200
-        
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+# ====================================================================
+# FUNCIONES AUXILIARES PARA WHATSAPP
+# ====================================================================
+
+def send_whatsapp_document(api_url, api_token, phone_number_id, recipient_phone,
+                           pdf_path, caption, document_filename):
+    """
+    Envía un documento PDF por WhatsApp usando la Meta Cloud API.
+
+    1. Sube el PDF como media
+    2. Envía el documento con caption al destinatario
+
+    Returns: (success: bool, message: str)
+    """
+    headers_auth = {
+        'Authorization': f'Bearer {api_token}'
+    }
+
+    # Paso 1: Subir el PDF como media
+    upload_url = f"{api_url}/{phone_number_id}/media"
+
+    with open(pdf_path, 'rb') as pdf_file:
+        upload_response = requests.post(
+            upload_url,
+            headers=headers_auth,
+            files={'file': (document_filename, pdf_file, 'application/pdf')},
+            data={'messaging_product': 'whatsapp', 'type': 'application/pdf'},
+            timeout=30
+        )
+
+    if upload_response.status_code != 200:
+        return False, f"Error al subir media: {upload_response.status_code} - {upload_response.text}"
+
+    media_id = upload_response.json().get('id')
+    if not media_id:
+        return False, f"No se obtuvo media_id de la respuesta: {upload_response.text}"
+
+    # Paso 2: Enviar mensaje con el documento
+    message_url = f"{api_url}/{phone_number_id}/messages"
+
+    message_payload = {
+        "messaging_product": "whatsapp",
+        "to": recipient_phone,
+        "type": "document",
+        "document": {
+            "id": media_id,
+            "caption": caption,
+            "filename": document_filename
+        }
+    }
+
+    msg_response = requests.post(
+        message_url,
+        headers={**headers_auth, 'Content-Type': 'application/json'},
+        json=message_payload,
+        timeout=30
+    )
+
+    if msg_response.status_code not in (200, 201):
+        return False, f"Error al enviar documento: {msg_response.status_code} - {msg_response.text}"
+
+    return True, "Documento enviado correctamente"
+
+
+def send_whatsapp_text(api_url, api_token, phone_number_id, recipient_phone, text_body):
+    """
+    Envía un mensaje de texto por WhatsApp usando la Meta Cloud API.
+
+    Returns: (success: bool, message: str)
+    """
+    message_url = f"{api_url}/{phone_number_id}/messages"
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": recipient_phone,
+        "type": "text",
+        "text": {"body": text_body}
+    }
+
+    response = requests.post(
+        message_url,
+        headers={
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/json'
+        },
+        json=payload,
+        timeout=30
+    )
+
+    if response.status_code not in (200, 201):
+        return False, f"Error al enviar texto: {response.status_code} - {response.text}"
+
+    return True, "Mensaje enviado correctamente"
+
+
+# ====================================================================
+# ENDPOINTS PARA DISTRIBUCIÓN POR WHATSAPP
+# ====================================================================
+
+@api_blueprint.route('/examinations/<exam_id>/send-report-whatsapp', methods=['POST'])
+@jwt_required()
+def send_report_whatsapp(exam_id):
+    """
+    Envía un informe por WhatsApp
+
+    Path:
+    - exam_id: GUID del examen
+
+    Body JSON:
+    {
+        "phone": "+521234567890" (required)
+    }
+
+    Returns:
+    {
+        "success": true,
+        "message": "Informe enviado por WhatsApp correctamente"
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+
+        phone = data.get('phone', '').strip()
+
+        if not phone:
+            return jsonify({
+                'success': False,
+                'message': 'El número de teléfono es requerido'
+            }), 400
+
+        # Limpiar el número: solo dígitos
+        clean_phone = phone.lstrip('+')
+        clean_phone = ''.join(c for c in clean_phone if c.isdigit())
+
+        if not clean_phone or len(clean_phone) < 10:
+            return jsonify({
+                'success': False,
+                'message': 'Número de teléfono inválido. Debe incluir código de país (ej: +521234567890)'
+            }), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        # Obtener información del reporte, examen y config WhatsApp de la facility
+        query = """
+            SELECT
+                r.pdfpath,
+                CONCAT(dp.name, ' ', dp.surname) as patient_name,
+                st.description as study_type,
+                ex.localacc as accession_number,
+                f.whatsapp_api_url,
+                f.whatsapp_api_token,
+                f.whatsapp_phone_number_id,
+                f.whatsapp_is_active,
+                ex.studyinstanceuid,
+                COALESCE(ex.isimage, 0) as has_images,
+                COALESCE(f.smtp_from_name, f.name, 'NextRIS') as sender_name
+            FROM nextris.tbexamination ex
+            LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
+            LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
+            LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
+            LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+            LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+            WHERE ex.guid = %s
+        """
+
+        cursor.execute(query, (exam_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+
+        pdf_path = result[0]
+        patient_name = result[1]
+        study_type = result[2]
+        accession_number = result[3]
+        wa_api_url = result[4]
+        wa_api_token = result[5]
+        wa_phone_number_id = result[6]
+        wa_is_active = result[7]
+        study_uid = result[8]
+        has_images = bool(result[9])
+        sender_name = result[10]
+
+        # Validar configuración WhatsApp
+        if not wa_is_active:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'WhatsApp no está activo para esta facility. Active la configuración de WhatsApp en la configuración de la facility.'
+            }), 400
+
+        if not wa_api_url or not wa_api_token or not wa_phone_number_id:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Configuración de WhatsApp incompleta. Verifique API URL, Token y Phone Number ID en la configuración de la facility.',
+                'data': {
+                    'whatsapp_configured': False,
+                    'api_url_exists': bool(wa_api_url),
+                    'api_token_exists': bool(wa_api_token),
+                    'phone_number_id_exists': bool(wa_phone_number_id)
+                }
+            }), 500
+
+        if not pdf_path or not os.path.exists(pdf_path):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'PDF del informe no encontrado'
+            }), 404
+
+        # Construir caption del documento
+        caption = (
+            f"Estimado/a {patient_name},\n\n"
+            f"Adjunto el informe médico correspondiente al estudio: {study_type}\n"
+            f"Número de acceso: {accession_number}\n\n"
+            f"Este es un mensaje automático.\n"
+            f"- {sender_name}"
+        )
+
+        document_filename = f"informe_{accession_number}.pdf"
+
+        # Enviar documento PDF por WhatsApp
+        success, message = send_whatsapp_document(
+            wa_api_url, wa_api_token, wa_phone_number_id,
+            clean_phone, pdf_path, caption, document_filename
+        )
+
+        if not success:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Error al enviar por WhatsApp: {message}'
+            }), 500
+
+        # Si hay imágenes DICOM, enviar link del visor en un segundo mensaje
+        if has_images and study_uid:
+            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_text = (
+                f"Para visualizar las imágenes médicas de su estudio ({study_type}), "
+                f"acceda al siguiente enlace:\n\n{viewer_url}"
+            )
+            send_whatsapp_text(
+                wa_api_url, wa_api_token, wa_phone_number_id,
+                clean_phone, viewer_text
+            )
+
+        # Marcar examen como publicado/enviado
+        update_query = """
+            UPDATE nextris.tbexamination
+            SET ispublicated = 1
+            WHERE guid = %s
+        """
+        cursor.execute(update_query, (exam_id,))
+        connection.commit()
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Informe enviado por WhatsApp correctamente'
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error al enviar por WhatsApp: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/update-phone', methods=['PATCH', 'PUT'])
+@jwt_required()
+def update_examination_phone(exam_id):
+    """
+    Actualiza el teléfono de un paciente asociado a un examen
+
+    Path:
+    - exam_id: GUID del examen
+
+    Body JSON:
+    {
+        "phone": "+521234567890" (required)
+    }
+
+    Returns:
+    {
+        "success": true,
+        "message": "Teléfono actualizado correctamente"
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere un cuerpo JSON'
+            }), 400
+
+        phone = data.get('phone', '').strip()
+
+        if not phone:
+            return jsonify({
+                'success': False,
+                'message': 'El teléfono es requerido'
+            }), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        # Obtener el patient_id del examen
+        cursor.execute(
+            "SELECT idpatient FROM nextris.tbexamination WHERE guid = %s",
+            (exam_id,)
+        )
+        result = cursor.fetchone()
+
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+
+        patient_id = result[0]
+
+        # Actualizar teléfono del paciente
+        cursor.execute(
+            "UPDATE nextris.datapatient SET phone = %s WHERE guid = %s",
+            (phone, patient_id)
+        )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Teléfono actualizado correctamente'
+        }), 200
+
     except Exception as e:
         return jsonify({
             'success': False,

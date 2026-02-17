@@ -582,9 +582,10 @@ def dicom_unlinked_studies():
         }), 500
 
 
-@blueprint.route('/api/dicom/link-study', methods=['POST'])
-@login_required
-def dicom_link_study():
+# DEPRECATED: Moved to apps/api/dicom_routes.py with JWT auth
+# @blueprint.route('/api/dicom/link-study', methods=['POST'])
+# @login_required
+def dicom_link_study_legacy():
     """
     Vincula un estudio DICOM cargado manualmente con una orden/examen existente
     """
@@ -672,9 +673,10 @@ def dicom_link_study():
         }), 500
 
 
-@blueprint.route('/api/dicom/search-examinations', methods=['GET'])
-@login_required  
-def dicom_search_examinations():
+# DEPRECATED: Moved to apps/api/dicom_routes.py with JWT auth
+# @blueprint.route('/api/dicom/search-examinations', methods=['GET'])
+# @login_required
+def dicom_search_examinations_legacy():
     """
     Busca exámenes existentes para vincular con estudios DICOM
     Filtra por isimage = 0 (sin imagen asociada)

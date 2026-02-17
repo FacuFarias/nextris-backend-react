@@ -112,6 +112,7 @@ def get_examinations_for_reporting():
         show_reported = request.args.get('show_reported', 'false').lower() == 'true'
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
+        show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
@@ -203,6 +204,10 @@ def get_examinations_for_reporting():
             base_query += " AND e.Status = %s"
             params.append(status_filter)
         
+        # Por defecto ocultar estudios sin imágenes; si show_no_image=true mostrar todo
+        if not show_no_image:
+            base_query += " AND e.isimage = 1"
+
         # Aplicar filtro de asignación si se solicita
         if assigned_to_me:
             base_query += " AND e.assignto = %s"

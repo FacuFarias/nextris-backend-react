@@ -100,11 +100,19 @@ def get_calendar_events():
         """
         cursor.execute(query_timezone, (equipment_aetitle,))
         timezone_result = cursor.fetchone()
-        timezone = timezone_result[0] if timezone_result and timezone_result[0] else 'America/Argentina/Buenos_Aires'
-        
+        default_tz = 'America/Argentina/Buenos_Aires'
+        timezone = timezone_result[0] if timezone_result and timezone_result[0] else default_tz
+
+        # Crear objeto timezone con fallback
+        try:
+            tz = pytz.timezone(timezone)
+        except pytz.exceptions.UnknownTimeZoneError:
+            tz = pytz.timezone(default_tz)
+            timezone = default_tz
+
         # Obtener eventos del equipo
         query_events = """
-            SELECT tba.guid, tba.comienzo, tba.fin, tba.idmed, st.description as exam, 
+            SELECT tba.guid, tba.comienzo, tba.fin, tba.idmed, st.description as exam,
                    tba.idmed_sol, CONCAT(pat.surname, ' ', pat.name) as patient_name
             FROM nextris.tbagendaevents tba
             INNER JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
@@ -113,22 +121,40 @@ def get_calendar_events():
             WHERE equip.aetitle = %s
             ORDER BY tba.comienzo
         """
-        
+
         cursor.execute(query_events, (equipment_aetitle,))
         eventos = cursor.fetchall()
-        
-        # Formatear eventos
+
+        # Formatear eventos - convertir UTC a hora local
         events_list = []
         for ev in eventos:
-            # Ajustar zona horaria si es necesario
             start_time = ev[1]
             end_time = ev[2]
-            
+
             if start_time and end_time:
+                # Convertir de UTC a hora local
+                try:
+                    if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
+                        start_local = start_time.astimezone(tz)
+                    else:
+                        start_local = pytz.UTC.localize(start_time).astimezone(tz)
+                    start_str = start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                except Exception:
+                    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S')
+
+                try:
+                    if hasattr(end_time, 'tzinfo') and end_time.tzinfo is not None:
+                        end_local = end_time.astimezone(tz)
+                    else:
+                        end_local = pytz.UTC.localize(end_time).astimezone(tz)
+                    end_str = end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                except Exception:
+                    end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S')
+
                 event = {
                     'guid': str(ev[0]),
-                    'start': start_time.isoformat(),
-                    'end': end_time.isoformat(),
+                    'start': start_str,
+                    'end': end_str,
                     'idmed': ev[3],
                     'exam': ev[4] or 'Sin examen',
                     'idmed_sol': ev[5],
@@ -148,16 +174,26 @@ def get_calendar_events():
         cursor.execute(query_work_hours, (equipment_aetitle,))
         work_hours_data = cursor.fetchall()
         
-        # Mapeo de días
+        # Mapeo de días (texto en español → número FullCalendar)
         days_mapping = {
             'lunes': 1, 'martes': 2, 'miércoles': 3, 'miercoles': 3,
             'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6, 'domingo': 0
         }
-        
+
+        def parse_day(raw_day):
+            """Convierte el día a número. Soporta valores numéricos (int o str) y texto en español."""
+            if isinstance(raw_day, int):
+                return raw_day
+            day_str = str(raw_day).strip().lower()
+            # Si es un valor numérico almacenado como string
+            if day_str.isdigit():
+                return int(day_str)
+            return days_mapping.get(day_str, 1)
+
         work_hours = []
         for row in work_hours_data:
             work_hours.append({
-                'day': days_mapping.get(row[0].lower(), 1),
+                'day': parse_day(row[0]),
                 'start': row[1].strftime('%H:%M:%S') if row[1] else '08:00:00',
                 'end': row[2].strftime('%H:%M:%S') if row[2] else '17:00:00'
             })
@@ -273,9 +309,12 @@ def reschedule_appointment(appointment_id):
             # Parsear datetimes locales
             dt_start_local = datetime.strptime(start_datetime, '%Y-%m-%d %H:%M:%S')
             dt_end_local = datetime.strptime(end_datetime, '%Y-%m-%d %H:%M:%S')
-            
-            # Localizar a la zona horaria de la location
-            tz = pytz.timezone(timezone_str)
+
+            # Localizar a la zona horaria de la location (con fallback)
+            try:
+                tz = pytz.timezone(timezone_str)
+            except pytz.exceptions.UnknownTimeZoneError:
+                tz = pytz.timezone('America/Argentina/Buenos_Aires')
             dt_start_local = tz.localize(dt_start_local)
             dt_end_local = tz.localize(dt_end_local)
             
@@ -411,10 +450,10 @@ def create_appointment():
             obra_social_id = event.get('obra_social_id')
             equipment_id = event.get('equipment_id')
             
-            if not all([exam_id, start_datetime, end_datetime, physician_id, obra_social_id]):
+            if not all([exam_id, start_datetime, end_datetime]):
                 return jsonify({
                     'success': False,
-                    'message': f'Evento {i+1}: Faltan campos requeridos exam_id, start_datetime, end_datetime, physician_id, obra_social_id'
+                    'message': f'Evento {i+1}: Faltan campos requeridos exam_id, start_datetime, end_datetime'
                 }), 400
             
             if appointment_type == 'equipment' and not equipment_id:
@@ -464,12 +503,30 @@ def create_appointment():
                 
                 # Convertir datetimes de local a UTC
                 try:
-                    # Parsear datetimes locales
-                    dt_start_local = datetime.strptime(start_datetime, '%Y-%m-%d %H:%M:%S')
-                    dt_end_local = datetime.strptime(end_datetime, '%Y-%m-%d %H:%M:%S')
+                    # Parsear datetimes locales (con o sin segundos)
+                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
+                        try:
+                            dt_start_local = datetime.strptime(start_datetime, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        raise ValueError(f'Formato de fecha inválido: {start_datetime}')
+
+                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
+                        try:
+                            dt_end_local = datetime.strptime(end_datetime, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        raise ValueError(f'Formato de fecha inválido: {end_datetime}')
                     
-                    # Localizar a la zona horaria de la location
-                    tz = pytz.timezone(timezone_str)
+                    # Localizar a la zona horaria de la location (con fallback)
+                    try:
+                        tz = pytz.timezone(timezone_str)
+                    except pytz.exceptions.UnknownTimeZoneError:
+                        tz = pytz.timezone('America/Argentina/Buenos_Aires')
                     dt_start_local = tz.localize(dt_start_local)
                     dt_end_local = tz.localize(dt_end_local)
                     
@@ -485,43 +542,36 @@ def create_appointment():
                     start_datetime_to_save = start_datetime
                     end_datetime_to_save = end_datetime
                 
-                # Insertar cada cita
-                if appointment_type == 'equipment':
-                    if location_id:
-                        query = """
-                            INSERT INTO nextris.tbagendaevents 
-                            (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, location_id, createdon, isadmitted)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                        """
-                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, equipment_id, 
-                                 patient_id, exam_id, physician_id, obra_social_id, location_id)
-                    else:
-                        query = """
-                            INSERT INTO nextris.tbagendaevents 
-                            (guid, comienzo, fin, idequipment, idpatient, idexam, idmed, obrasocial, createdon, isadmitted)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                        """
-                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, equipment_id, 
-                                 patient_id, exam_id, physician_id, obra_social_id)
-                else:
-                    if location_id:
-                        query = """
-                            INSERT INTO nextris.tbagendaevents 
-                            (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, location_id, createdon, isadmitted)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                        """
-                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, physician_id, 
-                                 patient_id, exam_id, obra_social_id, location_id)
-                    else:
-                        query = """
-                            INSERT INTO nextris.tbagendaevents 
-                            (guid, comienzo, fin, idmed, idpatient, idexam, obrasocial, createdon, isadmitted)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), false)
-                        """
-                        params = (new_guid, start_datetime_to_save, end_datetime_to_save, physician_id, 
-                                 patient_id, exam_id, obra_social_id)
+                # Construir INSERT dinámicamente según campos disponibles
+                columns = ['guid', 'comienzo', 'fin', 'idpatient', 'idexam']
+                values = [new_guid, start_datetime_to_save, end_datetime_to_save, patient_id, exam_id]
+
+                if appointment_type == 'equipment' and equipment_id:
+                    columns.append('idequipment')
+                    values.append(equipment_id)
+
+                if physician_id:
+                    columns.append('idmed')
+                    values.append(physician_id)
+
+                if obra_social_id:
+                    columns.append('obrasocial')
+                    values.append(obra_social_id)
+
+                if location_id:
+                    columns.append('location_id')
+                    values.append(location_id)
+
+                # createdon e isadmitted van al final con valores SQL literales
+                columns.extend(['createdon', 'isadmitted'])
+                placeholders = ', '.join(['%s'] * len(values) + ['NOW()', 'false'])
+                query = f"""
+                    INSERT INTO nextris.tbagendaevents
+                    ({', '.join(columns)})
+                    VALUES ({placeholders})
+                """
                 
-                cursor.execute(query, params)
+                cursor.execute(query, tuple(values))
                 created_appointment_ids.append(new_guid)
             
             # Confirmar todas las transacciones
@@ -600,6 +650,7 @@ def get_appointments():
         equipment_id = request.args.get('equipment_id')
         admitted_filter = request.args.get('admitted')
         today_only = request.args.get('today', 'false').lower() == 'true'
+        search = request.args.get('search', '').strip()
         
         # Parámetros de paginación
         page = int(request.args.get('page', 1))
@@ -648,7 +699,7 @@ def get_appointments():
                 tba.location_id,
                 tba.idequipment as equipment_id,
                 mod.description as modality,
-                COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires') as timezone,
+                COALESCE(tbl_equip.timezone, tbl_event.timezone, 'America/Argentina/Buenos_Aires') as timezone,
                 tba.idexam as exam_id
             FROM nextris.tbagendaevents tba
             LEFT JOIN nextris.datapatient pat ON pat.guid = tba.idpatient
@@ -656,7 +707,8 @@ def get_appointments():
             LEFT JOIN nextris.tbuser med ON med.guid = tba.idmed
             LEFT JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
             LEFT JOIN nextris.ismodality mod ON mod.guid = st.modality_id
-            LEFT JOIN nextris.tblocation tbl ON tbl.guid = tba.location_id
+            LEFT JOIN nextris.tblocation tbl_event ON tbl_event.guid = tba.location_id
+            LEFT JOIN nextris.tblocation tbl_equip ON tbl_equip.guid = equip.location_id
             WHERE 1=1
         """
         
@@ -679,6 +731,11 @@ def get_appointments():
             filter_conditions += " AND tba.idequipment = %s"
             params.append(equipment_id)
         
+        if search:
+            filter_conditions += " AND (CONCAT(pat.surname, ' ', pat.name) ILIKE %s OR pat.name ILIKE %s OR pat.surname ILIKE %s OR equip.aetitle ILIKE %s OR st.description ILIKE %s)"
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param, search_param, search_param, search_param])
+
         if admitted_filter is not None:
             is_admitted = admitted_filter.lower() == 'true'
             filter_conditions += " AND tba.isadmitted = %s"
@@ -705,34 +762,50 @@ def get_appointments():
         cursor.close()
         connection.close()
         
-        # Obtener timezone (será el mismo para todos)
-        timezone = 'America/Argentina/Buenos_Aires'
-        if results and len(results) > 0:
-            timezone = results[0][11] if results[0][11] else 'America/Argentina/Buenos_Aires'
-        
-        # Crear objeto timezone
-        tz = pytz.timezone(timezone)
+        # Timezone por defecto (fallback)
+        default_tz = 'America/Argentina/Buenos_Aires'
+        response_timezone = default_tz
         
         # Formatear resultados
         appointments = []
         for row in results:
-            # Convertir de UTC (naive) a la zona horaria local
+            # Convertir de UTC (naive) a la zona horaria local por cada fila
             start_time = row[2]
             end_time = row[3]
+            row_timezone = row[11] if row[11] else default_tz
+
+            try:
+                tz = pytz.timezone(row_timezone)
+            except pytz.exceptions.UnknownTimeZoneError:
+                tz = pytz.timezone(default_tz)
+                row_timezone = default_tz
+
+            if response_timezone == default_tz and row_timezone:
+                response_timezone = row_timezone
             
             if start_time:
-                # Asumir que está en UTC y localizar
-                start_utc = pytz.UTC.localize(start_time)
-                start_local = start_utc.astimezone(tz)
-                start_str = start_local.isoformat()
+                try:
+                    if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
+                        start_local = start_time.astimezone(tz)
+                    else:
+                        start_utc = pytz.UTC.localize(start_time)
+                        start_local = start_utc.astimezone(tz)
+                    start_str = start_local.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    start_str = str(start_time)
             else:
                 start_str = ''
-            
+
             if end_time:
-                # Asumir que está en UTC y localizar
-                end_utc = pytz.UTC.localize(end_time)
-                end_local = end_utc.astimezone(tz)
-                end_str = end_local.isoformat()
+                try:
+                    if hasattr(end_time, 'tzinfo') and end_time.tzinfo is not None:
+                        end_local = end_time.astimezone(tz)
+                    else:
+                        end_utc = pytz.UTC.localize(end_time)
+                        end_local = end_utc.astimezone(tz)
+                    end_str = end_local.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    end_str = str(end_time)
             else:
                 end_str = ''
             
@@ -754,7 +827,7 @@ def get_appointments():
         return jsonify({
             'success': True,
             'data': {
-                'timezone': timezone,
+                'timezone': response_timezone,
                 'data': appointments,
                 'page': page,
                 'per_page': per_page,
@@ -1018,19 +1091,81 @@ def get_physicians_by_location(location_id=None):
         }), 500
 
 
+@api_blueprint.route('/institutional/locations/<location_id>/rads_per_location', methods=['GET'])
+@jwt_required()
+def get_rads_per_location(location_id):
+    """
+    Obtiene radiólogos (médicos firmantes) con acceso a una ubicación.
+
+    GET /api/institutional/locations/{location_id}/rads_per_location
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        query = """
+            SELECT DISTINCT
+                u.guid,
+                CONCAT(COALESCE(u.name, ''), ' ', COALESCE(u.surname, '')) as description,
+                r.description as role
+            FROM nextris.tbuser u
+            INNER JOIN nextris.isrole r ON r.guid = u.idrole
+            INNER JOIN nextris.rel_user_location rul ON rul.user_id = u.guid
+            WHERE u.isactive = 1
+              AND rul.location_id = %s
+              AND (
+                  r.description ILIKE '%%med%%' OR
+                  r.description ILIKE '%%rad%%'
+              )
+            ORDER BY description
+        """
+
+        cursor.execute(query, (location_id,))
+        rows = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        rads_list = []
+        for row in rows:
+            rads_list.append({
+                'guid': row[0],
+                'description': (row[1] or '').strip(),
+                'role': row[2]
+            })
+
+        return jsonify({
+            'success': True,
+            'data': rads_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
 @api_blueprint.route('/institutional/locations/<location_id>/health-insurances', methods=['GET'])
 @api_blueprint.route('/institutional/health-insurances', methods=['GET'])
 @jwt_required()
 def get_health_insurances_by_location(location_id=None):
     """
-    Obtiene obras sociales (price lists) filtradas opcionalmente por ubicación
-    
+    Obtiene obras sociales filtradas opcionalmente por ubicación
+
     GET /api/institutional/locations/{location_id}/health-insurances
     GET /api/institutional/health-insurances
-    
+
     Path Parameters:
     - location_id (OPCIONAL): UUID de la ubicación
-    
+
     Returns:
     {
         "success": true,
@@ -1051,47 +1186,46 @@ def get_health_insurances_by_location(location_id=None):
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        
-        # Consulta con JOIN para incluir información de la ubicación
-        query = """
-            SELECT p.guid, p.description, p.location_id, l.name as location_name
-            FROM nextris.ispricelist p
-            LEFT JOIN nextris.tblocation l ON p.location_id = l.guid
-            WHERE p.isactive = 1
-        """
-        
-        params = []
-        
-        # Agregar filtro de ubicación si se proporciona
+
         if location_id:
-            query += " AND p.location_id = %s"
-            params.append(location_id)
-        
-        query += " ORDER BY p.description"
-        
-        cursor.execute(query, params)
+            query = """
+                SELECT hi.guid, hi.description,hi.externalcode,hi.headerdescription
+                FROM nextris.ishealthinsurances hi
+                INNER JOIN nextris.rel_insurance_location ril ON hi.guid = ril.insurance_id
+                WHERE hi.isactive = 1
+                AND ril.location_id = %s
+                ORDER BY hi.description
+            """
+            cursor.execute(query, [location_id])
+        else:
+            query = """
+                SELECT hi.guid, hi.description
+                FROM nextris.ishealthinsurances hi
+                WHERE hi.isactive = 1
+                ORDER BY hi.description
+            """
+            cursor.execute(query)
+
         results = cursor.fetchall()
-        
+
         cursor.close()
         connection.close()
-        
+
         insurances_list = []
         for row in results:
             insurances_list.append({
                 'guid': row[0],
-                'description': row[1],
-                'location_id': row[2],
-                'location_name': row[3]
+                'description': row[1]
             })
-        
+
         return jsonify({
             'success': True,
             'data': insurances_list
         }), 200
-        
+
     except Exception as e:
         return jsonify({
             'success': False,

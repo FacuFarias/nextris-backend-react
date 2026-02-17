@@ -20,6 +20,14 @@ def test_no_auth():
     """Ruta de prueba sin autenticación"""
     return jsonify({'success': True, 'message': 'Ruta sin autenticación funciona!'})
 
+# TEST: Ruta CON autenticación para pruebas
+@api_blueprint.route('/test-with-auth', methods=['GET'])
+@jwt_required()
+def test_with_auth():
+    """Ruta de prueba CON autenticación JWT"""
+    current_user = get_jwt_identity()
+    return jsonify({'success': True, 'message': 'Auth funciona!', 'user_id': current_user})
+
 # Obtener configuración de BD
 config = ConfigService.get_db_config()
 
@@ -252,7 +260,7 @@ def manual_unlinked_studies():
         cursor = conn.cursor()
         
         query = """
-            SELECT 
+            SELECT
                 guid,
                 filename,
                 patient_name,
@@ -266,7 +274,8 @@ def manual_unlinked_studies():
                 upload_date,
                 uploaded_by_username,
                 pacs_status,
-                file_size
+                file_size,
+                location_id
             FROM nextris.tbmanual_uploads
             WHERE islinked = 0
         """
@@ -298,7 +307,8 @@ def manual_unlinked_studies():
                 'upload_date': row[10].isoformat() if row[10] else None,
                 'uploaded_by': row[11],
                 'pacs_status': row[12],
-                'file_size_mb': round(row[13] / (1024 * 1024), 2) if row[13] else 0
+                'file_size_mb': round(row[13] / (1024 * 1024), 2) if row[13] else 0,
+                'location_id': str(row[14]) if row[14] else None
             })
         
         cursor.close()
@@ -329,25 +339,20 @@ def dicom_search_examinations():
     Requiere location_id como parámetro obligatorio
     """
     try:
-        # Validar location_id obligatorio
+        # location_id opcional - puede buscar con location_id específico, NULL o todos
         location_id = request.args.get('location_id', '')
-        if not location_id or location_id.strip() == '':
-            return jsonify({
-                'success': False,
-                'error': 'El parámetro location_id es obligatorio'
-            }), 400
-        
+
         patient_name = request.args.get('patient_name', '')
         patient_id = request.args.get('patient_id', '')
         accession = request.args.get('accession', '')
         date_from = request.args.get('date_from', '')
         date_to = request.args.get('date_to', '')
-        
+
         conn = psycopg2.connect(**config)
         cursor = conn.cursor()
-        
+
         query = """
-            SELECT 
+            SELECT
                 e.guid,
                 e.localacc,
                 p.name as patient_name,
@@ -359,10 +364,14 @@ def dicom_search_examinations():
             LEFT JOIN nextris.datapatient p ON e.idpatient = p.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             WHERE (e.isimage IS NULL OR e.isimage = 0)
-            AND e.location_id = %s
         """
-        
-        params = [location_id]
+
+        params = []
+
+        # Filtrar por location_id si se proporciona
+        if location_id and location_id.strip():
+            query += " AND e.location_id = %s"
+            params.append(location_id)
         
         if patient_name:
             query += " AND LOWER(p.name) LIKE LOWER(%s)"

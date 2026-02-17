@@ -10,7 +10,7 @@ from flask_jwt_extended import (
     jwt_required, 
     get_jwt_identity
 )
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 import psycopg2
 from apps.api import api_blueprint
 from apps.authentication.models import Users, PatientUser
@@ -367,6 +367,97 @@ def logout():
         'success': True,
         'message': 'Logout exitoso'
     }), 200
+
+
+@api_blueprint.route('/auth/change-password', methods=['POST'])
+@jwt_required()
+def change_password_first_login():
+    """
+    Cambia contraseña del usuario autenticado y desactiva bandera de primer login.
+
+    Body JSON:
+    {
+        "new_password": "string" (required, min 6)
+    }
+    """
+    try:
+        data = request.get_json(force=True, silent=True)
+        new_password = (data or {}).get('new_password')
+
+        if not new_password:
+            return jsonify({
+                'success': False,
+                'message': 'new_password es requerido'
+            }), 400
+
+        if len(new_password) < 6:
+            return jsonify({
+                'success': False,
+                'message': 'La contraseña debe tener al menos 6 caracteres'
+            }), 400
+
+        user_id = get_jwt_identity()
+
+        from flask_jwt_extended import get_jwt
+        claims = get_jwt()
+        user_type = claims.get('user_type', 'staff')
+
+        hashed_password = generate_password_hash(new_password)
+
+        from apps.home.routes import config as db_config
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+
+        if user_type == 'patient':
+            cursor.execute(
+                """
+                UPDATE nextris.tbuser_patient
+                SET password = %s,
+                    firstlogin = 0,
+                    updated_at = NOW()
+                WHERE guid = %s
+                """,
+                (hashed_password, user_id)
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE nextris.tbuser
+                SET password = %s,
+                    first_login = 0
+                WHERE guid = %s
+                """,
+                (hashed_password, user_id)
+            )
+
+        if cursor.rowcount == 0:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña actualizada exitosamente'
+        }), 200
+
+    except Exception as e:
+        try:
+            connection.rollback()
+            cursor.close()
+            connection.close()
+        except Exception:
+            pass
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
 
 
 @api_blueprint.route('/auth/user/<user_id>/patientdomains', methods=['GET'])

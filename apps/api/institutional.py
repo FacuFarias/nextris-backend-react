@@ -22,17 +22,22 @@ def get_db_config():
 
 
 @api_blueprint.route('/institutional/info', methods=['GET'])
+@api_blueprint.route('/institutional/info/<location_id>', methods=['GET'])
 @jwt_required()
-def get_institutional_info():
+def get_institutional_info(location_id=None):
     """
-    Obtiene la información institucional
-    
+    Obtiene la información institucional de una ubicación.
+    Si no se pasa location_id, retorna la primera ubicación del usuario.
+
+    Path Parameters:
+    - location_id (opcional): GUID de la ubicación
+
     Returns:
     {
         "success": true,
         "data": {
             "guid": "uuid",
-            "name": "Nombre de la institución",
+            "name": "Nombre de la ubicación",
             "mail": "email@ejemplo.com",
             "address": "Dirección",
             "phone": "Teléfono",
@@ -47,23 +52,35 @@ def get_institutional_info():
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        
-        query = """
-            SELECT guid, name, mail, address, phone, logo_path 
-            FROM nextris.isbasicinformation 
-            ORDER BY guid ASC 
-            LIMIT 1
-        """
-        
-        cursor.execute(query)
+
+        if location_id:
+            query = """
+                SELECT guid, name, mail, address, phone, logo_path
+                FROM nextris.tblocation
+                WHERE guid = %s
+            """
+            cursor.execute(query, (location_id,))
+        else:
+            from flask_jwt_extended import get_jwt_identity
+            user_id = get_jwt_identity()
+            query = """
+                SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path
+                FROM nextris.tblocation l
+                INNER JOIN nextris.rel_user_location rul ON l.guid = rul.location_id
+                WHERE rul.user_id = %s
+                ORDER BY rul.is_default DESC, l.name
+                LIMIT 1
+            """
+            cursor.execute(query, (user_id,))
+
         result = cursor.fetchone()
-        
+
         cursor.close()
         connection.close()
-        
+
         if result:
             return jsonify({
                 'success': True,
@@ -81,7 +98,7 @@ def get_institutional_info():
                 'success': True,
                 'data': None
             }), 200
-            
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -89,114 +106,115 @@ def get_institutional_info():
         }), 500
 
 
-@api_blueprint.route('/institutional/info', methods=['POST', 'PUT'])
+@api_blueprint.route('/institutional/info/<location_id>', methods=['POST', 'PUT'])
 @jwt_required()
-def update_institutional_info():
+def update_institutional_info(location_id):
     """
-    Actualiza o crea la información institucional
-    
+    Actualiza la información institucional de una ubicación
+
+    Path Parameters:
+    - location_id: GUID de la ubicación
+
     Content-Type: multipart/form-data
-    
+
     Form Data:
-    - name: string (required) - Nombre de la institución
-    - mail: string (optional) - Email institucional
+    - name: string (optional) - Nombre de la ubicación
+    - mail: string (optional) - Email
     - address: string (optional) - Dirección
     - phone: string (optional) - Teléfono
     - logo: file (optional) - Archivo de imagen para el logo
-    
-    Returns:
-    {
-        "success": true,
-        "message": "Información institucional actualizada exitosamente",
-        "data": {
-            "guid": "uuid",
-            "logo_path": "/ruta/al/logo.png" (si se actualizó)
-        }
-    }
     """
     try:
-        # Validar campos requeridos
-        name = request.form.get('name')
-        if not name:
-            return jsonify({
-                'success': False,
-                'message': 'El nombre de la institución es requerido'
-            }), 400
-        
-        mail = request.form.get('mail')
-        address = request.form.get('address')
-        phone = request.form.get('phone')
-        logo_file = request.files.get('logo')
-        logo_path = None
-        
-        # Procesar logo si se envió
-        if logo_file and logo_file.filename:
-            logo_path = _process_institutional_logo(logo_file)
-            if not logo_path:
-                return jsonify({
-                    'success': False,
-                    'message': 'Error al procesar el logo'
-                }), 400
-        
         config = get_db_config()
         if not config:
             return jsonify({
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        
-        # Verificar si ya existe un registro
-        check_query = "SELECT guid, logo_path FROM nextris.isbasicinformation LIMIT 1"
-        cursor.execute(check_query)
+
+        # Verificar que la ubicación existe
+        cursor.execute("SELECT guid, logo_path FROM nextris.tblocation WHERE guid=%s", (location_id,))
         existing = cursor.fetchone()
-        
-        if existing:
-            # Actualizar registro existente
-            guid = existing[0]
-            
-            if logo_path:
-                update_query = """
-                    UPDATE nextris.isbasicinformation 
-                    SET name=%s, mail=%s, address=%s, phone=%s, logo_path=%s 
-                    WHERE guid=%s
-                """
-                cursor.execute(update_query, (name, mail, address, phone, logo_path, guid))
-            else:
-                # Si no se envió nuevo logo, mantener el existente
-                update_query = """
-                    UPDATE nextris.isbasicinformation 
-                    SET name=%s, mail=%s, address=%s, phone=%s 
-                    WHERE guid=%s
-                """
-                cursor.execute(update_query, (name, mail, address, phone, guid))
-                logo_path = existing[1]  # Usar logo existente para respuesta
-        else:
-            # Crear nuevo registro
-            guid = str(uuid.uuid4())
-            insert_query = """
-                INSERT INTO nextris.isbasicinformation 
-                (guid, name, mail, address, phone, logo_path) 
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(insert_query, (guid, name, mail, address, phone, logo_path))
-        
+
+        if not existing:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+
+        name = request.form.get('name')
+        mail = request.form.get('mail')
+        address = request.form.get('address')
+        phone = request.form.get('phone')
+        logo_file = request.files.get('logo')
+        logo_path = None
+
+        # Procesar logo si se envió
+        if logo_file and logo_file.filename:
+            logo_path = _process_institutional_logo(logo_file)
+            if not logo_path:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Error al procesar el logo'
+                }), 400
+
+        update_fields = []
+        values = []
+
+        if name is not None:
+            update_fields.append("name = %s")
+            values.append(name)
+        if mail is not None:
+            update_fields.append("mail = %s")
+            values.append(mail)
+        if address is not None:
+            update_fields.append("address = %s")
+            values.append(address)
+        if phone is not None:
+            update_fields.append("phone = %s")
+            values.append(phone)
+        if logo_path:
+            update_fields.append("logo_path = %s")
+            values.append(logo_path)
+
+        if not update_fields:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No hay campos para actualizar'
+            }), 400
+
+        update_fields.append("updated_at = now()")
+        values.append(location_id)
+        query = f"UPDATE nextris.tblocation SET {', '.join(update_fields)} WHERE guid = %s"
+
+        cursor.execute(query, values)
         connection.commit()
+
+        if not logo_path:
+            logo_path = existing[1]
+
         cursor.close()
         connection.close()
-        
-        response_data = {'guid': guid}
+
+        response_data = {'guid': location_id}
         if logo_path:
             response_data['logo_path'] = logo_path
-        
+
         return jsonify({
             'success': True,
             'message': 'Información institucional actualizada exitosamente',
             'data': response_data
         }), 200
-        
+
     except Exception as e:
         return jsonify({
             'success': False,

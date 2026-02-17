@@ -15,7 +15,14 @@ class Config(object):
     # Set up the App SECRET_KEY
     SECRET_KEY  = os.getenv('SECRET_KEY', "nextris_123456789")
     if not SECRET_KEY:
-        SECRET_KEY = ''.join(random.choice( string.ascii_lowercase  ) for i in range( 32 ))    
+        SECRET_KEY = ''.join(random.choice( string.ascii_lowercase  ) for i in range( 32 ))
+
+    # JWT Configuration
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hour default
+    JWT_TOKEN_LOCATION = ['headers']
+    JWT_HEADER_NAME = 'Authorization'
+    JWT_HEADER_TYPE = 'Bearer'
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

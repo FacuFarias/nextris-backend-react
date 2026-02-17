@@ -38,7 +38,7 @@
   <div class="row">
     <!-- Columna izquierda: Tabla de estudios (col-8) -->
     <div class="col-8">
-      <div class="card nr-table-card mb-4">
+      <div class="card mb-4 shadow">
         <div class="card-header pb-0">
             <div class="row">
                 <div class="col-md-6">
@@ -51,9 +51,9 @@
                 </div>
             </div>
         </div>
-        
-        <div class="card-body nr-table-card-body px-0 pt-0 pb-2">
-            <table class="nr-table tabla-estudios table" id="tabla-estudios">
+
+        <div class="card-body px-0 pt-0 pb-2" style="max-height: 65vh; overflow-y: auto; overflow-x: hidden; display: block;">
+            <table class="tabla-primary tabla-estudios table" id="tabla-estudios">
                 <thead>
                     <tr>
                         <th>Codigo</th>
@@ -76,11 +76,11 @@
       <!-- Primera row: Estudio Seleccionado -->
       <div class="row">
         <div class="col-12">
-          <div class="card nr-table-card mb-4">
+          <div class="card mb-4 shadow">
             <div class="card-header pb-0">
               <h6>Estudio Seleccionado</h6>
             </div>
-            <div class="card-body nr-table-card-body-sm px-3 pt-3 pb-3">
+            <div class="card-body px-3 pt-3 pb-3" style="max-height: 25vh; overflow-y: auto; overflow-x: hidden;">
               <div id="estudio-seleccionado-info">
                 <p class="text-muted text-sm mb-0">Haga clic en un estudio para seleccionarlo</p>
               </div>
@@ -92,7 +92,7 @@
       <!-- Segunda row: Equipos -->
       <div class="row">
         <div class="col-12">
-          <div class="card nr-table-card mb-4">
+          <div class="card mb-4 shadow">
             <div class="card-header pb-0">
                 <div class="row">
                     <div class="col-md-6">
@@ -105,9 +105,9 @@
                   </div>
                 </div>
             </div>
-            
-            <div class="card-body nr-table-card-body-sm px-0 pt-0 pb-2">
-                <table class="nr-table table" id="tabla-equipos-p-exam">
+
+            <div class="card-body px-0 pt-0 pb-2" style="max-height: 25vh; overflow-y: auto; overflow-x: hidden;">
+                <table class="tabla-primary table" id="tabla-equipos-p-exam">
                     <thead>
                         <tr>
                             <th>Equipo</th>

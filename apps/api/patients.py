@@ -1095,15 +1095,18 @@ def get_patient_history(guid):
         cursor = connection.cursor()
         
         query = """
-            SELECT 
-                ex.guid, 
-                st.description AS estudio, 
-                ex.createdon, 
+            SELECT
+                ex.guid,
+                st.description AS estudio,
+                ex.createdon,
+                ex.localacc,
                 ex.isreported,
-                CONCAT(us_reporter.name,' ',us_reporter.surname) as medico_autor, 
-                ex.isimage, 
+                CONCAT(us_reporter.name,' ',us_reporter.surname) as medico_autor,
+                ex.isimage,
                 mod.externalcode as modality,
-                CONCAT(us_referring.name,' ',us_referring.surname) as medico_referente
+                CONCAT(us_referring.name,' ',us_referring.surname) as medico_referente,
+                rep.pdfpath,
+                loc.name as ubicacion
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.datapatient data on data.guid=ex.idpatient
@@ -1111,6 +1114,8 @@ def get_patient_history(guid):
             LEFT JOIN nextris.tbuser us_reporter on us_reporter.guid=rep.idreporterphysician
             LEFT JOIN nextris.tbuser us_referring on us_referring.guid=rep.idreferringphysician
             LEFT JOIN nextris.ismodality mod on mod.guid=st.modality_id
+            LEFT JOIN nextris.isequipment eq ON ex.IdEquipment = eq.Guid
+            LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
             WHERE data.guid = %s
             ORDER BY ex.createdon DESC
         """
@@ -1127,7 +1132,9 @@ def get_patient_history(guid):
                 'fecha': row[2].strftime('%d/%m/%Y %H:%M') if row[2] else 'Sin fecha',
                 'modalidad': row[6] or 'N/A',
                 'con_imagen': 'Sí' if row[5] == 1 else 'No',
-                'isreported': row[3]
+                'isreported': row[3],
+                'pdf_path': row[8] or None,
+                'ubicacion': row[9] or 'Sin ubicación'
             })
         
         cursor.close()
