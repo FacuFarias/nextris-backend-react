@@ -113,6 +113,8 @@ def get_examinations_for_reporting():
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
         show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
+        flag_filter_raw = request.args.get('flag_filter', '')
+        flag_filter = [f for f in flag_filter_raw.split(',') if f in ('red', 'green', 'blue', 'yellow')]
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
@@ -181,7 +183,8 @@ def get_examinations_for_reporting():
                    st.bodypart_id,
                    bp.description as bodypart_description,
                    e.blockby,
-                   CONCAT(blocker.name, ' ', blocker.surname) as blocked_by_name
+                   CONCAT(blocker.name, ' ', blocker.surname) as blocked_by_name,
+                   COALESCE(e.flags, '{{}}') as flags
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -230,6 +233,11 @@ def get_examinations_for_reporting():
             print(f"[FILTER] Aplicando filtro study_group_id: {study_group_id}")
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
+
+        # Aplicar filtro por banderas (OR: muestra estudios con AL MENOS UNA de las banderas seleccionadas)
+        if flag_filter:
+            base_query += " AND e.flags && %s::text[]"
+            params.append(flag_filter)
         
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
@@ -271,7 +279,8 @@ def get_examinations_for_reporting():
                 'bodypart_id': str(row[20]) if row[20] else None,
                 'bodypart_description': row[21] or '',
                 'blocked_by': str(row[22]) if row[22] else None,
-                'blocked_by_name': row[23] or None
+                'blocked_by_name': row[23] or None,
+                'flags': list(row[24]) if row[24] else []
             })
         
         cursor.close()
@@ -2158,6 +2167,55 @@ def serve_pdf(filename):
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/flags', methods=['PATCH'])
+@jwt_required()
+def update_examination_flags(exam_id):
+    """
+    Actualiza las banderas de color de un examen.
+
+    Path Parameters:
+    - exam_id: GUID del examen
+
+    Body (JSON):
+    {
+        "flags": ["red", "green"]   // Lista de colores activos; puede estar vacía
+    }
+
+    Returns:
+    {
+        "success": true,
+        "flags": ["red", "green"]
+    }
+    """
+    try:
+        data = request.get_json()
+        if data is None or 'flags' not in data:
+            return jsonify({'success': False, 'message': 'El campo "flags" es requerido'}), 400
+
+        allowed = {'red', 'green', 'blue', 'yellow'}
+        flags = [f for f in data['flags'] if f in allowed]
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "UPDATE nextris.tbexamination SET flags = %s WHERE Guid = %s",
+            (flags, exam_id)
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'flags': flags}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
 @api_blueprint.route('/examinations/<exam_id>/block', methods=['POST'])
