@@ -8,6 +8,7 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 import uuid
 import os
 
@@ -113,12 +114,35 @@ def get_examinations_for_reporting():
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
         show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
+        show_only_with_notes = request.args.get('show_only_with_notes', 'false').lower() == 'true'
         flag_filter_raw = request.args.get('flag_filter', '')
         flag_filter = [f for f in flag_filter_raw.split(',') if f in ('red', 'green', 'blue', 'yellow')]
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
-        
+        date_range = request.args.get('date_range', 'all')
+        date_field = request.args.get('date_field', 'admision')  # 'admision' | 'reporte'
+        sort_column = request.args.get('sort_column', '')
+        sort_direction = request.args.get('sort_direction', 'desc')
+
+        # Whitelist de columnas permitidas para ordenamiento (evitar SQL injection)
+        SORT_COLUMN_MAP = {
+            'patient_name': "CONCAT(dp.Name, ' ', dp.Surname)",
+            'patient_dni': 'dp.nationalcode',
+            'study_type': 'st.Description',
+            'admission_number': 'e.AdmisionNumber',
+            'accession_number': 'e.LocalAcc',
+            'created_on': 'e.CreatedOn',
+            'status': 'e.Status',
+            'is_reported': 'COALESCE(e.IsReported, 0)',
+            'report_date': 'rep.date',
+        }
+        if sort_column and sort_column in SORT_COLUMN_MAP:
+            order_dir = 'ASC' if sort_direction == 'asc' else 'DESC'
+            order_clause = f"ORDER BY {SORT_COLUMN_MAP[sort_column]} {order_dir}"
+        else:
+            order_clause = "ORDER BY e.CreatedOn DESC"
+
         print(f"[PARAMS] modality_id={modality_id}, body_part_id={body_part_id}, study_group_id={study_group_id}")
         
         connection = psycopg2.connect(**config)
@@ -184,7 +208,10 @@ def get_examinations_for_reporting():
                    bp.description as bodypart_description,
                    e.blockby,
                    CONCAT(blocker.name, ' ', blocker.surname) as blocked_by_name,
-                   COALESCE(e.flags, '{{}}') as flags
+                   COALESCE(e.flags, '{{}}') as flags,
+                   COALESCE(e.tag_ids, '{{}}') as tag_ids,
+                   rep.date as report_date,
+                   e.generalnotes
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -234,19 +261,38 @@ def get_examinations_for_reporting():
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
 
+        # Aplicar filtro de rango de fechas
+        date_range_intervals = {
+            '1d':  '1 day',
+            '3d':  '3 days',
+            '7d':  '7 days',
+            '14d': '14 days',
+            '1m':  '1 month',
+            '2m':  '2 months',
+            '3m':  '3 months',
+            '1y':  '1 year',
+        }
+        if date_range and date_range in date_range_intervals:
+            date_col = "rep.date" if date_field == 'reporte' else "e.CreatedOn"
+            base_query += f" AND {date_col} >= NOW() - INTERVAL '{date_range_intervals[date_range]}'"
+
         # Aplicar filtro por banderas (OR: muestra estudios con AL MENOS UNA de las banderas seleccionadas)
         if flag_filter:
             base_query += " AND e.flags && %s::text[]"
             params.append(flag_filter)
-        
+
+        # Aplicar filtro solo con notas
+        if show_only_with_notes:
+            base_query += " AND e.generalnotes IS NOT NULL AND e.generalnotes <> ''"
+
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
         cursor.execute(count_query, params)
         total = cursor.fetchone()[0]
         
         # Query con paginación
-        query = base_query + """
-            ORDER BY e.CreatedOn DESC
+        query = base_query + f"""
+            {order_clause}
             LIMIT %s OFFSET %s
         """
         
@@ -280,7 +326,10 @@ def get_examinations_for_reporting():
                 'bodypart_description': row[21] or '',
                 'blocked_by': str(row[22]) if row[22] else None,
                 'blocked_by_name': row[23] or None,
-                'flags': list(row[24]) if row[24] else []
+                'flags': list(row[24]) if row[24] else [],
+                'tag_ids': list(row[25]) if row[25] else [],
+                'report_date': row[26].isoformat() if row[26] else None,
+                'general_notes': row[27] or ''
             })
         
         cursor.close()
@@ -362,9 +411,16 @@ def get_examination_report(exam_id):
                    dp.sexcode,
                    e.LocalAcc as accession_number,
                    COALESCE(e.IsReported, 0) as is_reported,
-                   e.studyinstanceuid
+                   e.studyinstanceuid,
+                   dp.patientid,
+                   dp.nationalcode,
+                   st.description as study_description,
+                   mod.description as modality,
+                   e.CreatedOn as exam_date
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
+            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
+            LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -394,6 +450,11 @@ def get_examination_report(exam_id):
         accession_number = exam[14]
         is_reported = exam[15]
         study_instance_uid = exam[16]
+        patientid = exam[17]
+        national_code = exam[18]
+        study_description = exam[19]
+        modality = exam[20]
+        exam_date = exam[21]
         
         # Obtener reporte
         cursor.execute("""
@@ -488,8 +549,13 @@ def get_examination_report(exam_id):
                 'guid': str(report_guid) if report_guid else None,
                 'exam_id': str(exam_guid),
                 'patient_id': str(patient_id) if patient_id else None,
+                'patientid': patientid or None,
+                'national_code': national_code or None,
                 'admission_number': admission_number or '',
                 'accession_number': accession_number or '',
+                'study_description': study_description or '',
+                'modality': modality or '',
+                'exam_date': exam_date.isoformat() if exam_date else None,
                 'patient_name': patient_name or '',
                 'first_name': first_name or '',
                 'last_name': last_name or '',
@@ -553,6 +619,7 @@ def update_examination_report(exam_id):
         impressions = data.get('impressions')
         techniques = data.get('techniques')
         conclusions = data.get('conclusions')
+        history = data.get('history')
         mark_as_reported = data.get('mark_as_reported', False)
         
         config = get_db_config()
@@ -640,6 +707,14 @@ def update_examination_report(exam_id):
                 findings or '', impressions or '', techniques or '', conclusions or ''
             ))
         
+        # Actualizar historia clínica si se envía
+        if history is not None:
+            cursor.execute("""
+                UPDATE nextris.tbexamination
+                SET history = %s
+                WHERE Guid = %s
+            """, (history, exam_id))
+
         # Marcar examen como reportado si se solicita
         if mark_as_reported:
             cursor.execute("""
@@ -1623,6 +1698,7 @@ def get_next_exam():
 
 @api_blueprint.route('/reports/<exam_id>/sign', methods=['POST'])
 @jwt_required()
+@require_permission('reports.sign', include_role_permissions=False)
 def sign_report(exam_id):
     """
     Firma un reporte médico (marca como reportado) y opcionalmente devuelve el siguiente examen
@@ -2019,6 +2095,7 @@ def verify_credentials():
 
 @api_blueprint.route('/reports/<exam_id>/unsign', methods=['POST'])
 @jwt_required()
+@require_permission('reports.unsign', include_role_permissions=False)
 def unsign_report(exam_id):
     """
     Quita la firma de un reporte (desmarca como reportado)
@@ -2536,3 +2613,45 @@ def quitar_firma(exam_id):
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/general-notes', methods=['PATCH'])
+@jwt_required()
+def update_general_notes(exam_id):
+    """
+    Actualiza las notas generales de un examen (tbexamination.generalnotes)
+
+    Body JSON:
+    {
+        "general_notes": "texto de la nota"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        general_notes = data.get('general_notes', '')
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "UPDATE nextris.tbexamination SET generalnotes = %s WHERE Guid = %s",
+            (general_notes or None, exam_id)
+        )
+
+        if cursor.rowcount == 0:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Nota guardada exitosamente'}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500

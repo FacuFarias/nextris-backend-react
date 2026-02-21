@@ -10,6 +10,7 @@ import psycopg2
 import uuid
 from datetime import datetime
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 from apps.authentication.util import hash_pass
 
 
@@ -17,6 +18,25 @@ def get_db_config():
     """Obtiene la configuración de la base de datos"""
     from apps.home.routes import config as db_config
     return db_config
+
+
+def get_user_patientdomain_ids(cursor, user_id):
+    """Obtiene dominios del usuario; si no tiene, retorna todos los dominios disponibles."""
+    cursor.execute(
+        """
+        SELECT patientdomain_id
+        FROM nextris.rel_user_patientdomain
+        WHERE user_id = %s
+        """,
+        (user_id,)
+    )
+
+    user_domains = [row[0] for row in cursor.fetchall()]
+    if user_domains:
+        return user_domains
+
+    cursor.execute("SELECT guid FROM nextris.ispatientdomain")
+    return [row[0] for row in cursor.fetchall()]
 
 
 # ===========================
@@ -52,14 +72,8 @@ def get_patients():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener los dominios del usuario
-        cursor.execute("""
-            SELECT patientdomain_id
-            FROM nextris.rel_user_patientdomain
-            WHERE user_id = %s
-        """, (user_id,))
-        
-        user_domains = [row[0] for row in cursor.fetchall()]
+        # Obtener los dominios del usuario (fallback: todos si no tiene asignados)
+        user_domains = get_user_patientdomain_ids(cursor, user_id)
         
         if not user_domains:
             cursor.close()
@@ -77,8 +91,8 @@ def get_patients():
         search_pattern = f'%{search}%'
         offset = (page - 1) * per_page
         
-        # Cláusula HAVING para filtrar pacientes sin estudios
-        having_clause = "HAVING COUNT(tbex.guid) > 0" if hide_without_studies else ""
+        # Cláusula HAVING para filtrar pacientes sin estudios terminados
+        having_clause = "HAVING COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) > 0" if hide_without_studies else ""
 
         # Contar total de resultados
         count_query = f"""
@@ -86,6 +100,7 @@ def get_patients():
                 SELECT dp.guid
                 FROM nextris.datapatient dp
                 LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
+                LEFT JOIN nextris.tbreport rep ON rep.idexamination = tbex.guid
                 WHERE dp.id_patientdomain = ANY(%s)
                 AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
                 GROUP BY dp.guid
@@ -95,7 +110,7 @@ def get_patients():
         cursor.execute(count_query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern))
         total = cursor.fetchone()[0]
 
-        # Obtener pacientes con conteo de estudios
+        # Obtener pacientes con conteo de estudios terminados
         query = f"""
             SELECT
                 dp.guid,
@@ -107,9 +122,10 @@ def get_patients():
                 dp.phone,
                 dp.email,
                 dp.patientid,
-                COUNT(tbex.guid) as study_count
+                COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) as study_count
             FROM nextris.datapatient dp
             LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
+            LEFT JOIN nextris.tbreport rep ON rep.idexamination = tbex.guid
             WHERE dp.id_patientdomain = ANY(%s)
             AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
             GROUP BY dp.guid, dp.name, dp.surname, dp.nationalcode, dp.sexcode,
@@ -462,14 +478,8 @@ def get_patient(guid):
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener los dominios del usuario
-        cursor.execute("""
-            SELECT patientdomain_id
-            FROM nextris.rel_user_patientdomain
-            WHERE user_id = %s
-        """, (user_id,))
-        
-        user_domains = [row[0] for row in cursor.fetchall()]
+        # Obtener los dominios del usuario (fallback: todos si no tiene asignados)
+        user_domains = get_user_patientdomain_ids(cursor, user_id)
         
         if not user_domains:
             cursor.close()
@@ -535,6 +545,7 @@ def get_patient(guid):
 
 @api_blueprint.route('/patients', methods=['POST'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def create_patient():
     """
     Crear un nuevo paciente con todos los datos completos
@@ -695,6 +706,7 @@ def create_patient():
 
 @api_blueprint.route('/patients/quick', methods=['POST'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def create_patient_quick():
     """
     Crear un paciente rápidamente con datos mínimos
@@ -794,6 +806,7 @@ def create_patient_quick():
 
 @api_blueprint.route('/patients/<guid>', methods=['PUT'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def update_patient(guid):
     """
     Actualizar un paciente existente
@@ -880,6 +893,7 @@ def update_patient(guid):
 
 @api_blueprint.route('/patients/<guid>/email', methods=['PATCH'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def update_patient_email(guid):
     """
     Actualizar solo el email de un paciente
@@ -941,6 +955,7 @@ def update_patient_email(guid):
 
 @api_blueprint.route('/patients/<guid>', methods=['DELETE'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def delete_patient(guid):
     """
     Eliminar un paciente
@@ -999,6 +1014,7 @@ def delete_patient(guid):
 
 @api_blueprint.route('/patients/merge', methods=['POST'])
 @jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
 def merge_patients():
     """
     Unificar/fusionar pacientes duplicados
@@ -1117,6 +1133,8 @@ def get_patient_history(guid):
             LEFT JOIN nextris.isequipment eq ON ex.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
             WHERE data.guid = %s
+              AND ex.isreported = 1
+              AND rep.pdfpath IS NOT NULL
             ORDER BY ex.createdon DESC
         """
         
@@ -1127,14 +1145,14 @@ def get_patient_history(guid):
             history.append({
                 'guid': row[0],
                 'estudio': row[1] or 'Sin descripción',
-                'medico_autor': row[4] or 'No asignado',
-                'medico_referente': row[7] or 'No asignado',
+                'medico_autor': row[5] or 'No asignado',
+                'medico_referente': row[8] or 'No asignado',
                 'fecha': row[2].strftime('%d/%m/%Y %H:%M') if row[2] else 'Sin fecha',
-                'modalidad': row[6] or 'N/A',
-                'con_imagen': 'Sí' if row[5] == 1 else 'No',
-                'isreported': row[3],
-                'pdf_path': row[8] or None,
-                'ubicacion': row[9] or 'Sin ubicación'
+                'modalidad': row[7] or 'N/A',
+                'con_imagen': 'Sí' if row[6] == 1 else 'No',
+                'isreported': row[4],
+                'pdf_path': row[9] or None,
+                'ubicacion': row[10] or 'Sin ubicación'
             })
         
         cursor.close()
