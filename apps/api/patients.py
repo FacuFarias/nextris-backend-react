@@ -122,21 +122,24 @@ def get_patients():
                 dp.phone,
                 dp.email,
                 dp.patientid,
-                COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) as study_count
+                COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) as study_count,
+                tup.username,
+                tup.status as user_status
             FROM nextris.datapatient dp
             LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
             LEFT JOIN nextris.tbreport rep ON rep.idexamination = tbex.guid
+            LEFT JOIN nextris.tbuser_patient tup ON tup.datapatient_id = dp.guid
             WHERE dp.id_patientdomain = ANY(%s)
             AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
             GROUP BY dp.guid, dp.name, dp.surname, dp.nationalcode, dp.sexcode,
-                     dp.birthdate, dp.phone, dp.email, dp.patientid
+                     dp.birthdate, dp.phone, dp.email, dp.patientid, tup.username, tup.status
             {having_clause}
             ORDER BY dp.surname, dp.name
             LIMIT %s OFFSET %s
         """
 
         cursor.execute(query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern, per_page, offset))
-        
+
         patients = []
         for row in cursor.fetchall():
             patients.append({
@@ -149,7 +152,9 @@ def get_patients():
                 'phone': row[6],
                 'email': row[7],
                 'patientid': row[8],
-                'study_count': row[9]
+                'study_count': row[9],
+                'username': row[10],
+                'user_status': row[11]
             })
         
         cursor.close()
@@ -798,6 +803,81 @@ def create_patient_quick():
             'success': False,
             'error': str(e)
         }), 500
+
+
+# ===========================
+# CREAR USUARIO PARA PACIENTE EXISTENTE
+# ===========================
+
+@api_blueprint.route('/patients/<guid>/create-user', methods=['POST'])
+@jwt_required()
+@require_permission('patients.manage', include_role_permissions=True)
+def create_user_for_patient(guid):
+    """
+    Crea un usuario en tbuser_patient para un paciente existente que no tiene usuario.
+    """
+    try:
+        db_config = get_db_config()
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+
+        # Verificar que el paciente existe
+        cursor.execute("""
+            SELECT guid, name, surname FROM nextris.datapatient WHERE guid = %s
+        """, (guid,))
+        patient = cursor.fetchone()
+        if not patient:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Paciente no encontrado'}), 404
+
+        # Verificar que no tiene usuario ya
+        cursor.execute("""
+            SELECT guid FROM nextris.tbuser_patient WHERE datapatient_id = %s
+        """, (guid,))
+        if cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El paciente ya tiene un usuario asignado'}), 409
+
+        nombre = patient[1].strip()
+        apellido = patient[2].strip()
+        base_username = (nombre[0] + apellido).lower().replace(' ', '')
+
+        # Verificar colisión de username
+        cursor.execute("""
+            SELECT username FROM nextris.tbuser_patient WHERE username LIKE %s ORDER BY username
+        """, (f"{base_username}%",))
+        existing_users = cursor.fetchall()
+        username = base_username
+        if existing_users:
+            counter = 1
+            while True:
+                test_username = f"{base_username}{counter:02d}"
+                if not any(u[0] == test_username for u in existing_users):
+                    username = test_username
+                    break
+                counter += 1
+
+        hashed_password = hash_pass('next')
+        cursor.execute("""
+            INSERT INTO nextris.tbuser_patient (guid, username, password, datapatient_id, status, firstlogin)
+            VALUES (uuid_generate_v4(), %s, %s, %s, 'Active', 1)
+        """, (username, hashed_password, guid))
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': f"Usuario '{username}' creado correctamente",
+            'username': username
+        }), 201
+
+    except Exception as e:
+        print(f"[API CREATE USER FOR PATIENT] Error: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
 # ===========================

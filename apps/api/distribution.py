@@ -8,6 +8,7 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 import uuid
 import os
 import smtplib
@@ -206,6 +207,7 @@ def get_examinations_for_distribution():
 
 @api_blueprint.route('/examinations/<exam_id>/send-report', methods=['POST'])
 @jwt_required()
+@require_permission('distribution.send_report', include_role_permissions=False)
 def send_report_email(exam_id):
     """
     Envía un informe por email
@@ -418,6 +420,7 @@ Saludos cordiales,
 
 @api_blueprint.route('/examinations/<exam_id>/update-email', methods=['PATCH', 'PUT'])
 @jwt_required()
+@require_permission('distribution.update_email', include_role_permissions=False)
 def update_examination_email(exam_id):
     """
     Actualiza el email de un examen/orden
@@ -765,6 +768,7 @@ def send_whatsapp_text(api_url, api_token, phone_number_id, recipient_phone, tex
 
 @api_blueprint.route('/examinations/<exam_id>/send-report-whatsapp', methods=['POST'])
 @jwt_required()
+@require_permission('distribution.send_report_whatsapp', include_role_permissions=False)
 def send_report_whatsapp(exam_id):
     """
     Envía un informe por WhatsApp

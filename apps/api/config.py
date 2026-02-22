@@ -8,6 +8,15 @@ from flask import request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import (
+    ensure_permissions_schema,
+    seed_permissions,
+    get_permission_catalog,
+    get_user_permission_codes,
+    get_default_permissions_for_role,
+    replace_user_permissions,
+    require_permission,
+)
 import uuid
 import os
 import smtplib
@@ -25,6 +34,58 @@ def get_db_config():
         return config
     except:
         return None
+
+
+def sync_user_patientdomains_from_user_locations(connection, user_id):
+    """
+    Sincroniza rel_user_patientdomain con las locations del usuario.
+    - Agrega dominios faltantes derivados de locations.
+    - Elimina dominios sin locations asociadas (contempla dominios compartidos).
+    """
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT DISTINCT l.id_patientdomain
+            FROM nextris.rel_user_location rul
+            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            WHERE rul.user_id = %s
+              AND l.id_patientdomain IS NOT NULL
+              AND l.id_patientdomain <> ''
+            """,
+            (user_id,),
+        )
+        patientdomain_ids = [row[0] for row in cursor.fetchall()]
+
+        if patientdomain_ids:
+            cursor.executemany(
+                """
+                INSERT INTO nextris.rel_user_patientdomain
+                    (guid, user_id, patientdomain_id, is_default, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (user_id, patientdomain_id) DO NOTHING
+                """,
+                [
+                    (str(uuid.uuid4()), user_id, patientdomain_id, False)
+                    for patientdomain_id in patientdomain_ids
+                ],
+            )
+
+            cursor.execute(
+                """
+                DELETE FROM nextris.rel_user_patientdomain
+                WHERE user_id = %s
+                  AND NOT (patientdomain_id = ANY(%s))
+                """,
+                (user_id, patientdomain_ids),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM nextris.rel_user_patientdomain WHERE user_id = %s",
+                (user_id,),
+            )
+    finally:
+        cursor.close()
 
 
 def ensure_user_medical_table(connection):
@@ -209,6 +270,8 @@ def get_workflow_config():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+        ensure_permissions_schema(connection)
+        seed_permissions(connection)
         
         query = """
             SELECT agenda_tipo, agenda_estudios
@@ -640,8 +703,32 @@ def get_modalities():
         cursor = connection.cursor()
         
         query = "SELECT guid, externalcode, description FROM nextris.ismodality ORDER BY description"
-        cursor.execute(query)
-        results = cursor.fetchall()
+        try:
+            cursor.execute(query)
+            results = cursor.fetchall()
+            has_custom_permissions_count = True
+        except Exception:
+            # Fallback para entornos donde la tabla de permisos aún no existe
+            if include_inactive:
+                fallback_query = """
+                    SELECT u.guid, u.username, r.description, u.name, u.surname,
+                           u.nationalnumber, u.mail, u.isactive
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    ORDER BY u.isactive DESC, u.username
+                """
+            else:
+                fallback_query = """
+                    SELECT u.guid, u.username, r.description, u.name, u.surname,
+                           u.nationalnumber, u.mail, u.isactive
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    WHERE u.isactive = 1
+                    ORDER BY u.username
+                """
+            cursor.execute(fallback_query)
+            results = cursor.fetchall()
+            has_custom_permissions_count = False
         
         cursor.close()
         connection.close()
@@ -2867,26 +2954,67 @@ def get_config_users():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        if include_inactive:
-            query = """
-                SELECT u.guid, u.username, r.description, u.name, u.surname, 
-                       u.nationalnumber, u.mail, u.isactive
-                FROM nextris.tbuser u
-                INNER JOIN nextris.isrole r ON r.guid = u.idrole
-                ORDER BY u.isactive DESC, u.username
-            """
-        else:
-            query = """
-                SELECT u.guid, u.username, r.description, u.name, u.surname, 
-                       u.nationalnumber, u.mail, u.isactive
-                FROM nextris.tbuser u
-                INNER JOIN nextris.isrole r ON r.guid = u.idrole
-                WHERE u.isactive = 1
-                ORDER BY u.username
-            """
-        
-        cursor.execute(query)
-        results = cursor.fetchall()
+        has_custom_permissions_count = True
+
+        try:
+            if include_inactive:
+                  query = """
+                      SELECT u.guid, u.username, r.description, u.idrole, u.name, u.surname, 
+                          u.nationalnumber, u.mail, u.isactive,
+                          COALESCE(up.permissions_count, 0) AS custom_permissions_count
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    LEFT JOIN (
+                        SELECT user_id, COUNT(*) AS permissions_count
+                        FROM nextris.rel_user_permission
+                        WHERE is_granted = TRUE
+                        GROUP BY user_id
+                    ) up ON up.user_id = u.guid
+                    ORDER BY u.isactive DESC, u.username
+                """
+            else:
+                  query = """
+                      SELECT u.guid, u.username, r.description, u.idrole, u.name, u.surname, 
+                          u.nationalnumber, u.mail, u.isactive,
+                          COALESCE(up.permissions_count, 0) AS custom_permissions_count
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    LEFT JOIN (
+                        SELECT user_id, COUNT(*) AS permissions_count
+                        FROM nextris.rel_user_permission
+                        WHERE is_granted = TRUE
+                        GROUP BY user_id
+                    ) up ON up.user_id = u.guid
+                    WHERE u.isactive = 1
+                    ORDER BY u.username
+                """
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+        except Exception:
+            connection.rollback()
+            has_custom_permissions_count = False
+
+            if include_inactive:
+                  fallback_query = """
+                      SELECT u.guid, u.username, r.description, u.idrole, u.name, u.surname,
+                          u.nationalnumber, u.mail, u.isactive
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    ORDER BY u.isactive DESC, u.username
+                """
+            else:
+                fallback_query = """
+                      SELECT u.guid, u.username, r.description, u.idrole, u.name, u.surname,
+                          u.nationalnumber, u.mail, u.isactive
+                    FROM nextris.tbuser u
+                    INNER JOIN nextris.isrole r ON r.guid = u.idrole
+                    WHERE u.isactive = 1
+                    ORDER BY u.username
+                """
+
+            cursor.execute(fallback_query)
+            results = cursor.fetchall()
         
         cursor.close()
         connection.close()
@@ -2897,11 +3025,13 @@ def get_config_users():
                 'guid': row[0],
                 'username': row[1],
                 'role': row[2],
-                'name': row[3],
-                'surname': row[4],
-                'national_number': row[5],
-                'email': row[6],
-                'is_active': bool(row[7])
+                'role_id': row[3],
+                'name': row[4],
+                'surname': row[5],
+                'national_number': row[6],
+                'email': row[7],
+                'is_active': bool(row[8]),
+                'custom_permissions_count': int(row[9] or 0) if has_custom_permissions_count else 0
             })
         
         return jsonify({
@@ -2987,14 +3117,16 @@ def create_config_user():
             }), 400
         
         # Verificar que el rol existe
-        cursor.execute("SELECT 1 FROM nextris.isrole WHERE guid = %s", (role_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT description FROM nextris.isrole WHERE guid = %s", (role_id,))
+        role_row = cursor.fetchone()
+        if not role_row:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Rol no encontrado'
             }), 404
+        role_description = role_row[0]
         
         # Hashear contraseña
         from werkzeug.security import generate_password_hash
@@ -3015,8 +3147,12 @@ def create_config_user():
             new_guid, username, email, password_hash, name, surname,
             national_number, role_id
         ))
-        
+
         result = cursor.fetchone()
+
+        default_permission_codes = get_default_permissions_for_role(role_description)
+        if default_permission_codes:
+            replace_user_permissions(new_guid, default_permission_codes, connection=connection)
 
         full_name = f"{name} {surname}".strip()
         send_new_user_credentials_email(
@@ -3094,19 +3230,31 @@ def update_config_user(user_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Verificar que el usuario existe
-        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid=%s", (user_id,))
-        if not cursor.fetchone():
+        # Verificar que el usuario existe y obtener rol actual
+        cursor.execute(
+            """
+            SELECT u.idrole, r.description
+            FROM nextris.tbuser u
+            LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+            WHERE u.guid = %s
+            """,
+            (user_id,)
+        )
+        user_row = cursor.fetchone()
+        if not user_row:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Usuario no encontrado'
             }), 404
+        current_role_id = user_row[0]
         
         # Construir query dinámicamente
         updates = []
         params = []
+        role_changed = False
+        new_role_description = None
         
         if 'username' in data:
             # Verificar que el nuevo username no esté en uso por otro usuario
@@ -3142,14 +3290,18 @@ def update_config_user(user_id):
         
         if 'role_id' in data:
             # Verificar que el rol existe
-            cursor.execute("SELECT 1 FROM nextris.isrole WHERE guid = %s", (data['role_id'],))
-            if not cursor.fetchone():
+            cursor.execute("SELECT description FROM nextris.isrole WHERE guid = %s", (data['role_id'],))
+            role_row = cursor.fetchone()
+            if not role_row:
                 cursor.close()
                 connection.close()
                 return jsonify({
                     'success': False,
                     'message': 'Rol no encontrado'
                 }), 404
+
+            new_role_description = role_row[0]
+            role_changed = data['role_id'] != current_role_id
             updates.append("idrole = %s")
             params.append(data['role_id'])
         
@@ -3165,6 +3317,11 @@ def update_config_user(user_id):
         query = f"UPDATE nextris.tbuser SET {', '.join(updates)} WHERE guid = %s"
         
         cursor.execute(query, params)
+
+        if role_changed:
+            default_permission_codes = get_default_permissions_for_role(new_role_description)
+            replace_user_permissions(user_id, default_permission_codes, connection=connection)
+
         connection.commit()
         
         cursor.close()
@@ -3408,6 +3565,185 @@ def delete_config_user(user_id):
             'message': 'Usuario eliminado permanentemente'
         }), 200
         
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/permissions', methods=['GET'])
+@jwt_required()
+@require_permission('users.permissions.manage', include_role_permissions=True)
+def get_permissions_catalog_endpoint():
+    """
+    Retorna catálogo de permisos disponibles para asignación.
+    """
+    try:
+        permissions = get_permission_catalog()
+        return jsonify({
+            'success': True,
+            'data': permissions
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>/permissions', methods=['GET'])
+@jwt_required()
+@require_permission('users.permissions.manage', include_role_permissions=True)
+def get_user_permissions_endpoint(user_id):
+    """
+    Obtiene permisos de un usuario.
+
+    Respuesta:
+    {
+      "success": true,
+      "data": {
+        "user_id": "...",
+        "custom_permissions": ["distribution.send_report"],
+        "effective_permissions": [...],
+        "catalog": [...]
+      }
+    }
+    """
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_permissions_schema(connection)
+        seed_permissions(connection)
+        cursor = connection.cursor()
+
+        resolved_user_id = user_id
+
+        cursor.execute("SELECT guid FROM nextris.tbuser WHERE guid = %s", (user_id,))
+        user_row = cursor.fetchone()
+
+        if not user_row:
+            cursor.execute("SELECT guid FROM nextris.tbuser WHERE username = %s", (user_id,))
+            user_row = cursor.fetchone()
+
+        if not user_row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+
+        resolved_user_id = user_row[0]
+
+        cursor.execute(
+            """
+            SELECT p.code
+            FROM nextris.rel_user_permission up
+            INNER JOIN nextris.ispermission p ON p.guid = up.permission_id
+            WHERE up.user_id = %s
+              AND up.is_granted = TRUE
+              AND p.is_active = TRUE
+            ORDER BY p.code
+            """,
+            (resolved_user_id,),
+        )
+        custom_permissions = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+        connection.close()
+
+        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=True)
+        catalog = get_permission_catalog()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'user_id': resolved_user_id,
+                'custom_permissions': custom_permissions,
+                'effective_permissions': effective_permissions,
+                'catalog': catalog,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/users/<user_id>/permissions', methods=['PUT'])
+@jwt_required()
+@require_permission('users.permissions.manage', include_role_permissions=True)
+def set_user_permissions_endpoint(user_id):
+    """
+    Reemplaza permisos personalizados de un usuario.
+
+    Body JSON:
+    {
+      "permission_codes": ["distribution.send_report", "reports.sign"]
+    }
+    """
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        permission_codes = data.get('permission_codes')
+
+        if not isinstance(permission_codes, list):
+            return jsonify({
+                'success': False,
+                'message': 'permission_codes debe ser una lista'
+            }), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT guid FROM nextris.tbuser WHERE guid = %s", (user_id,))
+        user_row = cursor.fetchone()
+
+        if not user_row:
+            cursor.execute("SELECT guid FROM nextris.tbuser WHERE username = %s", (user_id,))
+            user_row = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+
+        if not user_row:
+            return jsonify({
+                'success': False,
+                'message': 'Usuario no encontrado'
+            }), 404
+
+        resolved_user_id = user_row[0]
+
+        assigned_codes = replace_user_permissions(resolved_user_id, permission_codes)
+        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=True)
+
+        return jsonify({
+            'success': True,
+            'message': 'Permisos actualizados exitosamente',
+            'data': {
+                'user_id': resolved_user_id,
+                'custom_permissions': assigned_codes,
+                'effective_permissions': effective_permissions,
+            }
+        }), 200
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
     except Exception as e:
         return jsonify({
             'success': False,
@@ -3758,6 +4094,8 @@ def set_config_user_locations(user_id):
             ]
             cursor.executemany(insert_query, insert_values)
 
+        sync_user_patientdomains_from_user_locations(connection, user_id)
+
         connection.commit()
         cursor.close()
         connection.close()
@@ -3862,6 +4200,8 @@ def add_user_location(user_id):
             (user_id, location_id, is_default)
         )
 
+        sync_user_patientdomains_from_user_locations(connection, user_id)
+
         connection.commit()
         cursor.close()
         connection.close()
@@ -3920,6 +4260,8 @@ def remove_user_location(user_id, location_id):
             "DELETE FROM nextris.rel_user_location WHERE user_id = %s AND location_id = %s",
             (user_id, location_id)
         )
+
+        sync_user_patientdomains_from_user_locations(connection, user_id)
 
         connection.commit()
         cursor.close()

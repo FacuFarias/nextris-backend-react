@@ -168,3 +168,5 @@ comment_routes.py
 routes_hl7.py
 routes_new.py
 routes_refactored.py
+# DICOM uploads
+uploads_dicom/

@@ -8,7 +8,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 import os
 import psycopg2
 import pydicom
-import subprocess
+import requests as http_requests
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from apps.api import api_blueprint
@@ -31,13 +31,13 @@ def test_with_auth():
 # Obtener configuración de BD
 config = ConfigService.get_db_config()
 
-# Configuración DICOM
+# Configuración DICOM / PACS (STOW-RS vía HTTP)
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../uploads_dicom')
 ALLOWED_EXTENSIONS = {'dcm', 'dicom', 'dic'}
-PACS_HOST = '148.230.72.8'
-PACS_PORT = 11112
-PACS_AET = 'DCM4CHEE'
-LOCAL_AET = 'NEXTRIS_UPLOADER'
+PACS_STOW_URL = 'http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs/studies'
+KEYCLOAK_TOKEN_URL = 'http://localhost:8090/auth/realms/dcm4che/protocol/openid-connect/token'
+KEYCLOAK_CLIENT_ID = 'dcm4chee-arc-rs'
+KEYCLOAK_CLIENT_SECRET = 'changeit'
 
 # Crear carpeta de uploads si no existe
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -70,38 +70,54 @@ def validate_dicom(filepath):
         return False, str(e)
 
 
+def get_pacs_token():
+    """Obtiene token de acceso para PACS via Keycloak service account"""
+    resp = http_requests.post(
+        KEYCLOAK_TOKEN_URL,
+        data={
+            'grant_type': 'client_credentials',
+            'client_id': KEYCLOAK_CLIENT_ID,
+            'client_secret': KEYCLOAK_CLIENT_SECRET,
+        },
+        timeout=10
+    )
+    resp.raise_for_status()
+    return resp.json()['access_token']
+
+
 def send_to_pacs(filepath):
-    """Envía un archivo DICOM al PACS usando storescu"""
+    """Envía un archivo DICOM al PACS usando STOW-RS (HTTP)"""
     try:
-        print(f"[INFO] Enviando archivo al PACS: {filepath}")
-        
-        cmd = [
-            'storescu',
-            '-aec', PACS_AET,
-            '-aet', LOCAL_AET,
-            PACS_HOST,
-            str(PACS_PORT),
-            filepath
-        ]
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
+        print(f"[INFO] Enviando archivo al PACS via STOW-RS: {filepath}")
+
+        token = get_pacs_token()
+
+        with open(filepath, 'rb') as f:
+            dicom_data = f.read()
+
+        boundary = 'DICOMboundary'
+        body = (
+            f'--{boundary}\r\nContent-Type: application/dicom\r\n\r\n'
+        ).encode() + dicom_data + f'\r\n--{boundary}--\r\n'.encode()
+
+        resp = http_requests.post(
+            PACS_STOW_URL,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type': f'multipart/related; type="application/dicom"; boundary={boundary}',
+            },
+            data=body,
+            timeout=60
         )
-        
-        if result.returncode == 0:
-            print(f"[SUCCESS] Archivo enviado exitosamente al PACS: {filepath}")
+
+        if resp.status_code in (200, 409):
+            print(f"[SUCCESS] Archivo enviado al PACS: {filepath}")
             return True, "Enviado al PACS exitosamente"
         else:
-            error_msg = result.stderr or result.stdout or "Error desconocido"
+            error_msg = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
             print(f"[ERROR] Error enviando al PACS: {error_msg}")
-            return False, f"Error al enviar al PACS: {error_msg}"
-            
-    except subprocess.TimeoutExpired:
-        print(f"[ERROR] Timeout enviando al PACS: {filepath}")
-        return False, "Timeout al conectar con el PACS"
+            return False, f"Error al enviar al PACS: HTTP {resp.status_code}"
+
     except Exception as e:
         print(f"[ERROR] Error en send_to_pacs: {str(e)}")
         return False, str(e)
@@ -259,56 +275,59 @@ def manual_unlinked_studies():
         conn = psycopg2.connect(**config)
         cursor = conn.cursor()
         
+        # Agrupar por study_instance_uid para mostrar un estudio por fila
         query = """
             SELECT
-                guid,
-                filename,
+                MIN(guid) as guid,
                 patient_name,
                 patient_id,
                 study_date,
                 study_time,
                 study_description,
-                modality,
+                STRING_AGG(DISTINCT modality, ',') as modalities,
                 study_instance_uid,
                 accession_number,
-                upload_date,
-                uploaded_by_username,
-                pacs_status,
-                file_size,
-                location_id
+                MAX(upload_date) as upload_date,
+                MIN(pacs_status) as pacs_status,
+                SUM(file_size) as total_size,
+                location_id,
+                COUNT(*) as instance_count
             FROM nextris.tbmanual_uploads
             WHERE islinked = 0
         """
-        
+
         params = []
         if location_id:
             query += " AND location_id = %s"
             params.append(location_id)
-        
-        query += " ORDER BY upload_date DESC"
-        
+
+        query += """
+            GROUP BY patient_name, patient_id, study_date, study_time,
+                     study_description, study_instance_uid, accession_number, location_id
+            ORDER BY MAX(upload_date) DESC
+        """
+
         cursor.execute(query, params)
-        
+
         rows = cursor.fetchall()
-        
+
         studies = []
         for row in rows:
             studies.append({
                 'guid': str(row[0]),
-                'filename': row[1],
-                'patient_name': row[2],
-                'patient_id': row[3],
-                'study_date': row[4],
-                'study_time': row[5],
-                'study_description': row[6],
-                'modality': row[7],
-                'study_instance_uid': row[8],
-                'accession_number': row[9],
-                'upload_date': row[10].isoformat() if row[10] else None,
-                'uploaded_by': row[11],
-                'pacs_status': row[12],
-                'file_size_mb': round(row[13] / (1024 * 1024), 2) if row[13] else 0,
-                'location_id': str(row[14]) if row[14] else None
+                'patient_name': row[1],
+                'patient_id': row[2],
+                'study_date': row[3],
+                'study_time': row[4],
+                'study_description': row[5],
+                'modality': row[6],
+                'study_instance_uid': row[7],
+                'accession_number': row[8],
+                'upload_date': row[9].isoformat() if row[9] else None,
+                'pacs_status': row[10],
+                'file_size_mb': round(row[11] / (1024 * 1024), 2) if row[11] else 0,
+                'location_id': str(row[12]) if row[12] else None,
+                'instance_count': row[13],
             })
         
         cursor.close()
@@ -464,18 +483,36 @@ def dicom_link_study():
                 'error': 'El examen especificado no existe'
             }), 404
         
+        # Obtener el study_instance_uid del registro seleccionado
+        cursor.execute(
+            "SELECT study_instance_uid, patient_name FROM nextris.tbmanual_uploads WHERE guid = %s",
+            (upload_guid,)
+        )
+        upload_row = cursor.fetchone()
+        if not upload_row:
+            cursor.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': 'No se encontró el estudio cargado'
+            }), 404
+
+        study_instance_uid, patient_name = upload_row
+
+        # Marcar TODAS las instancias del mismo estudio como vinculadas
         cursor.execute("""
             UPDATE nextris.tbmanual_uploads
-            SET 
+            SET
                 islinked = 1,
                 linked_examination_guid = %s,
                 linked_date = CURRENT_TIMESTAMP
-            WHERE guid = %s
+            WHERE study_instance_uid = %s AND islinked = 0
             RETURNING guid, filename, patient_name, study_instance_uid
-        """, (examination_guid, upload_guid))
-        
-        result = cursor.fetchone()
-        
+        """, (examination_guid, study_instance_uid))
+
+        results = cursor.fetchall()
+        result = results[0] if results else None
+
         if not result:
             cursor.close()
             conn.close()
@@ -484,11 +521,13 @@ def dicom_link_study():
                 'error': 'No se encontró el estudio cargado'
             }), 404
         
+        # Actualizar tbexamination con el UID real del DICOM y marcar con imagen
         cursor.execute("""
             UPDATE nextris.tbexamination
-            SET isimage = 1
+            SET isimage = 1,
+                studyinstanceuid = %s
             WHERE guid = %s
-        """, (examination_guid,))
+        """, (study_instance_uid, examination_guid,))
         
         conn.commit()
         cursor.close()

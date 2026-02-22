@@ -4,10 +4,16 @@ API del Portal de Pacientes - Endpoints para pacientes autenticados
 Permite a los pacientes gestionar su perfil y acceder a su información
 """
 
-from flask import jsonify, request
+from flask import jsonify, request, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from datetime import datetime
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from apps.api import api_blueprint
 
 
@@ -475,11 +481,12 @@ def get_my_studies():
                     ELSE false
                 END as has_images,
                 rp.description as referring_physician,
-                CASE 
+                CASE
                     WHEN CAST(ex.stat AS TEXT) = 'S' THEN 'Urgente'
                     ELSE 'Normal'
                 END as urgency,
-                r.date as report_date
+                r.date as report_date,
+                ex.studyinstanceuid
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.ismodality m ON st.modality_id = m.guid
@@ -530,7 +537,8 @@ def get_my_studies():
                 'has_images': row[7],
                 'referring_physician': row[8],
                 'urgency': row[9],
-                'report_date': row[10].isoformat() if row[10] else None
+                'report_date': row[10].isoformat() if row[10] else None,
+                'study_uid': row[11]
             })
         
         return jsonify({
@@ -542,9 +550,244 @@ def get_my_studies():
                 'total': total
             }
         }), 200
-        
+
     except Exception as e:
         return jsonify({
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+# ====================================================================
+# VER INFORME - Descarga del PDF del informe del paciente
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/examinations/<exam_id>/report', methods=['GET'])
+@jwt_required()
+def get_patient_report(exam_id):
+    """
+    Devuelve el PDF del informe de un estudio.
+    Solo el paciente dueño del estudio puede descargarlo.
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        # Verificar que el paciente existe
+        cursor.execute("""
+            SELECT dp.guid
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
+            WHERE up.guid = %s
+        """, (patient_user_id,))
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Paciente no encontrado'}), 404
+
+        patient_data_id = result[0]
+
+        # Obtener el PDF verificando que el examen pertenece al paciente
+        cursor.execute("""
+            SELECT r.pdfpath, ex.localacc
+            FROM nextris.tbexamination ex
+            INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            WHERE ex.guid = %s AND ex.idpatient = %s AND ex.isreported = 1
+        """, (exam_id, patient_data_id))
+        result = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+
+        if not result:
+            return jsonify({'success': False, 'message': 'Informe no encontrado'}), 404
+
+        pdf_path = result[0]
+        accession_number = result[1]
+
+        # Resolver a ruta absoluta (la DB guarda rutas relativas al raíz del proyecto)
+        abs_pdf_path = os.path.abspath(pdf_path)
+
+        if not pdf_path or not os.path.exists(abs_pdf_path):
+            return jsonify({'success': False, 'message': 'Archivo PDF no encontrado'}), 404
+
+        return send_file(
+            abs_pdf_path,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=f'informe_{accession_number}.pdf'
+        )
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+# ====================================================================
+# COMPARTIR INFORME - Envío por email a médico de referencia externa
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/examinations/<exam_id>/share', methods=['POST'])
+@jwt_required()
+def share_examination(exam_id):
+    """
+    Envía el informe de un estudio por email a un médico de referencia externo.
+    Solo el paciente dueño del estudio puede compartirlo.
+
+    Body JSON:
+    {
+        "email": "medico@ejemplo.com",   (required)
+        "doctor_name": "Dr. García"      (optional)
+    }
+    """
+    try:
+        patient_user_id = get_jwt_identity()
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'message': 'Se requiere un cuerpo JSON'}), 400
+
+        email = data.get('email', '').strip()
+        doctor_name = data.get('doctor_name', '').strip()
+
+        if not email:
+            return jsonify({'success': False, 'message': 'El email es requerido'}), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        # Obtener patient_data_id del usuario autenticado
+        cursor.execute("""
+            SELECT dp.guid
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
+            WHERE up.guid = %s
+        """, (patient_user_id,))
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Paciente no encontrado'}), 404
+
+        patient_data_id = result[0]
+
+        # Verificar que el examen pertenece al paciente y tiene informe
+        query = """
+            SELECT
+                r.pdfpath,
+                CONCAT(dp.name, ' ', dp.surname) as patient_name,
+                st.description as study_type,
+                ex.localacc as accession_number,
+                f.smtp_server,
+                f.smtp_port,
+                f.smtp_user,
+                f.smtp_password,
+                f.smtp_from,
+                f.smtp_from_name,
+                f.use_tls,
+                ex.studyinstanceuid,
+                COALESCE(ex.isimage, 0) as has_images
+            FROM nextris.tbexamination ex
+            LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
+            LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
+            LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
+            LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+            LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+            WHERE ex.guid = %s AND ex.idpatient = %s AND ex.isreported = 1
+        """
+        cursor.execute(query, (exam_id, patient_data_id))
+        result = cursor.fetchone()
+
+        if not result:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Estudio no encontrado o sin informe disponible'}), 404
+
+        pdf_path = result[0]
+        patient_name = result[1]
+        study_type = result[2]
+        accession_number = result[3]
+
+        smtp_server = result[4] or os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = result[5] or int(os.environ.get('SMTP_PORT', '587'))
+        smtp_user = result[6] or os.environ.get('SMTP_USER')
+        smtp_password = result[7] or os.environ.get('SMTP_PASSWORD')
+        smtp_from = result[8] or smtp_user or os.environ.get('SMTP_FROM')
+        smtp_from_name = result[9] or os.environ.get('SMTP_FROM_NAME', 'NextRIS')
+        use_tls = result[10] if result[10] is not None else True
+        study_uid = result[11]
+        has_images = bool(result[12])
+
+        if not pdf_path or not os.path.exists(pdf_path):
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'PDF del informe no encontrado'}), 404
+
+        if not smtp_user or not smtp_password:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Configuración SMTP incompleta'}), 500
+
+        # Construir email
+        recipient_label = f"Dr./Dra. {doctor_name}" if doctor_name else "Médico/a"
+
+        msg = MIMEMultipart()
+        msg['From'] = f"{smtp_from_name} <{smtp_from}>"
+        msg['To'] = email
+        msg['Subject'] = f'Informe Médico compartido por {patient_name} - {study_type}'
+
+        viewer_link = ""
+        if has_images and study_uid:
+            viewer_link = f"\n\nPara visualizar las imágenes médicas acceda al siguiente enlace:\nhttps://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}\n"
+
+        body = f"""
+Estimado/a {recipient_label},
+
+El/la paciente {patient_name} le comparte el informe médico correspondiente al siguiente estudio:
+
+  Estudio: {study_type}
+  Número de acceso: {accession_number}
+{viewer_link}
+El informe se encuentra adjunto en formato PDF.
+
+Este es un mensaje automático generado desde el portal de pacientes NextRIS.
+
+Saludos cordiales,
+{smtp_from_name}
+        """
+
+        msg.attach(MIMEText(body, 'plain'))
+
+        with open(pdf_path, 'rb') as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename=informe_{accession_number}.pdf')
+        msg.attach(part)
+
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        if use_tls:
+            server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_from, email, msg.as_string())
+        server.quit()
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Informe compartido correctamente'}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error al compartir: {str(e)}'}), 500

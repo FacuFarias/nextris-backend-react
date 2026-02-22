@@ -1,0 +1,380 @@
+# -*- encoding: utf-8 -*-
+"""
+Utilidades de permisos para API JWT.
+"""
+
+from functools import wraps
+import uuid
+import unicodedata
+
+import psycopg2
+from flask import jsonify
+from flask_jwt_extended import get_jwt_identity
+
+from apps.api.utils import get_db_config
+
+
+PERMISSION_CATALOG = [
+    # Permisos de pestañas/módulos
+    {'code': 'tabs.patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pestaña Pacientes'},
+    {'code': 'tabs.appointments.view', 'module': 'appointments', 'action': 'view', 'description': 'Ver pestaña Citas'},
+    {'code': 'tabs.admissions.view', 'module': 'admissions', 'action': 'view', 'description': 'Ver pestaña Admisión'},
+    {'code': 'tabs.execution.view', 'module': 'execution', 'action': 'view', 'description': 'Ver pestaña Ejecución'},
+    {'code': 'tabs.reports.view', 'module': 'reports', 'action': 'view', 'description': 'Ver pestaña Redacción/Informes'},
+    {'code': 'tabs.distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
+    {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
+    {'code': 'tabs.preferences.view', 'module': 'preferences', 'action': 'view', 'description': 'Ver pestaña Preferencias'},
+    # Permisos de acciones
+    {'code': 'reports.sign', 'module': 'reports', 'action': 'sign', 'description': 'Firmar informe'},
+    {'code': 'reports.unsign', 'module': 'reports', 'action': 'unsign', 'description': 'Desfirmar informe'},
+    {'code': 'distribution.send_report', 'module': 'distribution', 'action': 'send_report', 'description': 'Enviar informe por email'},
+    {'code': 'distribution.send_report_whatsapp', 'module': 'distribution', 'action': 'send_report_whatsapp', 'description': 'Enviar informe por WhatsApp'},
+    {'code': 'distribution.update_email', 'module': 'distribution', 'action': 'update_email', 'description': 'Actualizar email para distribución'},
+    {'code': 'users.manage', 'module': 'users', 'action': 'manage', 'description': 'Gestionar usuarios'},
+    {'code': 'users.permissions.manage', 'module': 'users', 'action': 'manage_permissions', 'description': 'Gestionar permisos de usuarios'},
+
+    # Permisos solicitados para flujo operativo
+    {'code': 'admissions.view', 'module': 'admissions', 'action': 'view', 'description': 'Ver admisiones'},
+    {'code': 'admissions.create_spontaneous', 'module': 'admissions', 'action': 'create_spontaneous', 'description': 'Generar admisión espontánea'},
+    {'code': 'admissions.admit_appointments', 'module': 'admissions', 'action': 'admit_appointments', 'description': 'Admisionar citas'},
+
+    {'code': 'appointments.view', 'module': 'appointments', 'action': 'view', 'description': 'Ver citas'},
+    {'code': 'appointments.create', 'module': 'appointments', 'action': 'create', 'description': 'Generar citas'},
+
+    {'code': 'distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
+    {'code': 'distribution.perform', 'module': 'distribution', 'action': 'perform', 'description': 'Hacer la distribución'},
+
+    {'code': 'execution.view_pending', 'module': 'execution', 'action': 'view_pending', 'description': 'Ver ejecuciones pendientes'},
+    {'code': 'execution.execute', 'module': 'execution', 'action': 'execute', 'description': 'Ejecutar'},
+
+    {'code': 'patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pacientes'},
+    {'code': 'patients.manage', 'module': 'patients', 'action': 'manage', 'description': 'Generar nuevos pacientes / editar pacientes'},
+
+    {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
+    {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
+]
+
+
+ROLE_BASED_PERMISSIONS = {
+    'sysadmin': {'*'},
+    'administrativo': {
+        'tabs.patients.view',
+        'tabs.appointments.view',
+        'tabs.admissions.view',
+        'tabs.distribution.view',
+    },
+    'tecnico': {
+        'tabs.patients.view',
+        'tabs.execution.view',
+    },
+    'medico': {
+        'tabs.patients.view',
+        'tabs.reports.view',
+        'tabs.distribution.view',
+        'reports.sign',
+    },
+}
+
+
+def normalize_role_name(role_name):
+    if not role_name:
+        return ''
+
+    normalized = unicodedata.normalize('NFD', str(role_name))
+    normalized = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    return normalized.strip().lower()
+
+
+def get_default_permissions_for_role(role_name):
+    normalized_role = normalize_role_name(role_name)
+    return sorted(ROLE_BASED_PERMISSIONS.get(normalized_role, set()))
+
+
+def ensure_permissions_schema(connection):
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.ispermission (
+                guid VARCHAR(50) PRIMARY KEY,
+                code VARCHAR(100) UNIQUE NOT NULL,
+                module VARCHAR(50) NOT NULL,
+                action VARCHAR(50) NOT NULL,
+                description VARCHAR(255) NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_on TIMESTAMP DEFAULT NOW()
+            );
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.rel_user_permission (
+                guid VARCHAR(50) PRIMARY KEY,
+                user_id VARCHAR(50) NOT NULL,
+                permission_id VARCHAR(50) NOT NULL,
+                is_granted BOOLEAN DEFAULT TRUE,
+                created_on TIMESTAMP DEFAULT NOW(),
+                updated_on TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT uq_user_permission UNIQUE (user_id, permission_id),
+                CONSTRAINT fk_user_permission_user FOREIGN KEY (user_id)
+                    REFERENCES nextris.tbuser(guid) ON DELETE CASCADE,
+                CONSTRAINT fk_user_permission_permission FOREIGN KEY (permission_id)
+                    REFERENCES nextris.ispermission(guid) ON DELETE CASCADE
+            );
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rel_user_permission_user
+            ON nextris.rel_user_permission(user_id);
+            """
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+    finally:
+        cursor.close()
+
+
+def seed_permissions(connection):
+    cursor = connection.cursor()
+    try:
+        values = [
+            (
+                str(uuid.uuid4()),
+                permission['code'],
+                permission['module'],
+                permission['action'],
+                permission['description'],
+            )
+            for permission in PERMISSION_CATALOG
+        ]
+        cursor.executemany(
+            """
+            INSERT INTO nextris.ispermission (guid, code, module, action, description, is_active)
+            VALUES (%s, %s, %s, %s, %s, TRUE)
+            ON CONFLICT (code)
+            DO UPDATE SET
+                module = EXCLUDED.module,
+                action = EXCLUDED.action,
+                description = EXCLUDED.description,
+                is_active = TRUE
+            """,
+            values,
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+    finally:
+        cursor.close()
+
+
+def get_permission_catalog(connection=None):
+    own_connection = connection is None
+    if own_connection:
+        config = get_db_config()
+        if not config:
+            return []
+        connection = psycopg2.connect(**config)
+
+    try:
+        ensure_permissions_schema(connection)
+        seed_permissions(connection)
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT code, module, action, description
+                FROM nextris.ispermission
+                WHERE is_active = TRUE
+                ORDER BY module, action, code
+                """
+            )
+            rows = cursor.fetchall()
+        except Exception:
+            rows = [
+                (item['code'], item['module'], item['action'], item['description'])
+                for item in PERMISSION_CATALOG
+            ]
+        finally:
+            cursor.close()
+        return [
+            {
+                'code': row[0],
+                'module': row[1],
+                'action': row[2],
+                'description': row[3],
+            }
+            for row in rows
+        ]
+    finally:
+        if own_connection and connection:
+            connection.close()
+
+
+def _get_user_role_name(user_id, connection):
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        SELECT r.description
+        FROM nextris.tbuser u
+        LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+        WHERE u.guid = %s
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    return row[0] if row and row[0] else None
+
+
+def get_user_permission_codes(user_id, connection=None, include_role_permissions=True):
+    own_connection = connection is None
+    if own_connection:
+        config = get_db_config()
+        if not config:
+            return []
+        connection = psycopg2.connect(**config)
+
+    try:
+        ensure_permissions_schema(connection)
+        seed_permissions(connection)
+
+        permissions = set()
+        if include_role_permissions:
+            role_name = _get_user_role_name(user_id, connection)
+            permissions.update(get_default_permissions_for_role(role_name))
+
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT p.code
+                FROM nextris.rel_user_permission up
+                INNER JOIN nextris.ispermission p ON p.guid = up.permission_id
+                WHERE up.user_id = %s
+                  AND up.is_granted = TRUE
+                  AND p.is_active = TRUE
+                """,
+                (user_id,),
+            )
+            rows = cursor.fetchall()
+        except Exception:
+            rows = []
+        finally:
+            cursor.close()
+
+        permissions.update(row[0] for row in rows)
+        return sorted(permissions)
+    finally:
+        if own_connection and connection:
+            connection.close()
+
+
+def user_has_permission_code(user_id, permission_code, connection=None, include_role_permissions=True):
+    codes = get_user_permission_codes(
+        user_id,
+        connection=connection,
+        include_role_permissions=include_role_permissions,
+    )
+    return '*' in codes or permission_code in codes
+
+
+def replace_user_permissions(user_id, permission_codes, connection=None):
+    own_connection = connection is None
+    if own_connection:
+        config = get_db_config()
+        if not config:
+            raise RuntimeError('Error de configuración de base de datos')
+        connection = psycopg2.connect(**config)
+
+    try:
+        ensure_permissions_schema(connection)
+        seed_permissions(connection)
+
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid = %s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            raise ValueError('Usuario no encontrado')
+
+        normalized_codes = [code for code in dict.fromkeys(permission_codes or []) if code]
+        if normalized_codes:
+            cursor.execute(
+                """
+                SELECT code, guid
+                FROM nextris.ispermission
+                WHERE code = ANY(%s)
+                  AND is_active = TRUE
+                """,
+                (normalized_codes,),
+            )
+            permission_map = {row[0]: row[1] for row in cursor.fetchall()}
+            missing_codes = [code for code in normalized_codes if code not in permission_map]
+            if missing_codes:
+                cursor.close()
+                raise ValueError(f'Permisos no válidos: {", ".join(missing_codes)}')
+        else:
+            permission_map = {}
+
+        cursor.execute(
+            "DELETE FROM nextris.rel_user_permission WHERE user_id = %s",
+            (user_id,),
+        )
+
+        if permission_map:
+            cursor.executemany(
+                """
+                INSERT INTO nextris.rel_user_permission (
+                    guid, user_id, permission_id, is_granted, created_on, updated_on
+                ) VALUES (%s, %s, %s, TRUE, NOW(), NOW())
+                """,
+                [
+                    (str(uuid.uuid4()), user_id, permission_map[code])
+                    for code in normalized_codes
+                ],
+            )
+
+        connection.commit()
+        cursor.close()
+        return normalized_codes
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if own_connection and connection:
+            connection.close()
+
+
+def require_permission(permission_code, include_role_permissions=False):
+    """
+    Decorador para validar permisos API por usuario.
+
+    Nota: este decorador asume que la ruta ya tiene @jwt_required().
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            user_id = get_jwt_identity()
+            if not user_id:
+                return jsonify({
+                    'success': False,
+                    'message': 'No autenticado'
+                }), 401
+
+            has_permission = user_has_permission_code(
+                user_id,
+                permission_code,
+                include_role_permissions=include_role_permissions,
+            )
+            if not has_permission:
+                return jsonify({
+                    'success': False,
+                    'message': f'No tiene permiso: {permission_code}'
+                }), 403
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

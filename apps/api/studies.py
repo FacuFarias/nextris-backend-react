@@ -1511,3 +1511,172 @@ def get_report_data(exam_id):
 # @api_blueprint.route('/examinations/distribution', methods=['GET'])
 # Este endpoint ha sido movido a apps/api/distribution.py con mejor estructura de paginación
 
+
+@api_blueprint.route('/examinations/demograficos', methods=['GET'])
+@jwt_required()
+def get_examinations_demograficos():
+    """
+    Obtiene todos los exámenes con datos demográficos completos del paciente.
+
+    GET /api/examinations/demograficos
+    """
+    try:
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT
+                e.Guid,
+                e.CreatedOn,
+                e.LocalAcc,
+                e.admisionnumber,
+                e.Status,
+                st.Description AS study_type,
+                dp.Guid AS patient_guid,
+                dp.Name,
+                dp.Surname,
+                dp.nationalcode,
+                dp.sexcode,
+                dp.birthdate,
+                st.Guid AS studytype_id,
+                st.modality_id,
+                st.studygroup_id,
+                st.bodypart_id,
+                dp.patientid
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
+            LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
+            ORDER BY e.CreatedOn DESC
+            LIMIT 2000
+        """)
+
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'exam_guid': str(row[0]) if row[0] else '',
+                'createdon': row[1].strftime('%d/%m/%Y %H:%M') if row[1] else '',
+                'createdon_raw': row[1].isoformat() if row[1] else '',
+                'localacc': row[2] or '',
+                'admisionnumber': row[3] or '',
+                'status': row[4] or '',
+                'study_type': row[5] or '',
+                'patient_guid': str(row[6]) if row[6] else '',
+                'name': row[7] or '',
+                'surname': row[8] or '',
+                'nationalcode': row[9] or '',
+                'sexcode': row[10] or '',
+                'birthdate': row[11].strftime('%Y-%m-%d') if row[11] else '',
+                'studytype_id': str(row[12]) if row[12] else '',
+                'modality_id': str(row[13]) if row[13] else '',
+                'studygroup_id': str(row[14]) if row[14] else '',
+                'bodypart_id': str(row[15]) if row[15] else '',
+                'patientid': row[16] or '',
+            })
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'data': results}), 200
+
+    except Exception as e:
+        print(f"[API EXAMINATIONS DEMOGRAFICOS] Error: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@api_blueprint.route('/examinations/<guid>/demograficos', methods=['PATCH'])
+@jwt_required()
+def update_examination_demograficos(guid):
+    """
+    Actualiza datos demográficos de un examen y su paciente asociado.
+
+    PATCH /api/examinations/<guid>/demograficos
+    Body: { name, surname, nationalcode, sexcode, birthdate, localacc, admisionnumber, status, createdon }
+    """
+    try:
+        data = request.get_json()
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración'}), 500
+
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT IdPatient FROM nextris.tbexamination WHERE Guid = %s
+        """, (guid,))
+        exam = cursor.fetchone()
+        if not exam:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        patient_id = exam[0]
+        new_patientid = data.get('patientid')
+
+        # If changing patient (by patientid), look up their GUID and reassign
+        if new_patientid:
+            cursor.execute("SELECT Guid FROM nextris.datapatient WHERE patientid = %s", (new_patientid,))
+            target = cursor.fetchone()
+            if not target:
+                cursor.close()
+                connection.close()
+                return jsonify({'success': False, 'message': f'No existe paciente con ID "{new_patientid}"'}), 404
+
+            new_patient_guid = target[0]
+            if str(new_patient_guid) != str(patient_id):
+                cursor.execute(
+                    "UPDATE nextris.tbexamination SET IdPatient = %s WHERE Guid = %s",
+                    (new_patient_guid, guid)
+                )
+                cursor.execute(
+                    "UPDATE nextris.tbReport SET IdPatient = %s WHERE IdExamination = %s",
+                    (new_patient_guid, guid)
+                )
+                patient_id = new_patient_guid
+
+        # Update exam fields
+        exam_fields = {}
+        for field in ('localacc', 'admisionnumber', 'status'):
+            if field in data:
+                col = 'LocalAcc' if field == 'localacc' else ('admisionnumber' if field == 'admisionnumber' else 'Status')
+                exam_fields[col] = data[field]
+        if 'createdon' in data and data['createdon']:
+            exam_fields['CreatedOn'] = data['createdon']
+
+        if exam_fields:
+            set_clause = ', '.join([f"{k} = %s" for k in exam_fields])
+            cursor.execute(
+                f"UPDATE nextris.tbexamination SET {set_clause} WHERE Guid = %s",
+                list(exam_fields.values()) + [guid]
+            )
+
+        # Update patient demographic fields (on whichever patient is now linked)
+        patient_fields = {}
+        mapping = {'name': 'Name', 'surname': 'Surname', 'nationalcode': 'nationalcode', 'sexcode': 'sexcode'}
+        for field, col in mapping.items():
+            if field in data:
+                patient_fields[col] = data[field]
+        if 'birthdate' in data and data['birthdate']:
+            patient_fields['birthdate'] = data['birthdate']
+
+        if patient_fields and patient_id:
+            set_clause = ', '.join([f"{k} = %s" for k in patient_fields])
+            cursor.execute(
+                f"UPDATE nextris.datapatient SET {set_clause} WHERE Guid = %s",
+                list(patient_fields.values()) + [patient_id]
+            )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Datos actualizados correctamente'}), 200
+
+    except Exception as e:
+        print(f"[API UPDATE DEMOGRAFICOS] Error: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+

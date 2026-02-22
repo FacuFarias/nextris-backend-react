@@ -13,6 +13,7 @@ from flask_jwt_extended import (
 from werkzeug.security import check_password_hash, generate_password_hash
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import get_user_permission_codes
 from apps.authentication.models import Users, PatientUser
 from apps import db
 
@@ -157,6 +158,7 @@ def api_login():
                 'email': user.email or '',
                 'user_type': user.user_type,
                 'role_id': user.role_id,
+                'permissions': get_user_permission_codes(user.id, include_role_permissions=True),
                 'requires_password_change': bool(user.first_login)
             }
         
@@ -287,7 +289,8 @@ def get_current_user():
                     'surname': user.surname or '',
                     'email': user.email or '',
                     'user_type': user.user_type,
-                    'role_id': user.role_id
+                    'role_id': user.role_id,
+                    'permissions': get_user_permission_codes(user.id, include_role_permissions=True)
                 }
             }), 200
     
@@ -413,8 +416,7 @@ def change_password_first_login():
                 """
                 UPDATE nextris.tbuser_patient
                 SET password = %s,
-                    firstlogin = 0,
-                    updated_at = NOW()
+                    firstlogin = 0
                 WHERE guid = %s
                 """,
                 (hashed_password, user_id)

@@ -8,7 +8,7 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
-from apps.api.permissions import require_permission
+from apps.api.permissions import require_permission, user_has_permission_code
 import uuid
 import os
 
@@ -2420,14 +2420,16 @@ def unblock_examination(exam_id):
         
         current_block = result[0]
         
-        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado)
+        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado), excepto admins
         if current_block and str(current_block) != str(user_id):
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Solo el usuario que bloqueó el examen puede desbloquearlo'
-            }), 403
+            is_admin = user_has_permission_code(user_id, '*', connection=connection)
+            if not is_admin:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Solo el usuario que bloqueó el examen puede desbloquearlo'
+                }), 403
         
         # Desbloquear el examen
         cursor.execute("""
