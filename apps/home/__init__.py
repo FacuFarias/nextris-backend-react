@@ -18,6 +18,7 @@ from apps.home.controllers.appointment_controller import appointment_bp, appoint
 from apps.home.controllers.medical_controller import medical_bp
 from apps.home.controllers.institutional_controller import institutional_bp
 from apps.home.controllers.config_controller import config_bp
+from apps.home.controllers.structured_reports_controller import structured_reports_bp
 
 # Importar patient_controller para registrar sus rutas
 from apps.home.controllers import patient_controller
@@ -52,6 +53,7 @@ blueprint.register_blueprint(appointment_legacy_bp)
 blueprint.register_blueprint(medical_bp)
 blueprint.register_blueprint(institutional_bp)
 blueprint.register_blueprint(config_bp)
+blueprint.register_blueprint(structured_reports_bp)
 
 # Agregar rutas de compatibilidad (sin prefijo /api)
 blueprint.add_url_rule('/verpdf/<report_id>', 'verpdf', verpdf, methods=['GET'])

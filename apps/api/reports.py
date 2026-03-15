@@ -8,9 +8,11 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
-from apps.api.permissions import require_permission, user_has_permission_code
 import uuid
 import os
+import re
+import html
+from decimal import Decimal, InvalidOperation
 
 
 def get_db_config():
@@ -32,6 +34,337 @@ def get_user_locations(user_id, connection):
     locations = [row[0] for row in cursor.fetchall()]
     cursor.close()
     return locations
+
+
+PDF_OUTPUT_DIR = '/var/www/nextris-dev-react/output_pdfs'
+
+
+def _get_report_pdfpath_from_exam(exam_id):
+    """Obtiene la ruta de PDF asociada a un examen."""
+    config = get_db_config()
+    if not config:
+        return None, 'Error de configuración de base de datos', 500
+
+    connection = psycopg2.connect(**config)
+    cursor = connection.cursor()
+    try:
+        query = "SELECT pdfpath FROM nextris.tbreport WHERE idexamination = %s"
+        cursor.execute(query, (exam_id,))
+        result = cursor.fetchone()
+    finally:
+        cursor.close()
+        connection.close()
+
+    if not result or not result[0]:
+        return None, 'PDF no disponible', 404
+
+    return str(result[0]), None, None
+
+
+def _send_pdf_response_from_path(pdf_path):
+    """Valida y devuelve el PDF de forma consistente."""
+    normalized = os.path.normpath(str(pdf_path))
+    absolute_path = os.path.abspath(normalized)
+
+    if not os.path.exists(absolute_path):
+        return jsonify({
+            'success': False,
+            'message': 'Archivo PDF no encontrado en el sistema'
+        }), 404
+
+    if not absolute_path.lower().endswith('.pdf'):
+        return jsonify({
+            'success': False,
+            'message': 'Archivo no válido'
+        }), 400
+
+    return send_file(absolute_path, as_attachment=False, mimetype='application/pdf')
+
+
+def _normalize_placeholder_key(raw_value):
+    """Normaliza el nombre de variable para permitir matching tolerante."""
+    if raw_value is None:
+        return ''
+    value = str(raw_value).strip().lower()
+    if not value:
+        return ''
+
+    # Normalizar wrappers legacy frecuentes en plantillas/chips.
+    value = re.sub(r'^[\[\{\(\s]+', '', value)
+    value = re.sub(r'[\]\}\)\s]+$', '', value)
+
+    return re.sub(r'[^a-z0-9]+', '_', value).strip('_')
+
+
+def _format_sr_value(value_text, value_numeric, value_unit, value_datetime):
+    """Construye el valor legible de una variable extraída de SR."""
+    if value_text is not None and str(value_text).strip() != '':
+        return str(value_text).strip()
+
+    if value_numeric is not None:
+        try:
+            numeric_decimal = Decimal(str(value_numeric))
+            numeric_value = format(numeric_decimal.quantize(Decimal('0.01')), '.2f')
+        except (InvalidOperation, ValueError, TypeError):
+            try:
+                numeric_value = f"{float(value_numeric):.2f}"
+            except (ValueError, TypeError):
+                numeric_value = str(value_numeric).strip()
+
+        if value_unit and str(value_unit).strip():
+            return f"{numeric_value} {str(value_unit).strip()}"
+        return numeric_value
+
+    if value_datetime is not None:
+        return str(value_datetime)
+
+    return ''
+
+
+def _get_sr_variable_values(cursor, study_instance_uid):
+    """Obtiene un diccionario {nombre_variable: valor} desde dicom_sr para un estudio."""
+    if not study_instance_uid:
+        return {}
+
+    try:
+        cursor.execute("""
+            WITH docs AS (
+                SELECT id
+                FROM dicom_sr.sr_document
+                WHERE study_instance_uid = %s
+                ORDER BY COALESCE(processing_finished_at, received_at, created_at) DESC NULLS LAST, id DESC
+            )
+            SELECT
+                COALESCE(
+                    NULLIF(BTRIM(ev.value_json->>'canonical_name'), ''),
+                    NULLIF(BTRIM(fvm_best.canonical_name), ''),
+                    NULLIF(BTRIM(sref.resolved_label), ''),
+                    NULLIF(BTRIM(vd.canonical_name), ''),
+                    NULLIF(BTRIM(ev.concept_code_meaning), ''),
+                    NULLIF(BTRIM(ev.concept_code_value), '')
+                ) AS variable_name,
+                ev.value_text,
+                ev.value_numeric,
+                ev.value_unit,
+                ev.value_datetime,
+                ev.sequence_index,
+                ev.id
+            FROM docs d
+            JOIN dicom_sr.sr_extracted_variable ev ON ev.sr_document_id = d.id
+            LEFT JOIN dicom_sr.variable_definition vd ON vd.id = ev.canonical_variable_definition_id
+            LEFT JOIN dicom_sr.sr_extracted_variable_semantic_map sem_map ON sem_map.sr_extracted_variable_id = ev.id
+            LEFT JOIN dicom_sr.sr_variable_semantic_reference sref ON sref.id = sem_map.semantic_reference_id
+            LEFT JOIN LATERAL (
+                SELECT fvm.canonical_name
+                FROM dicom_sr.facility_variable_mapping fvm
+                WHERE fvm.semantic_signature = sem_map.semantic_signature
+                  AND COALESCE(fvm.active, TRUE) = TRUE
+                ORDER BY CASE WHEN fvm.facility_id IS NULL THEN 0 ELSE 1 END, fvm.id DESC
+                LIMIT 1
+            ) fvm_best ON TRUE
+            ORDER BY ev.sr_document_id DESC, ev.sequence_index ASC NULLS LAST, ev.id ASC
+        """, (study_instance_uid,))
+
+        rows = cursor.fetchall() or []
+    except Exception:
+        # En ambientes sin dicom_sr o sin datos SR, no bloquear la carga del redactor.
+        return {}
+
+    variable_map = {}
+    for row in rows:
+        variable_name = row[0]
+        if not variable_name:
+            continue
+
+        value = _format_sr_value(row[1], row[2], row[3], row[4])
+        if value == '':
+            continue
+
+        exact_key = str(variable_name).strip().lower()
+        normalized_key = _normalize_placeholder_key(variable_name)
+
+        if exact_key and exact_key not in variable_map:
+            variable_map[exact_key] = value
+        if normalized_key and normalized_key not in variable_map:
+            variable_map[normalized_key] = value
+
+    return variable_map
+
+
+def _build_sr_variables_list(variable_map):
+    """Construye lista de variables SR para UI, unificando claves duplicadas (snake/espaciado)."""
+    grouped = {}
+    for key, value in (variable_map or {}).items():
+        normalized = _normalize_placeholder_key(key)
+        if not normalized:
+            continue
+
+        existing = grouped.get(normalized)
+        candidate_name = str(key).strip()
+
+        if not existing:
+            grouped[normalized] = {
+                'key': normalized,
+                'name': candidate_name,
+                'value': value,
+            }
+            continue
+
+        # Preferir etiqueta humana (con espacios) sobre snake_case.
+        has_spaces_candidate = ' ' in candidate_name
+        has_spaces_existing = ' ' in existing['name']
+        if has_spaces_candidate and not has_spaces_existing:
+            existing['name'] = candidate_name
+
+    items = list(grouped.values())
+    items.sort(key=lambda item: str(item['name']).lower())
+    return items
+
+
+def _replace_sr_placeholders(content, variable_values):
+    """Reemplaza placeholders {Variable} y chips HTML por valores extraídos de SR."""
+    if not content or not variable_values:
+        return content or ''
+
+    def _resolve_value(variable_name):
+        if not variable_name:
+            return None
+
+        candidate_raw = str(variable_name).strip()
+        direct_key = candidate_raw.lower()
+        if direct_key in variable_values:
+            return variable_values[direct_key]
+
+        # Variantes wrapper frecuentes: (name), [name], {name}
+        stripped_key = re.sub(r'^[\[\{\(\s]+', '', candidate_raw)
+        stripped_key = re.sub(r'[\]\}\)\s]+$', '', stripped_key)
+        stripped_direct = stripped_key.lower()
+        if stripped_direct in variable_values:
+            return variable_values[stripped_direct]
+
+        normalized_key = _normalize_placeholder_key(stripped_key)
+        if normalized_key in variable_values:
+            return variable_values[normalized_key]
+
+        # Fallback 1: placeholders largos tipo ruta semántica, usar segmentos por separadores.
+        # Ej: Common-Carotid-...-Peak Systolic Velocity -> Peak Systolic Velocity
+        segments = [
+            segment.strip()
+            for segment in re.split(r'[-|>]+', stripped_key)
+            if segment and segment.strip()
+        ]
+
+        for segment in reversed(segments):
+            segment_direct = segment.lower()
+            if segment_direct in variable_values:
+                return variable_values[segment_direct]
+
+            segment_normalized = _normalize_placeholder_key(segment)
+            if segment_normalized in variable_values:
+                return variable_values[segment_normalized]
+
+        # Fallback 2: comparar por compactación alfanumérica.
+        compact_candidate = re.sub(r'[^a-z0-9]+', '', stripped_direct)
+        if compact_candidate:
+            for key, val in variable_values.items():
+                compact_key = re.sub(r'[^a-z0-9]+', '', str(key).lower())
+                if compact_key == compact_candidate:
+                    return val
+
+        # Fallback 3: si una variable conocida está contenida en el placeholder normalizado,
+        # usar la coincidencia más larga (evita falsas coincidencias genéricas).
+        normalized_candidate_text = _normalize_placeholder_key(stripped_key)
+        best_match = None
+        best_length = 0
+        for key, val in variable_values.items():
+            key_norm = _normalize_placeholder_key(key)
+            if not key_norm or len(key_norm) < 4:
+                continue
+            if key_norm in normalized_candidate_text and len(key_norm) > best_length:
+                best_match = val
+                best_length = len(key_norm)
+
+        if best_match is not None:
+            return best_match
+
+        return None
+
+    def _extract_chip_variable_name(chip_match):
+        attr_name = chip_match.group(1)
+        inner_html = chip_match.group(2) or ''
+
+        if attr_name:
+            return attr_name
+
+        inner_text = re.sub(r'<[^>]+>', '', inner_html)
+        inner_text = html.unescape(inner_text or '').strip()
+
+        # Formatos posibles legacy: {name}, [name], [[name]]
+        wrapped_match = re.match(r'^\{(.+)\}$', inner_text) or re.match(r'^\[\[(.+)\]\]$', inner_text) or re.match(r'^\[(.+)\]$', inner_text)
+        if wrapped_match:
+            return wrapped_match.group(1)
+
+        return inner_text
+
+    def _replace_chip(match):
+        variable_name = _extract_chip_variable_name(match)
+        resolved_value = _resolve_value(variable_name)
+        if resolved_value is None:
+            return match.group(0)
+        return html.escape(str(resolved_value))
+
+    def _replace_curly(match):
+        variable_name = match.group(1)
+        resolved_value = _resolve_value(variable_name)
+        if resolved_value is None:
+            return match.group(0)
+        return html.escape(str(resolved_value))
+
+    # Primero reemplazar chips de variable para evitar dejar spans huérfanos en el reporte final.
+    resolved_content = re.sub(
+        r'<span[^>]*data-variable-chip="true"[^>]*(?:data-variable-name="([^"]+)")?[^>]*>(.*?)</span>',
+        _replace_chip,
+        content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    # Compatibilidad legacy: placeholders tipo [[Variable]].
+    resolved_content = re.sub(r'\[\[([^\]]+)\]\]', _replace_curly, resolved_content)
+
+    # Luego placeholders textuales en formato {Variable}.
+    return re.sub(r'\{([^{}]+)\}', _replace_curly, resolved_content)
+
+
+def _collect_placeholder_candidates(content):
+    """Extrae placeholders potenciales para diagnóstico."""
+    if not content:
+        return []
+
+    candidates = set()
+    for match in re.finditer(r'\{([^{}]+)\}', content):
+        name = (match.group(1) or '').strip()
+        if name:
+            candidates.add(name)
+
+    for match in re.finditer(r'\[\[([^\]]+)\]\]', content):
+        name = (match.group(1) or '').strip()
+        if name:
+            candidates.add(name)
+
+    for match in re.finditer(r'<span[^>]*data-variable-chip="true"[^>]*(?:data-variable-name="([^"]+)")?[^>]*>(.*?)</span>', content, flags=re.IGNORECASE | re.DOTALL):
+        attr_name = (match.group(1) or '').strip()
+        if attr_name:
+            candidates.add(attr_name)
+            continue
+
+        inner = re.sub(r'<[^>]+>', '', match.group(2) or '')
+        inner = html.unescape(inner).strip()
+        inner = re.sub(r'^[\[\{\(\s]+', '', inner)
+        inner = re.sub(r'[\]\}\)\s]+$', '', inner)
+        if inner:
+            candidates.add(inner)
+
+    return sorted(candidates)
 
 
 # ====================================================================
@@ -113,36 +446,10 @@ def get_examinations_for_reporting():
         show_reported = request.args.get('show_reported', 'false').lower() == 'true'
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
-        show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
-        show_only_with_notes = request.args.get('show_only_with_notes', 'false').lower() == 'true'
-        flag_filter_raw = request.args.get('flag_filter', '')
-        flag_filter = [f for f in flag_filter_raw.split(',') if f in ('red', 'green', 'blue', 'yellow')]
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
-        date_range = request.args.get('date_range', 'all')
-        date_field = request.args.get('date_field', 'admision')  # 'admision' | 'reporte'
-        sort_column = request.args.get('sort_column', '')
-        sort_direction = request.args.get('sort_direction', 'desc')
-
-        # Whitelist de columnas permitidas para ordenamiento (evitar SQL injection)
-        SORT_COLUMN_MAP = {
-            'patient_name': "CONCAT(dp.Name, ' ', dp.Surname)",
-            'patient_dni': 'dp.nationalcode',
-            'study_type': 'st.Description',
-            'admission_number': 'e.AdmisionNumber',
-            'accession_number': 'e.LocalAcc',
-            'created_on': 'e.CreatedOn',
-            'status': 'e.Status',
-            'is_reported': 'COALESCE(e.IsReported, 0)',
-            'report_date': 'rep.date',
-        }
-        if sort_column and sort_column in SORT_COLUMN_MAP:
-            order_dir = 'ASC' if sort_direction == 'asc' else 'DESC'
-            order_clause = f"ORDER BY {SORT_COLUMN_MAP[sort_column]} {order_dir}"
-        else:
-            order_clause = "ORDER BY e.CreatedOn DESC"
-
+        
         print(f"[PARAMS] modality_id={modality_id}, body_part_id={body_part_id}, study_group_id={study_group_id}")
         
         connection = psycopg2.connect(**config)
@@ -206,12 +513,7 @@ def get_examinations_for_reporting():
                    sg.description as study_group_description,
                    st.bodypart_id,
                    bp.description as bodypart_description,
-                   e.blockby,
-                   CONCAT(blocker.name, ' ', blocker.surname) as blocked_by_name,
-                   COALESCE(e.flags, '{{}}') as flags,
-                   COALESCE(e.tag_ids, '{{}}') as tag_ids,
-                   rep.date as report_date,
-                   e.generalnotes
+                   e.blockby
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -221,7 +523,6 @@ def get_examinations_for_reporting():
             LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
-            LEFT JOIN nextris.tbuser blocker ON e.blockby::text = blocker.guid
             WHERE eq.location_id IN ({location_placeholders})
             AND e.IsExecuted = 1
             {reported_filter}
@@ -234,10 +535,6 @@ def get_examinations_for_reporting():
             base_query += " AND e.Status = %s"
             params.append(status_filter)
         
-        # Por defecto ocultar estudios sin imágenes; si show_no_image=true mostrar todo
-        if not show_no_image:
-            base_query += " AND e.isimage = 1"
-
         # Aplicar filtro de asignación si se solicita
         if assigned_to_me:
             base_query += " AND e.assignto = %s"
@@ -260,39 +557,15 @@ def get_examinations_for_reporting():
             print(f"[FILTER] Aplicando filtro study_group_id: {study_group_id}")
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
-
-        # Aplicar filtro de rango de fechas
-        date_range_intervals = {
-            '1d':  '1 day',
-            '3d':  '3 days',
-            '7d':  '7 days',
-            '14d': '14 days',
-            '1m':  '1 month',
-            '2m':  '2 months',
-            '3m':  '3 months',
-            '1y':  '1 year',
-        }
-        if date_range and date_range in date_range_intervals:
-            date_col = "rep.date" if date_field == 'reporte' else "e.CreatedOn"
-            base_query += f" AND {date_col} >= NOW() - INTERVAL '{date_range_intervals[date_range]}'"
-
-        # Aplicar filtro por banderas (OR: muestra estudios con AL MENOS UNA de las banderas seleccionadas)
-        if flag_filter:
-            base_query += " AND e.flags && %s::text[]"
-            params.append(flag_filter)
-
-        # Aplicar filtro solo con notas
-        if show_only_with_notes:
-            base_query += " AND e.generalnotes IS NOT NULL AND e.generalnotes <> ''"
-
+        
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
         cursor.execute(count_query, params)
         total = cursor.fetchone()[0]
         
         # Query con paginación
-        query = base_query + f"""
-            {order_clause}
+        query = base_query + """
+            ORDER BY e.CreatedOn DESC
             LIMIT %s OFFSET %s
         """
         
@@ -324,12 +597,7 @@ def get_examinations_for_reporting():
                 'study_group_description': row[19] or '',
                 'bodypart_id': str(row[20]) if row[20] else None,
                 'bodypart_description': row[21] or '',
-                'blocked_by': str(row[22]) if row[22] else None,
-                'blocked_by_name': row[23] or None,
-                'flags': list(row[24]) if row[24] else [],
-                'tag_ids': list(row[25]) if row[25] else [],
-                'report_date': row[26].isoformat() if row[26] else None,
-                'general_notes': row[27] or ''
+                'blocked_by': str(row[22]) if row[22] else None
             })
         
         cursor.close()
@@ -410,17 +678,9 @@ def get_examination_report(exam_id):
                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, dp.birthdate))::INTEGER as age,
                    dp.sexcode,
                    e.LocalAcc as accession_number,
-                   COALESCE(e.IsReported, 0) as is_reported,
-                   e.studyinstanceuid,
-                   dp.patientid,
-                   dp.nationalcode,
-                   st.description as study_description,
-                   mod.description as modality,
-                   e.CreatedOn as exam_date
+                   e.StudyInstanceUID
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
-            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
-            LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -448,13 +708,7 @@ def get_examination_report(exam_id):
         age = exam[12]
         sex = exam[13]
         accession_number = exam[14]
-        is_reported = exam[15]
-        study_instance_uid = exam[16]
-        patientid = exam[17]
-        national_code = exam[18]
-        study_description = exam[19]
-        modality = exam[20]
-        exam_date = exam[21]
+        study_instance_uid = exam[15]
         
         # Obtener reporte
         cursor.execute("""
@@ -539,30 +793,46 @@ def get_examination_report(exam_id):
                         impressions = predef[1] or ''
                         techniques = predef[2] or ''
                         conclusions = predef[3] or ''
+
+        debug_requested = request.args.get('debug_sr', '').strip().lower() in ('1', 'true', 'yes')
+        debug_before = {
+            'findings': _collect_placeholder_candidates(findings),
+            'impressions': _collect_placeholder_candidates(impressions),
+            'techniques': _collect_placeholder_candidates(techniques),
+            'conclusions': _collect_placeholder_candidates(conclusions),
+        } if debug_requested else None
+
+        # Reemplazar placeholders {Variable} con valores SR del estudio, cuando existan.
+        sr_variable_values = _get_sr_variable_values(cursor, study_instance_uid)
+        sr_variables_list = _build_sr_variables_list(sr_variable_values)
+        findings = _replace_sr_placeholders(findings, sr_variable_values)
+        impressions = _replace_sr_placeholders(impressions, sr_variable_values)
+        techniques = _replace_sr_placeholders(techniques, sr_variable_values)
+        conclusions = _replace_sr_placeholders(conclusions, sr_variable_values)
+
+        debug_after = {
+            'findings': _collect_placeholder_candidates(findings),
+            'impressions': _collect_placeholder_candidates(impressions),
+            'techniques': _collect_placeholder_candidates(techniques),
+            'conclusions': _collect_placeholder_candidates(conclusions),
+        } if debug_requested else None
         
         cursor.close()
         connection.close()
         
-        return jsonify({
+        response_payload = {
             'success': True,
             'data': {
                 'guid': str(report_guid) if report_guid else None,
                 'exam_id': str(exam_guid),
                 'patient_id': str(patient_id) if patient_id else None,
-                'patientid': patientid or None,
-                'national_code': national_code or None,
                 'admission_number': admission_number or '',
                 'accession_number': accession_number or '',
-                'study_description': study_description or '',
-                'modality': modality or '',
-                'exam_date': exam_date.isoformat() if exam_date else None,
                 'patient_name': patient_name or '',
                 'first_name': first_name or '',
                 'last_name': last_name or '',
                 'age': age,
                 'sex': sex or '',
-                'study_instance_uid': study_instance_uid or '',
-                'is_reported': bool(is_reported),
                 'findings': findings,
                 'impressions': impressions,
                 'techniques': techniques,
@@ -574,9 +844,21 @@ def get_examination_report(exam_id):
                 'clinical_question': clinical_question or '',
                 'laterality_id': str(laterality_id) if laterality_id else None,
                 'stat': stat or '',
-                'others_details': others_details or ''
+                'others_details': others_details or '',
+                'sr_variables': sr_variables_list,
             }
-        }), 200
+        }
+
+        if debug_requested:
+            response_payload['debug_sr'] = {
+                'study_instance_uid': study_instance_uid,
+                'sr_variable_keys_count': len(sr_variable_values.keys()),
+                'sr_variable_keys_sample': sorted(list(sr_variable_values.keys()))[:80],
+                'placeholders_before': debug_before,
+                'placeholders_after': debug_after,
+            }
+
+        return jsonify(response_payload), 200
         
     except Exception as e:
         return jsonify({
@@ -619,7 +901,6 @@ def update_examination_report(exam_id):
         impressions = data.get('impressions')
         techniques = data.get('techniques')
         conclusions = data.get('conclusions')
-        history = data.get('history')
         mark_as_reported = data.get('mark_as_reported', False)
         
         config = get_db_config()
@@ -707,14 +988,6 @@ def update_examination_report(exam_id):
                 findings or '', impressions or '', techniques or '', conclusions or ''
             ))
         
-        # Actualizar historia clínica si se envía
-        if history is not None:
-            cursor.execute("""
-                UPDATE nextris.tbexamination
-                SET history = %s
-                WHERE Guid = %s
-            """, (history, exam_id))
-
         # Marcar examen como reportado si se solicita
         if mark_as_reported:
             cursor.execute("""
@@ -1497,14 +1770,11 @@ def get_next_exam():
         cursor = connection.cursor()
         
         # Obtener la fecha de creación del examen actual para buscar el siguiente
-        # Si no se proporciona current_exam_id, se busca desde el más reciente
-        current_created_on = None
-        if current_exam_id:
-            cursor.execute("""
-                SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
-            """, (current_exam_id,))
-            current_exam = cursor.fetchone()
-            current_created_on = current_exam[0] if current_exam else None
+        cursor.execute("""
+            SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+        """, (current_exam_id,))
+        current_exam = cursor.fetchone()
+        current_created_on = current_exam[0] if current_exam else None
         
         location_placeholders = ','.join(['%s'] * len(user_locations))
         
@@ -1518,54 +1788,27 @@ def get_next_exam():
         else:
             reported_filter = "AND 1=0"
         
-        # Query para obtener el siguiente examen con todos los datos del reporte
+        # Query para obtener el siguiente examen
         query = f"""
-            SELECT e.Guid,
+            SELECT e.Guid, 
                    e.studyinstanceuid,
                    CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
                    dp.nationalcode,
                    st.Description as study_type,
                    e.LocalAcc,
-                   COALESCE(e.IsReported, 0) as is_reported,
-                   e.IdPatient,
-                   e.AdmisionNumber,
-                   e.studytype_id,
-                   e.history,
-                   e.clinicalquestion,
-                   e.laterality_id,
-                   e.stat,
-                   e.othersdetails,
-                   dp.Name as first_name,
-                   dp.Surname as last_name,
-                   EXTRACT(YEAR FROM AGE(CURRENT_DATE, dp.birthdate))::INTEGER as age,
-                   dp.sexcode,
-                   r.Guid as report_guid,
-                   r.findings,
-                   r.impressions,
-                   r.techniques,
-                   r.conclusions,
-                   r.wassaved,
-                   r.pdfpath,
-                   r.date as report_date,
-                   st.default_predef_id
+                   COALESCE(e.IsReported, 0) as is_reported
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-            LEFT JOIN nextris.tbreport r ON e.Guid = r.IdExamination
             WHERE eq.location_id IN ({location_placeholders})
             AND e.IsExecuted = 1
+            AND e.Guid != %s
+            {reported_filter}
         """
         
         params = list(user_locations)
-        
-        # Excluir el examen actual si se proporciona
-        if current_exam_id:
-            query += " AND e.Guid != %s"
-            params.append(current_exam_id)
-        
-        # Aplicar filtro de reportado
-        query += f" {reported_filter}"
+        params.append(current_exam_id)
         
         # Aplicar filtro de asignación
         if assigned_to_me:
@@ -1595,92 +1838,23 @@ def get_next_exam():
         cursor.execute(query, params)
         next_exam = cursor.fetchone()
         
+        cursor.close()
+        connection.close()
+        
         if next_exam:
-            # Extraer datos del resultado
-            exam_guid = next_exam[0]
-            study_instance_uid = next_exam[1]
-            patient_name = next_exam[2]
-            patient_dni = next_exam[3]
-            study_type = next_exam[4]
-            accession_number = next_exam[5]
-            is_reported = next_exam[6]
-            patient_id = next_exam[7]
-            admission_number = next_exam[8]
-            study_type_id = next_exam[9]
-            history = next_exam[10]
-            clinical_question = next_exam[11]
-            laterality_id = next_exam[12]
-            stat = next_exam[13]
-            others_details = next_exam[14]
-            first_name = next_exam[15]
-            last_name = next_exam[16]
-            age = next_exam[17]
-            sex = next_exam[18]
-            report_guid = next_exam[19]
-            findings = next_exam[20]
-            impressions = next_exam[21]
-            techniques = next_exam[22]
-            conclusions = next_exam[23]
-            was_saved = next_exam[24]
-            pdf_path = next_exam[25]
-            report_date = next_exam[26]
-            default_predef_id = next_exam[27]
-            
-            # Si el reporte no fue guardado (was_saved es False), buscar el predefinido
-            if not was_saved and default_predef_id:
-                cursor = connection.cursor()
-                cursor.execute("""
-                    SELECT findings, impression, technique, conclusion
-                    FROM nextris.tbinfpredef
-                    WHERE guid = %s
-                """, (default_predef_id,))
-                
-                predef = cursor.fetchone()
-                if predef:
-                    findings = predef[0] or ''
-                    impressions = predef[1] or ''
-                    techniques = predef[2] or ''
-                    conclusions = predef[3] or ''
-                cursor.close()
-            
-            cursor.close()
-            connection.close()
-            
             return jsonify({
                 'success': True,
                 'data': {
-                    'guid': str(exam_guid),
-                    'exam_id': str(exam_guid),
-                    'study_instance_uid': study_instance_uid or '',
-                    'patient_id': str(patient_id) if patient_id else None,
-                    'patient_name': patient_name or '',
-                    'patient_dni': patient_dni or '',
-                    'first_name': first_name or '',
-                    'last_name': last_name or '',
-                    'age': age,
-                    'sex': sex or '',
-                    'study_type': study_type or '',
-                    'accession_number': accession_number or '',
-                    'admission_number': admission_number or '',
-                    'is_reported': bool(is_reported),
-                    'report_guid': str(report_guid) if report_guid else None,
-                    'findings': findings or '',
-                    'impressions': impressions or '',
-                    'techniques': techniques or '',
-                    'conclusions': conclusions or '',
-                    'was_saved': bool(was_saved) if was_saved is not None else False,
-                    'pdf_path': pdf_path or None,
-                    'updated_on': report_date.isoformat() if report_date else None,
-                    'history': history or '',
-                    'clinical_question': clinical_question or '',
-                    'laterality_id': str(laterality_id) if laterality_id else None,
-                    'stat': stat or '',
-                    'others_details': others_details or ''
+                    'guid': str(next_exam[0]),
+                    'study_instance_uid': next_exam[1] or '',
+                    'patient_name': next_exam[2] or '',
+                    'patient_dni': next_exam[3] or '',
+                    'study_type': next_exam[4] or '',
+                    'accession_number': next_exam[5] or '',
+                    'is_reported': bool(next_exam[6])
                 }
             }), 200
         else:
-            cursor.close()
-            connection.close()
             return jsonify({
                 'success': True,
                 'data': None,
@@ -1698,7 +1872,6 @@ def get_next_exam():
 
 @api_blueprint.route('/reports/<exam_id>/sign', methods=['POST'])
 @jwt_required()
-@require_permission('reports.sign', include_role_permissions=False)
 def sign_report(exam_id):
     """
     Firma un reporte médico (marca como reportado) y opcionalmente devuelve el siguiente examen
@@ -2095,7 +2268,6 @@ def verify_credentials():
 
 @api_blueprint.route('/reports/<exam_id>/unsign', methods=['POST'])
 @jwt_required()
-@require_permission('reports.unsign', include_role_permissions=False)
 def unsign_report(exam_id):
     """
     Quita la firma de un reporte (desmarca como reportado)
@@ -2159,40 +2331,37 @@ def get_report_pdf(exam_id):
     - Archivo PDF del reporte
     """
     try:
-        config = get_db_config()
-        if not config:
+        pdf_path, error_message, status_code = _get_report_pdfpath_from_exam(exam_id)
+        if error_message:
             return jsonify({
                 'success': False,
-                'message': 'Error de configuración de base de datos'
-            }), 500
+                'message': error_message
+            }), status_code
+
+        return _send_pdf_response_from_path(pdf_path)
         
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-        
-        query = "SELECT pdfpath FROM nextris.tbreport WHERE idexamination = %s"
-        cursor.execute(query, (exam_id,))
-        result = cursor.fetchone()
-        
-        cursor.close()
-        connection.close()
-        
-        if not result or not result[0]:
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/pdfs/by-exam/<exam_id>', methods=['GET'])
+def serve_pdf_by_exam(exam_id):
+    """
+    Ruta canónica para abrir PDFs por GUID de examen.
+    Pública para compatibilidad con flujos legacy.
+    """
+    try:
+        pdf_path, error_message, status_code = _get_report_pdfpath_from_exam(exam_id)
+        if error_message:
             return jsonify({
                 'success': False,
-                'message': 'PDF no disponible'
-            }), 404
-        
-        pdf_path = os.path.normpath(result[0])
-        absolute_path = os.path.abspath(pdf_path)
-        
-        if not os.path.exists(absolute_path):
-            return jsonify({
-                'success': False,
-                'message': 'Archivo PDF no encontrado en el sistema'
-            }), 404
-        
-        return send_file(absolute_path, as_attachment=False, mimetype='application/pdf')
-        
+                'message': error_message
+            }), status_code
+
+        return _send_pdf_response_from_path(pdf_path)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -2219,80 +2388,21 @@ def serve_pdf(filename):
     try:
         # Sanitizar el nombre del archivo para evitar path traversal
         safe_filename = os.path.basename(filename)
-        
-        # Construir ruta absoluta al PDF
-        pdf_path = os.path.join('/var/www/nextris-dev-react/output_pdfs', safe_filename)
-        
-        # Verificar que el archivo existe
-        if not os.path.exists(pdf_path):
+
+        if not safe_filename:
             return jsonify({
                 'success': False,
                 'message': 'PDF no encontrado'
             }), 404
-        
-        # Verificar que es realmente un archivo PDF
-        if not pdf_path.lower().endswith('.pdf'):
-            return jsonify({
-                'success': False,
-                'message': 'Archivo no válido'
-            }), 400
-        
-        return send_file(pdf_path, as_attachment=False, mimetype='application/pdf')
+
+        pdf_path = os.path.join(PDF_OUTPUT_DIR, safe_filename)
+        return _send_pdf_response_from_path(pdf_path)
         
     except Exception as e:
         return jsonify({
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
-
-
-@api_blueprint.route('/examinations/<exam_id>/flags', methods=['PATCH'])
-@jwt_required()
-def update_examination_flags(exam_id):
-    """
-    Actualiza las banderas de color de un examen.
-
-    Path Parameters:
-    - exam_id: GUID del examen
-
-    Body (JSON):
-    {
-        "flags": ["red", "green"]   // Lista de colores activos; puede estar vacía
-    }
-
-    Returns:
-    {
-        "success": true,
-        "flags": ["red", "green"]
-    }
-    """
-    try:
-        data = request.get_json()
-        if data is None or 'flags' not in data:
-            return jsonify({'success': False, 'message': 'El campo "flags" es requerido'}), 400
-
-        allowed = {'red', 'green', 'blue', 'yellow'}
-        flags = [f for f in data['flags'] if f in allowed]
-
-        config = get_db_config()
-        if not config:
-            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
-
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-
-        cursor.execute(
-            "UPDATE nextris.tbexamination SET flags = %s WHERE Guid = %s",
-            (flags, exam_id)
-        )
-        connection.commit()
-        cursor.close()
-        connection.close()
-
-        return jsonify({'success': True, 'flags': flags}), 200
-
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
 @api_blueprint.route('/examinations/<exam_id>/block', methods=['POST'])
@@ -2420,16 +2530,14 @@ def unblock_examination(exam_id):
         
         current_block = result[0]
         
-        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado), excepto admins
+        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado)
         if current_block and str(current_block) != str(user_id):
-            is_admin = user_has_permission_code(user_id, '*', connection=connection)
-            if not is_admin:
-                cursor.close()
-                connection.close()
-                return jsonify({
-                    'success': False,
-                    'message': 'Solo el usuario que bloqueó el examen puede desbloquearlo'
-                }), 403
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Solo el usuario que bloqueó el examen puede desbloquearlo'
+            }), 403
         
         # Desbloquear el examen
         cursor.execute("""
@@ -2510,150 +2618,5 @@ def get_study_groups_filter():
         cursor.close()
         connection.close()
         return jsonify({'success': True, 'data': results}), 200
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
-
-
-@api_blueprint.route('/quitar_firma/<exam_id>', methods=['POST'])
-@jwt_required()
-def quitar_firma(exam_id):
-    """
-    Quita la firma de un reporte (desmarca como reportado y elimina el PDF)
-    Esta función es lo contrario de sign_report
-    
-    Path:
-    - exam_id: GUID del examen
-    
-    Returns:
-    {
-        "success": true,
-        "message": "Firma removida exitosamente, PDF eliminado"
-    }
-    """
-    try:
-        config = get_db_config()
-        if not config:
-            return jsonify({
-                'success': False,
-                'message': 'Error de configuración de base de datos'
-            }), 500
-        
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-        
-        # Obtener el path del PDF antes de eliminarlo de la BD
-        cursor.execute(
-            "SELECT pdfpath FROM nextris.tbreport WHERE idexamination = %s",
-            (exam_id,)
-        )
-        report_result = cursor.fetchone()
-        pdf_path = report_result[0] if report_result else None
-        
-        # Marcar el examen como NO reportado y limpiar campos relacionados
-        cursor.execute("""
-            UPDATE nextris.tbexamination 
-            SET IsReported=0, reportdate=NULL
-            WHERE Guid=%s
-        """, (exam_id,))
-        
-        if cursor.rowcount == 0:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': f'Examen no encontrado: {exam_id}'
-            }), 404
-        
-        # Eliminar el path del PDF en tbreport (limpiar pdfpath)
-        cursor.execute("""
-            UPDATE nextris.tbreport
-            SET pdfpath = NULL
-            WHERE idexamination = %s
-        """, (exam_id,))
-        
-        connection.commit()
-        cursor.close()
-        connection.close()
-        
-        # Eliminar el archivo PDF físico si existe
-        pdf_deleted = False
-        if pdf_path:
-            # Normalizar la ruta del PDF
-            pdf_full_path = os.path.normpath(pdf_path)
-            if not os.path.isabs(pdf_full_path):
-                pdf_full_path = os.path.abspath(pdf_full_path)
-            
-            if os.path.exists(pdf_full_path):
-                try:
-                    os.remove(pdf_full_path)
-                    pdf_deleted = True
-                    print(f"[INFO] PDF eliminado: {pdf_full_path}")
-                except Exception as e:
-                    print(f"[WARN] No se pudo eliminar el PDF: {str(e)}")
-        
-        # Actualizar estado (si existe la función)
-        try:
-            from apps.home.routes import updatestatus
-            updatestatus(exam_id)
-        except:
-            pass
-        
-        message = 'Firma removida exitosamente'
-        if pdf_deleted:
-            message += ', PDF eliminado'
-        elif pdf_path:
-            message += ', pero el PDF no se pudo eliminar'
-        
-        return jsonify({
-            'success': True,
-            'message': message
-        }), 200
-        
-    except Exception as e:
-        print(f"[ERROR] Error al quitar firma: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
-
-
-@api_blueprint.route('/examinations/<exam_id>/general-notes', methods=['PATCH'])
-@jwt_required()
-def update_general_notes(exam_id):
-    """
-    Actualiza las notas generales de un examen (tbexamination.generalnotes)
-
-    Body JSON:
-    {
-        "general_notes": "texto de la nota"
-    }
-    """
-    try:
-        data = request.get_json() or {}
-        general_notes = data.get('general_notes', '')
-
-        config = get_db_config()
-        if not config:
-            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
-
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-
-        cursor.execute(
-            "UPDATE nextris.tbexamination SET generalnotes = %s WHERE Guid = %s",
-            (general_notes or None, exam_id)
-        )
-
-        if cursor.rowcount == 0:
-            cursor.close()
-            connection.close()
-            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
-
-        connection.commit()
-        cursor.close()
-        connection.close()
-
-        return jsonify({'success': True, 'message': 'Nota guardada exitosamente'}), 200
-
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500

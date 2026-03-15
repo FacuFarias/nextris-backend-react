@@ -487,7 +487,7 @@ function VerHolter(){
 
 function VerPDF() {
     var dataId = document.getElementById('data').getAttribute('data-id');
-    var url = `/verpdf/${dataId}`;
+    var url = `/api/pdfs/by-exam/${dataId}`;
 
     fetch(url)
         .then(response => {

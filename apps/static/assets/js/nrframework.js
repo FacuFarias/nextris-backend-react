@@ -71,7 +71,7 @@ function VerDcm(study_instance_uid) {
 
 function VerPDF(idest){
     
-    var url = `/verpdf/${idest}`;
+    var url = `/api/pdfs/by-exam/${idest}`;
 
     fetch(url)
         .then(response => {

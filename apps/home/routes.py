@@ -675,6 +675,7 @@ def validate_template_access(template, user_type):
         # Configuraciones - Solo Sysadmin
         'configuraciones.html': ['configuraciones'],
         'preferencias.html': ['preferencias'],
+        'reportes_estructurados.html': ['configuraciones'],
         
         # Pacientes - Todos los roles (no necesita validación específica)
         'historial_paciente.html': ['pacientes'],
@@ -695,6 +696,8 @@ def get_segment_from_template(template):
     """Extrae el segmento del template para navegación"""
     if 'index' in template:
         return 'index'
+    elif 'reportes_estructurados' in template:
+        return 'reportes_estructurados'
     elif 'config' in template:
         return 'configuraciones'
     elif 'patient' in template:

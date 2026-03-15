@@ -56,6 +56,17 @@
             console.log("Mostrando opciones de facturación");
         }
     });
+
+        $("#toggle-reportes-estructurados").click(function() {
+          var options = $("#reportes-estructurados-options");
+          if (options.is(":visible")) {
+            options.slideUp(300);
+            console.log("Ocultando opciones de reportes estructurados");
+          } else {
+            options.slideDown(300);
+            console.log("Mostrando opciones de reportes estructurados");
+          }
+        });
     });
   </script>
   <div class="sidenav-header">
@@ -253,6 +264,43 @@
       
       <!-- CONFIGURACIONES Y PREFERENCIAS - Solo Sysadmin -->
       {% if session.get('user_type') == 'Sysadmin' %}
+      <li class="nav-item">
+          <a class="nav-link {% if 'reportes' in segment or 'reportes_estructurados' in segment %} active {% endif %}" href="javascript:void(0);" id="toggle-reportes-estructurados">
+              <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">
+                  <i class="ni ni-single-copy-04 text-success text-sm opacity-10"></i>
+              </div>
+              <span class="nav-link-text ms-1">Reportes estructurados</span>
+          </a>
+          <ul id="reportes-estructurados-options" style="display: none;">
+            <hr class="horizontal dark mt-1">
+            <li>
+              <a class="nav-link" href="/reportes_estructurados.html#crear-nuevo-parser">
+                <i class="ni ni-fat-add text-success text-sm opacity-10"></i>
+                <span class="nav-link-text ms-1">Crear nuevo parser</span>
+              </a>
+            </li>
+            <li>
+              <a class="nav-link" href="/reportes_estructurados.html#mapeo-de-variables">
+                <i class="ni ni-map-big text-success text-sm opacity-10"></i>
+                <span class="nav-link-text ms-1">Mapeo de variables</span>
+              </a>
+            </li>
+            <li>
+              <a class="nav-link" href="/reportes_estructurados.html#conceptos-y-criterios">
+                <i class="ni ni-check-bold text-success text-sm opacity-10"></i>
+                <span class="nav-link-text ms-1">Conceptos y criterios</span>
+              </a>
+            </li>
+            <li>
+              <a class="nav-link" href="/reportes_estructurados.html#plantillas-inteligentes">
+                <i class="ni ni-collection text-success text-sm opacity-10"></i>
+                <span class="nav-link-text ms-1">Plantillas inteligentes</span>
+              </a>
+            </li>
+            <hr class="horizontal dark mt-1">
+          </ul>
+      </li>
+
       <li class="nav-item">
           <a class="nav-link {% if 'configuraciones' in segment %} active {% endif %}" href="/configuraciones.html">
               <div class="icon icon-shape icon-sm border-radius-md text-center me-2 d-flex align-items-center justify-content-center">

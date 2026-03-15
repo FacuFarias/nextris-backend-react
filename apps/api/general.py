@@ -3,7 +3,7 @@
 API General - Endpoints REST generales del sistema
 """
 
-from flask import jsonify, request, render_template_string, Response
+from flask import jsonify, request, render_template_string, Response, redirect
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 import requests
@@ -59,14 +59,24 @@ def get_viewer_url():
                 'message': 'Se requiere un cuerpo JSON'
             }), 400
         
-        user_id = data.get('user_id')
+        token_user_id = get_jwt_identity()
+        user_id = token_user_id
+        requested_user_id = data.get('user_id')
         examination_id = data.get('examination_id')
         
-        if not user_id or not examination_id:
+        if not examination_id:
             return jsonify({
                 'success': False,
-                'message': 'user_id y examination_id son requeridos'
+                'message': 'examination_id es requerido'
             }), 400
+
+        # Seguridad: si viene user_id en el body, no se usa para permisos.
+        # Se conserva solo para detectar discrepancias de clientes antiguos.
+        if requested_user_id and requested_user_id != token_user_id:
+            print(
+                f"[API VIEWER URL] Advertencia: user_id body ({requested_user_id}) "
+                f"no coincide con JWT ({token_user_id})"
+            )
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
@@ -181,8 +191,10 @@ def get_viewer_url():
                 'created_at': datetime.now()
             }
             
-            # URL de acceso directo que sirve el HTML con el token
-            viewer_url = f"https://nextris.cloud/api/general/open-viewer/{access_id}"
+            # URL directa a set-token.html en viewer.nextris.cloud
+            # Esto evita el problema de múltiples workers de gunicorn con cache en memoria
+            viewer_params = urlencode({'access_token': access_token, 'study_uid': study_uid})
+            viewer_url = f"https://viewer.nextris.cloud/set-token.html?{viewer_params}"
             
             # Generar página HTML embebida que el frontend puede abrir
             html_page = f"""
@@ -317,77 +329,15 @@ def open_viewer(access_id):
         
         study_uid = token_data['study_uid']
         access_token = token_data['access_token']
-        
+
         # Eliminar del cache después de usarlo (un solo uso)
         del viewer_tokens_cache[access_id]
-        
-        # Página HTML que establece el token y redirige
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Abriendo visor DICOM...</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    height: 100vh;
-                    margin: 0;
-                    background: #f0f0f0;
-                }
-                .loader {
-                    text-align: center;
-                }
-                .spinner {
-                    border: 4px solid #f3f3f3;
-                    border-top: 4px solid #3498db;
-                    border-radius: 50%;
-                    width: 40px;
-                    height: 40px;
-                    animation: spin 1s linear infinite;
-                    margin: 0 auto 20px;
-                }
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="loader">
-                <div class="spinner"></div>
-                <h2>Abriendo visor DICOM...</h2>
-                <p>Será redirigido automáticamente.</p>
-            </div>
-            
-            <script>
-                // Guardar el token en localStorage para que OHIF lo use
-                const tokenData = {
-                    access_token: "{{ access_token }}",
-                    token_type: "Bearer",
-                    expires_in: 300,
-                    timestamp: Date.now()
-                };
-                
-                // OHIF busca el token en diferentes formatos
-                localStorage.setItem('keycloak_token', "{{ access_token }}");
-                localStorage.setItem('access_token', "{{ access_token }}");
-                localStorage.setItem('token', JSON.stringify(tokenData));
-                
-                // Redirigir al visor después de guardar el token
-                setTimeout(function() {
-                    window.location.href = "https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={{ study_uid }}";
-                }, 1000);
-            </script>
-        </body>
-        </html>
-        """
-        
-        return render_template_string(html_template, 
-                                     access_token=access_token, 
-                                     study_uid=study_uid)
+
+        # Redirigir a set-token.html en viewer.nextris.cloud para que el token se guarde
+        # en el localStorage correcto (mismo dominio que OHIF)
+        from urllib.parse import urlencode, quote_plus
+        params = urlencode({'access_token': access_token, 'study_uid': study_uid})
+        return redirect(f"https://viewer.nextris.cloud/set-token.html?{params}", code=302)
         
     except Exception as e:
         print(f"[API OPEN VIEWER] Error: {str(e)}")

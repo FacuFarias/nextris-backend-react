@@ -1,0 +1,127 @@
+{% extends "layouts/base.html" %}
+
+{% block title %} Reportes estructurados {% endblock title %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="/static/assets/css/modern-pills.css">
+<link rel="stylesheet" href="/static/assets/css/modern-cards.css">
+<style>
+  .main-content { min-height: 100vh; }
+  .subsection-card { background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(0, 0, 0, 0.06); }
+  .result-box { background: #f8f9fa; border-radius: 0.5rem; padding: 1rem; white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 0.85rem; }
+</style>
+{% endblock stylesheets %}
+
+{% block content %}
+<div class="position-fixed w-100 h-100 top-0 start-0" style="z-index: -1;">
+  <img src="{{ config.ASSETS_ROOT }}/img/config.png" style="width: 100%; height: 100%; object-fit: cover;">
+  <div class="position-absolute top-0 start-0 w-100 h-100" style="background: linear-gradient(135deg, rgba(118, 75, 162, 0.85) 0%, rgba(212, 217, 247, 0.7) 50%, rgba(255, 255, 255, 0.6) 100%);"></div>
+</div>
+
+{% include "includes/sidenav.html" %}
+
+<main class="main-content position-relative border-radius-lg">
+  <div class="container-fluid py-4">
+    <div class="card shadow-lg mx-2 mx-md-4 mt-3 subsection-card">
+      <div class="card-header pb-0 px-4">
+        <h4 class="mb-1">Reportes estructurados</h4>
+        <p class="text-sm mb-3">Gestión de parser, variables, conceptos y plantillas inteligentes.</p>
+      </div>
+      <div class="card-body px-4">
+        <ul class="nav nav-pills mb-3" id="sr-tab" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-crear-parser" data-bs-toggle="pill" data-bs-target="#panel-crear-parser" type="button" role="tab">Crear nuevo parser</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-mapeo" data-bs-toggle="pill" data-bs-target="#panel-mapeo" type="button" role="tab">Mapeo de variables</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-conceptos" data-bs-toggle="pill" data-bs-target="#panel-conceptos" type="button" role="tab">Conceptos y criterios</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-plantillas" data-bs-toggle="pill" data-bs-target="#panel-plantillas" type="button" role="tab">Plantillas inteligentes</button>
+          </li>
+        </ul>
+
+        <div class="tab-content" id="sr-tab-content">
+          <div class="tab-pane fade show active" id="panel-crear-parser" role="tabpanel" aria-labelledby="tab-crear-parser">
+            <div id="crear-nuevo-parser"></div>
+            <form id="sr-create-parser-form" class="row g-3">
+              <div class="col-md-6">
+                <label for="sr-facility" class="form-label">Facility</label>
+                <select id="sr-facility" class="form-control" required>
+                  <option value="">Seleccione una facility...</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="sr-file" class="form-label">Archivo DICOM SR</label>
+                <input id="sr-file" type="file" class="form-control" accept=".dcm,.dicom,.dic" required>
+              </div>
+              <div class="col-12 d-flex gap-2">
+                <button id="sr-submit" type="submit" class="btn btn-primary mb-0">Procesar y crear parser</button>
+                <button id="sr-clear" type="button" class="btn btn-outline-secondary mb-0">Limpiar</button>
+              </div>
+            </form>
+
+            <div id="sr-status" class="mt-3"></div>
+            <div id="sr-result" class="result-box mt-2" style="display: none;"></div>
+          </div>
+
+          <div class="tab-pane fade" id="panel-mapeo" role="tabpanel" aria-labelledby="tab-mapeo">
+            <div id="mapeo-de-variables" class="pt-2"></div>
+            <div class="alert alert-info mb-0">Subsección disponible para gestión de mapeo de variables.</div>
+          </div>
+
+          <div class="tab-pane fade" id="panel-conceptos" role="tabpanel" aria-labelledby="tab-conceptos">
+            <div id="conceptos-y-criterios" class="pt-2">
+              <div class="row g-3 align-items-end mb-3">
+                <div class="col-md-6">
+                  <label for="criteria-parser" class="form-label">Parser</label>
+                  <select id="criteria-parser" class="form-control">
+                    <option value="">Seleccione un parser...</option>
+                  </select>
+                </div>
+                <div class="col-md-6 d-flex gap-2 justify-content-md-end">
+                  <button id="criteria-refresh" type="button" class="btn btn-outline-primary mb-0">Cargar criterios</button>
+                </div>
+              </div>
+
+              <div id="criteria-status" class="mb-2"></div>
+
+              <div class="table-responsive border rounded">
+                <table class="table table-sm align-middle mb-0" id="criteria-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Criterio</th>
+                      <th scope="col">Regla</th>
+                      <th scope="col">Texto final</th>
+                      <th scope="col" class="text-end">Prioridad</th>
+                      <th scope="col" class="text-center">Activo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="criteria-table-body">
+                    <tr>
+                      <td colspan="5" class="text-center text-muted py-3">Seleccione un parser para ver criterios.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane fade" id="panel-plantillas" role="tabpanel" aria-labelledby="tab-plantillas">
+            <div id="plantillas-inteligentes" class="pt-2"></div>
+            <div class="alert alert-info mb-0">Subsección disponible para plantillas inteligentes.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% include "includes/footer.html" %}
+</main>
+{% endblock content %}
+
+{% block javascripts %}
+<script src="{{ config.ASSETS_ROOT }}/js/scriptsReportesEstructurados.js"></script>
+{% endblock javascripts %}

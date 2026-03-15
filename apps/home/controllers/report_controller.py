@@ -3,7 +3,7 @@ Controller para gestión de reportes y plantillas predefinidas
 Migrado masivamente desde routes.py para reducir el archivo principal
 """
 
-from flask import Blueprint, request, jsonify, send_file, session
+from flask import Blueprint, request, jsonify, send_file, session, redirect
 from flask_login import current_user
 import os
 import uuid
@@ -547,42 +547,9 @@ def get_inf_predef():
 def verpdf(report_id):
     """Endpoint para ver/descargar el PDF de un reporte"""
     try:
-        print(f"[INFO] Solicitando PDF para report_id: {report_id}")
-        
-        # Buscar la ruta del PDF en la base de datos
-        query = "SELECT pdfpath FROM nextris.tbReport WHERE IdExamination = %s"
-        result = DatabaseService.execute_query(query, (report_id,))
-        
-        if not result:
-            print(f"[ERROR] Reporte no encontrado en la base de datos para ID: {report_id}")
-            return jsonify({"error": "Reporte no encontrado"}), 404
-            
-        pdf_path = result[0][0]
-        if not pdf_path:
-            print(f"[ERROR] No hay ruta de PDF asociada al reporte ID: {report_id}")
-            return jsonify({"error": "PDF no disponible"}), 404
-            
-        # Normalizar la ruta del archivo
-        pdf_path = os.path.normpath(pdf_path)
-        print(f"[INFO] Ruta normalizada del PDF: {pdf_path}")
-        
-        # Obtener ruta absoluta
-        absolute_path = os.path.abspath(pdf_path)
-        print(f"[INFO] Ruta absoluta del PDF: {absolute_path}")
-        
-        # Verificar que el archivo existe
-        if os.path.exists(absolute_path):
-            print(f"[SUCCESS] PDF encontrado, enviando archivo: {absolute_path}")
-            return send_file(absolute_path, as_attachment=False)
-        else:
-            print(f"[ERROR] PDF no encontrado en la ruta: {absolute_path}")
-            # Listar archivos en el directorio para debugging
-            pdf_dir = os.path.dirname(absolute_path)
-            if os.path.exists(pdf_dir):
-                files = os.listdir(pdf_dir)
-                print(f"[DEBUG] Archivos en directorio {pdf_dir}: {files}")
-            return jsonify({"error": "Archivo PDF no encontrado en el sistema"}), 404
-            
+        print(f"[INFO] Redirigiendo apertura de PDF a endpoint unificado para report_id: {report_id}")
+        return redirect(f"/api/pdfs/by-exam/{report_id}", code=302)
+
     except Exception as e:
         print(f"[ERROR] Error al obtener PDF: {str(e)}")
         return jsonify({"error": str(e)}), 500

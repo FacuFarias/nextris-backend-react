@@ -314,6 +314,45 @@ def get_study_image_file(study_uid, filename):
         }), 500
 
 
+@api_blueprint.route('/images/study/<study_uid>/file/<filename>', methods=['DELETE'])
+@jwt_required()
+def delete_study_image_file(study_uid, filename):
+    """
+    Elimina una imagen clave específica de un estudio.
+    También elimina el archivo JSON de metadata asociado si existe.
+
+    Path Parameters:
+    - study_uid: Study Instance UID del estudio
+    - filename: Nombre del archivo de imagen a eliminar
+    """
+    try:
+        if not study_uid or '..' in study_uid or '/' in study_uid.replace('.', ''):
+            return jsonify({'success': False, 'message': 'Study UID inválido'}), 400
+
+        if not filename or '..' in filename or '/' in filename:
+            return jsonify({'success': False, 'message': 'Nombre de archivo inválido'}), 400
+
+        if not filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+            return jsonify({'success': False, 'message': 'Solo se permiten archivos JPG, JPEG o PNG'}), 400
+
+        file_path = os.path.join(KEY_IMAGES_BASE_PATH, study_uid, filename)
+
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            return jsonify({'success': False, 'message': 'Imagen no encontrada'}), 404
+
+        os.remove(file_path)
+
+        # Eliminar el JSON de metadata asociado si existe
+        json_path = os.path.join(KEY_IMAGES_BASE_PATH, study_uid, os.path.splitext(filename)[0] + '.json')
+        if os.path.exists(json_path):
+            os.remove(json_path)
+
+        return jsonify({'success': True, 'message': 'Imagen eliminada correctamente'}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
 @api_blueprint.route('/images/study/<study_uid>/thumbnail/<filename>', methods=['GET'])
 @jwt_optional_with_query
 @add_cors_headers
