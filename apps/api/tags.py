@@ -19,9 +19,13 @@ from flask_jwt_extended import jwt_required
 from apps.api import api_blueprint
 
 
+ALLOWED_FLAG_COLORS = {'red', 'green', 'blue', 'yellow'}
+
+
 def get_db_config():
     try:
-        from apps.home.routes import config
+        from apps.home.services import ConfigService
+        config = ConfigService.get_db_config()
         return config
     except Exception:
         return None
@@ -329,3 +333,70 @@ def update_examination_tag_ids(exam_id):
 
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+# ─────────────────────────────────────────────────────────────
+# PATCH /api/examinations/<exam_id>/flags
+# ─────────────────────────────────────────────────────────────
+@api_blueprint.route('/examinations/<exam_id>/flags', methods=['PATCH'])
+@jwt_required()
+def update_examination_flags(exam_id):
+    """
+    Actualiza las banderas visuales de un examen.
+
+    Body JSON: { "flags": ["red", "green", "blue", "yellow"] }
+    """
+    data = request.get_json()
+    if data is None or 'flags' not in data:
+        return jsonify({'success': False, 'message': 'El campo "flags" es requerido'}), 400
+
+    flags = data['flags']
+    if not isinstance(flags, list):
+        return jsonify({'success': False, 'message': '"flags" debe ser una lista'}), 400
+
+    normalized_flags = []
+    for flag in flags:
+        if flag is None:
+            continue
+        value = str(flag).strip().lower()
+        if not value:
+            continue
+        if value not in ALLOWED_FLAG_COLORS:
+            return jsonify({
+                'success': False,
+                'message': f'Bandera inválida: {value}. Permitidas: red, green, blue, yellow'
+            }), 400
+        if value not in normalized_flags:
+            normalized_flags.append(value)
+
+    config = get_db_config()
+    if not config:
+        return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+    try:
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "UPDATE nextris.tbexamination SET flags = %s WHERE Guid = %s RETURNING Guid",
+            (normalized_flags, exam_id)
+        )
+        updated = cursor.fetchone()
+        connection.commit()
+
+        cursor.close()
+        connection.close()
+
+        if not updated:
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        return jsonify({'success': True, 'flags': normalized_flags}), 200
+
+    except Exception as e:
+        message = str(e)
+        if 'column "flags"' in message and 'does not exist' in message:
+            return jsonify({
+                'success': False,
+                'message': 'La columna flags no existe en tbexamination. Ejecuta migración de esquema.'
+            }), 500
+        return jsonify({'success': False, 'message': f'Error: {message}'}), 500

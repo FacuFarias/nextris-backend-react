@@ -930,12 +930,31 @@ def get_patients_by_location():
         
         print(f"[DEBUG get_patients_by_location] location_id recibido: {location_id}")
         
-        # Obtener el id_patientdomain de la ubicación
-        domain_query = """
-            SELECT id_patientdomain 
-            FROM nextris.tblocation 
-            WHERE guid = %s
+        has_facility_domain_query = """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'nextris'
+              AND table_name = 'tbfacility'
+              AND column_name = 'id_patientdomain'
+            LIMIT 1
         """
+        has_facility_domain = DatabaseService.execute_query(has_facility_domain_query)
+
+        # Obtener el id_patientdomain heredado desde la facility de la ubicación.
+        if has_facility_domain:
+            domain_query = """
+                SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
+                FROM nextris.tblocation l
+                LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+                WHERE l.guid = %s
+            """
+        else:
+            domain_query = """
+                SELECT NULLIF(l.id_patientdomain, '')
+                FROM nextris.tblocation l
+                WHERE l.guid = %s
+            """
+
         domain_result = DatabaseService.execute_query(domain_query, (location_id,))
         
         print(f"[DEBUG get_patients_by_location] domain_result: {domain_result}")

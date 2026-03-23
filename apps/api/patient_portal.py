@@ -19,7 +19,8 @@ from apps.api import api_blueprint
 
 def get_db_config():
     """Obtiene la configuración de la base de datos"""
-    from apps.home.routes import config as db_config
+    from apps.home.services import ConfigService
+    db_config = ConfigService.get_db_config()
     return db_config
 
 
@@ -492,7 +493,18 @@ def get_my_studies():
             LEFT JOIN nextris.ismodality m ON st.modality_id = m.guid
             LEFT JOIN nextris.isrequestingphysician rp ON ex.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
+                        LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
+                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
             WHERE ex.idpatient = %s
+                            AND EXISTS (
+                                        SELECT 1
+                                        FROM nextris.rel_facility_module rel
+                                        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
+                                        WHERE rel.facility_id = l.facility_id
+                                            AND rel.is_active = TRUE
+                                            AND mod.is_active = TRUE
+                                            AND mod.code = 'patient_portal'
+                                )
         """
         
         params = [patient_data_id]
@@ -599,7 +611,20 @@ def get_patient_report(exam_id):
             SELECT r.pdfpath, ex.localacc
             FROM nextris.tbexamination ex
             INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
-            WHERE ex.guid = %s AND ex.idpatient = %s AND ex.isreported = 1
+                        LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
+                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+                        WHERE ex.guid = %s
+                            AND ex.idpatient = %s
+                            AND ex.isreported = 1
+                            AND EXISTS (
+                                        SELECT 1
+                                        FROM nextris.rel_facility_module rel
+                                        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
+                                        WHERE rel.facility_id = l.facility_id
+                                            AND rel.is_active = TRUE
+                                            AND mod.is_active = TRUE
+                                            AND mod.code = 'patient_portal'
+                                )
         """, (exam_id, patient_data_id))
         result = cursor.fetchone()
 
@@ -704,7 +729,18 @@ def share_examination(exam_id):
             LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
             LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
-            WHERE ex.guid = %s AND ex.idpatient = %s AND ex.isreported = 1
+                        WHERE ex.guid = %s
+                            AND ex.idpatient = %s
+                            AND ex.isreported = 1
+                            AND EXISTS (
+                                        SELECT 1
+                                        FROM nextris.rel_facility_module rel
+                                        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
+                                        WHERE rel.facility_id = l.facility_id
+                                            AND rel.is_active = TRUE
+                                            AND mod.is_active = TRUE
+                                            AND mod.code = 'patient_portal'
+                                )
         """
         cursor.execute(query, (exam_id, patient_data_id))
         result = cursor.fetchone()

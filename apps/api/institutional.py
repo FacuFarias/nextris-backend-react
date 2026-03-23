@@ -15,10 +15,17 @@ import psycopg2
 def get_db_config():
     """Obtener configuración de base de datos"""
     try:
-        from apps.home.routes import config
+        from apps.home.services import ConfigService
+        config = ConfigService.get_db_config()
         return config
     except:
         return None
+
+
+def normalize_user_id(identity):
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
 
 
 @api_blueprint.route('/institutional/info', methods=['GET'])
@@ -65,7 +72,7 @@ def get_institutional_info(location_id=None):
             cursor.execute(query, (location_id,))
         else:
             from flask_jwt_extended import get_jwt_identity
-            user_id = get_jwt_identity()
+            user_id = normalize_user_id(get_jwt_identity())
             query = """
                 SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path
                 FROM nextris.tblocation l
@@ -300,6 +307,7 @@ def get_institutional_locations():
                 "guid": "uuid",
                 "name": "Nombre de ubicación",
                 "code": "Código",
+                "facility_id": "UUID de la facility",
                 "address": "Dirección",
                 "city": "Ciudad",
                 "phone": "Teléfono",
@@ -318,7 +326,7 @@ def get_institutional_locations():
                 'message': 'Error de configuración de base de datos'
             }), 500
         
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
@@ -328,6 +336,7 @@ def get_institutional_locations():
                 l.guid,
                 l.name,
                 l.code,
+                l.facility_id,
                 COALESCE(rul.is_default, false) as is_default
             FROM nextris.tblocation l
             LEFT JOIN nextris.rel_user_location rul ON l.guid = rul.location_id AND rul.user_id = %s
@@ -344,7 +353,8 @@ def get_institutional_locations():
                 'guid': row[0],
                 'name': row[1],
                 'code': row[2],
-                'is_default': row[3]
+                'facility_id': row[3],
+                'is_default': row[4]
             })
         
         cursor.close()

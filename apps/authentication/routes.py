@@ -8,14 +8,9 @@ from flask_login import (
 
 from apps import db, login_manager
 import psycopg2
-import os
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'home')))
-try:
-    from apps.home.routes import config
-except ImportError:
-    # Si no se puede importar, define config aquí o lanza error
-    config = None
+from apps.home.services import ConfigService
+
+config = ConfigService.get_db_config()
 from apps.authentication import blueprint
 from apps.authentication.forms import LoginForm, CreateAccountForm
 from apps.authentication.models import Users, PatientUser

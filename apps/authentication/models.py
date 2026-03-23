@@ -4,6 +4,7 @@ from flask_login import UserMixin
 from apps import db, login_manager
 
 from apps.authentication.util import hash_pass
+from apps.home.services import ConfigService
 
 
 # Clase para pacientes que no usa SQLAlchemy
@@ -107,11 +108,8 @@ def user_loader(id):
     # Si es un paciente (identificado por session['is_patient'])
     if session.get('is_patient'):
         try:
-            # Importar config para conectarse a PostgreSQL
-            import sys
-            import os
-            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'home')))
-            from apps.home.routes import config
+            # Obtener configuración de BD sin depender de rutas legacy.
+            config = ConfigService.get_db_config()
             
             if config is None:
                 return None

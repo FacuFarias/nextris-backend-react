@@ -24,6 +24,9 @@ class Config(object):
     JWT_HEADER_NAME = 'Authorization'
     JWT_HEADER_TYPE = 'Bearer'
 
+    # Legacy Flask/Jinja UI switch. Keep disabled by default in React-first setup.
+    ENABLE_LEGACY_UI = os.getenv('ENABLE_LEGACY_UI', 'false').lower() in ('1', 'true', 'yes', 'on')
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     DB_ENGINE   = os.getenv('DB_ENGINE'   , 'postgresql')

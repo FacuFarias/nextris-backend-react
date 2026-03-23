@@ -71,8 +71,8 @@ def api_login():
         if user_type == 'patient':
             # Autenticación de paciente
             try:
-                from apps.home.routes import config as db_config
-                
+                from apps.home.services import ConfigService
+                db_config = ConfigService.get_db_config()
                 if not db_config:
                     return jsonify({
                         'success': False,
@@ -228,7 +228,8 @@ def get_current_user():
         if user_type == 'patient':
             # Buscar paciente
             try:
-                from apps.home.routes import config as db_config
+                from apps.home.services import ConfigService
+                db_config = ConfigService.get_db_config()
                 connection = psycopg2.connect(**db_config)
                 cursor = connection.cursor()
                 
@@ -407,7 +408,9 @@ def change_password_first_login():
 
         hashed_password = generate_password_hash(new_password)
 
-        from apps.home.routes import config as db_config
+        from apps.home.services import ConfigService
+
+        db_config = ConfigService.get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
 
@@ -481,8 +484,8 @@ def get_user_patientdomains(user_id):
     }
     """
     try:
-        from apps.home.routes import config as db_config
-        
+        from apps.home.services import ConfigService
+        db_config = ConfigService.get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         

@@ -22,7 +22,8 @@ from email import encoders
 def get_db_config():
     """Obtener configuración de base de datos"""
     try:
-        from apps.home.routes import config
+        from apps.home.services import ConfigService
+        config = ConfigService.get_db_config()
         return config
     except:
         return None

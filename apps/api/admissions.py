@@ -14,7 +14,8 @@ from datetime import datetime
 def get_db_config():
     """Obtener configuración de base de datos"""
     try:
-        from apps.home.routes import config
+        from apps.home.services import ConfigService
+        config = ConfigService.get_db_config()
         return config
     except:
         return None
@@ -490,6 +491,36 @@ def cancel_admission(admission_guid):
         """
         
         cursor.execute(update_query, (admission_guid,))
+
+        # Desvincular imágenes DICOM asociadas al examen
+        cursor.execute("""
+            UPDATE nextris.tbmanual_uploads
+            SET islinked = 0,
+                linked_examination_guid = NULL,
+                linked_date = NULL
+            WHERE linked_examination_guid = %s
+        """, (admission_guid,))
+
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
+
+        if has_pacs_link_table:
+            cursor.execute("""
+                UPDATE nextris.tbpacs_study_link
+                SET link_status = 'unlinked',
+                    unlinked_at = CURRENT_TIMESTAMP,
+                    unlinked_reason = 'Admisión cancelada desde /api/admissions/<admission_guid>',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE order_guid = %s
+                  AND link_status = 'linked'
+            """, (admission_guid,))
+
         connection.commit()
         
         cursor.close()

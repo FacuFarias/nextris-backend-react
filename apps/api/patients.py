@@ -16,12 +16,61 @@ from apps.authentication.util import hash_pass
 
 def get_db_config():
     """Obtiene la configuración de la base de datos"""
-    from apps.home.routes import config as db_config
+    from apps.home.services import ConfigService
+    db_config = ConfigService.get_db_config()
     return db_config
 
 
+def normalize_user_id(identity):
+    """Support legacy string identities and object-based JWT identities."""
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
+
+
 def get_user_patientdomain_ids(cursor, user_id):
-    """Obtiene dominios del usuario; si no tiene, retorna todos los dominios disponibles."""
+    """Resolve domains from user locations/facilities, then legacy relation, then all domains."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'nextris'
+          AND table_name = 'tbfacility'
+          AND column_name = 'id_patientdomain'
+        LIMIT 1
+        """
+    )
+    has_facility_domain_column = cursor.fetchone() is not None
+
+    if has_facility_domain_column:
+        cursor.execute(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
+            FROM nextris.rel_user_location rul
+            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            WHERE rul.user_id = %s
+              AND COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) IS NOT NULL
+            """,
+            (user_id,),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT DISTINCT NULLIF(l.id_patientdomain, '')
+            FROM nextris.rel_user_location rul
+            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            WHERE rul.user_id = %s
+              AND NULLIF(l.id_patientdomain, '') IS NOT NULL
+            """,
+            (user_id,),
+        )
+
+    location_domains = [row[0] for row in cursor.fetchall()]
+    if location_domains:
+        return location_domains
+
+    # Legacy fallback while rel_user_patientdomain still exists.
     cursor.execute(
         """
         SELECT patientdomain_id
@@ -31,9 +80,9 @@ def get_user_patientdomain_ids(cursor, user_id):
         (user_id,)
     )
 
-    user_domains = [row[0] for row in cursor.fetchall()]
-    if user_domains:
-        return user_domains
+    legacy_domains = [row[0] for row in cursor.fetchall()]
+    if legacy_domains:
+        return legacy_domains
 
     cursor.execute("SELECT guid FROM nextris.ispatientdomain")
     return [row[0] for row in cursor.fetchall()]
@@ -56,7 +105,7 @@ def get_patients():
     - search: término de búsqueda (opcional)
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 1000, type=int)
@@ -185,7 +234,7 @@ def get_patients_minimal():
     Obtener información mínima de pacientes (para autocompletes)
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
@@ -244,7 +293,7 @@ def search_patients():
     }
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         search_term = data.get('search_term', '')
         
@@ -314,7 +363,7 @@ def search_patients_advanced():
     }
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         criteria = data.get('criteria', {})
         
@@ -408,12 +457,32 @@ def get_patients_by_location():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener el id_patientdomain de la ubicación
-        cursor.execute("""
-            SELECT id_patientdomain 
-            FROM nextris.tblocation 
-            WHERE guid = %s
-        """, (location_id,))
+        # Obtener dominio heredado desde facility cuando la columna existe.
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'nextris'
+              AND table_name = 'tbfacility'
+              AND column_name = 'id_patientdomain'
+            LIMIT 1
+            """
+        )
+        has_facility_domain_column = cursor.fetchone() is not None
+
+        if has_facility_domain_column:
+            cursor.execute("""
+                SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
+                FROM nextris.tblocation l
+                LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+                WHERE l.guid = %s
+            """, (location_id,))
+        else:
+            cursor.execute("""
+                SELECT NULLIF(l.id_patientdomain, '')
+                FROM nextris.tblocation l
+                WHERE l.guid = %s
+            """, (location_id,))
         
         result = cursor.fetchone()
         
@@ -477,7 +546,7 @@ def get_patient(guid):
     Verifica que el usuario tenga acceso al dominio del paciente
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
@@ -1535,7 +1604,7 @@ def get_user_locations():
     Obtener las ubicaciones del usuario autenticado
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
@@ -1589,7 +1658,7 @@ def get_patients_to_reassign():
     Obtener lista de pacientes disponibles para reasignación
     """
     try:
-        user_id = get_jwt_identity()
+        user_id = normalize_user_id(get_jwt_identity())
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)

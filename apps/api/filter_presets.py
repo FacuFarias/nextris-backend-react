@@ -13,7 +13,8 @@ from apps.api import api_blueprint
 
 def get_db_config():
     """Obtiene la configuración de la base de datos"""
-    from apps.home.routes import config as db_config
+    from apps.home.services import ConfigService
+    db_config = ConfigService.get_db_config()
     return db_config
 
 

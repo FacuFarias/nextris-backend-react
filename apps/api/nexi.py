@@ -56,7 +56,8 @@ def _load_nexi_directives() -> str:
 
 
 def _get_db_config():
-    from apps.home.routes import config as db_config
+    from apps.home.services import ConfigService
+    db_config = ConfigService.get_db_config()
     return db_config
 
 

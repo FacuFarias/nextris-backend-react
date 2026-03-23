@@ -14,10 +14,136 @@ from apps.api import api_blueprint
 def get_db_config():
     """Obtener configuración de base de datos"""
     try:
-        from apps.home.routes import config
+        from apps.home.services import ConfigService
+        config = ConfigService.get_db_config()
         return config
     except:
         return None
+
+
+VALID_REPORT_TYPES = {'simple', 'inteligente'}
+
+
+def normalize_report_type(value, default='simple'):
+    """Normaliza el tipo de informe a un valor permitido."""
+    normalized = (value or default).strip().lower()
+    return normalized
+
+
+def ensure_report_type_schema(conn):
+    """Garantiza columna report_type y normaliza datos históricos."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbinfpredef'
+                  AND column_name = 'report_type'
+            )
+            """
+        )
+        report_type_exists = bool(cur.fetchone()[0])
+
+        if not report_type_exists:
+            cur.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN report_type VARCHAR(20) NOT NULL DEFAULT 'simple'
+                """
+            )
+
+        # Backfill y saneamiento para plantillas existentes.
+        cur.execute(
+            """
+            UPDATE nextris.tbinfpredef
+            SET report_type = LOWER(TRIM(COALESCE(report_type, '')))
+            """
+        )
+        cur.execute(
+            """
+            UPDATE nextris.tbinfpredef
+            SET report_type = 'simple'
+            WHERE report_type = '' OR report_type IS NULL
+            """
+        )
+        cur.execute(
+            """
+            UPDATE nextris.tbinfpredef
+            SET report_type = 'simple'
+            WHERE report_type NOT IN ('simple', 'inteligente')
+            """
+        )
+
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def ensure_template_location_schema(conn):
+    """Garantiza tabla de relación plantilla-location para informes inteligentes."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.rel_infpredef_location (
+                guid VARCHAR(45) PRIMARY KEY,
+                template_id VARCHAR(45) NOT NULL,
+                location_id VARCHAR(45) NOT NULL,
+                created_on TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_rel_infpredef_location UNIQUE (template_id, location_id)
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def normalize_location_ids(raw_location_ids):
+    """Normaliza lista de location IDs eliminando vacíos y duplicados."""
+    if raw_location_ids is None:
+        return []
+
+    if not isinstance(raw_location_ids, list):
+        raise ValueError('location_ids debe ser una lista')
+
+    normalized = []
+    seen = set()
+    for value in raw_location_ids:
+        location_id = str(value).strip()
+        if not location_id:
+            continue
+        if location_id in seen:
+            continue
+        seen.add(location_id)
+        normalized.append(location_id)
+
+    return normalized
+
+
+def sync_template_locations(conn, template_id, location_ids):
+    """Sincroniza las locations asociadas a una plantilla."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM nextris.rel_infpredef_location WHERE template_id = %s",
+            (template_id,)
+        )
+
+        if location_ids:
+            insert_query = """
+                INSERT INTO nextris.rel_infpredef_location (guid, template_id, location_id)
+                VALUES (%s, %s, %s)
+            """
+            rows = [(str(uuid.uuid4()), template_id, location_id) for location_id in location_ids]
+            cur.executemany(insert_query, rows)
+
+        conn.commit()
+    finally:
+        cur.close()
 
 
 # ====================================================================
@@ -37,6 +163,7 @@ def get_templates():
     - study_type_id (optional): Filtrar por tipo de estudio
     - modality_id (optional): Filtrar por modalidad
     - bodypart_id (optional): Filtrar por parte del cuerpo
+    - report_type (optional): Filtrar por tipo de informe (simple/inteligente)
     - simple (optional): Si es true, devuelve solo guid, title y study_type_description
     
     Returns:
@@ -71,9 +198,18 @@ def get_templates():
         study_type_id = request.args.get('study_type_id')
         modality_id = request.args.get('modality_id')
         bodypart_id = request.args.get('bodypart_id')
+        report_type = normalize_report_type(request.args.get('report_type')) if request.args.get('report_type') else None
         simple = request.args.get('simple', 'false').lower() == 'true'
+
+        if report_type and report_type not in VALID_REPORT_TYPES:
+            return jsonify({
+                'success': False,
+                'message': 'report_type invalido. Valores permitidos: simple, inteligente'
+            }), 400
         
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
+        ensure_template_location_schema(conn)
         cur = conn.cursor()
         
         # Construir query con filtros dinámicos
@@ -90,7 +226,16 @@ def get_templates():
                 ip.findings,
                 ip.technique,
                 ip.impression,
-                ip.conclusion
+                ip.conclusion,
+                COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') AS report_type,
+                COALESCE(
+                    (
+                        SELECT ARRAY_AGG(rel.location_id ORDER BY rel.location_id)
+                        FROM nextris.rel_infpredef_location rel
+                        WHERE rel.template_id = ip.guid
+                    ),
+                    ARRAY[]::VARCHAR[]
+                ) AS location_ids
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -111,6 +256,10 @@ def get_templates():
         if bodypart_id:
             query += " AND ist.bodypart_id = %s"
             params.append(bodypart_id)
+
+        if report_type:
+            query += " AND COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = %s"
+            params.append(report_type)
         
         query += " ORDER BY ip.tittle ASC"
         
@@ -126,7 +275,9 @@ def get_templates():
                 templates.append({
                     'guid': row[0],
                     'title': row[1] or '',
-                    'study_type_description': row[3] or ''
+                    'study_type_description': row[3] or '',
+                    'report_type': row[12] or 'simple',
+                    'location_ids': row[13] or []
                 })
             else:
                 templates.append({
@@ -141,7 +292,9 @@ def get_templates():
                     'findings': row[8] or '',
                     'technique': row[9] or '',
                     'impression': row[10] or '',
-                    'conclusion': row[11] or ''
+                    'conclusion': row[11] or '',
+                    'report_type': row[12] or 'simple',
+                    'location_ids': row[13] or []
                 })
         
         return jsonify({
@@ -197,6 +350,8 @@ def get_template(template_id):
             }), 500
         
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
+        ensure_template_location_schema(conn)
         cur = conn.cursor()
         
         query = """
@@ -212,7 +367,16 @@ def get_template(template_id):
                 ip.findings,
                 ip.technique,
                 ip.impression,
-                ip.conclusion
+                ip.conclusion,
+                COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') AS report_type,
+                COALESCE(
+                    (
+                        SELECT ARRAY_AGG(rel.location_id ORDER BY rel.location_id)
+                        FROM nextris.rel_infpredef_location rel
+                        WHERE rel.template_id = ip.guid
+                    ),
+                    ARRAY[]::VARCHAR[]
+                ) AS location_ids
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -238,7 +402,9 @@ def get_template(template_id):
                 'findings': result[8] or '',
                 'technique': result[9] or '',
                 'impression': result[10] or '',
-                'conclusion': result[11] or ''
+                'conclusion': result[11] or '',
+                'report_type': result[12] or 'simple',
+                'location_ids': result[13] or []
             }
             
             return jsonify({
@@ -276,6 +442,7 @@ def create_template():
         "technique": "Texto de técnica",
         "impression": "Texto de impresión diagnóstica",
         "conclusion": "Texto de conclusión",
+        "report_type": "simple",
         "is_default": false
     }
     
@@ -318,19 +485,36 @@ def create_template():
         technique = data.get('technique', '').strip()
         impression = data.get('impression', '').strip()
         conclusion = data.get('conclusion', '').strip()
+        report_type = normalize_report_type(data.get('report_type'))
         is_default = data.get('is_default', False)
+
+        try:
+            location_ids = normalize_location_ids(data.get('location_ids', []))
+        except ValueError as validation_error:
+            return jsonify({
+                'success': False,
+                'message': str(validation_error)
+            }), 400
+
+        if report_type not in VALID_REPORT_TYPES:
+            return jsonify({
+                'success': False,
+                'message': 'report_type invalido. Valores permitidos: simple, inteligente'
+            }), 400
         
         # Generar nuevo GUID
         new_guid = str(uuid.uuid4())
         
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
+        ensure_template_location_schema(conn)
         cur = conn.cursor()
         
         # Insertar plantilla
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (guid, tittle, findings, impression, technique, conclusion, studytype_id, report_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cur.execute(insert_query, (
@@ -340,8 +524,15 @@ def create_template():
             impression,
             technique,
             conclusion,
-            study_type_id
+            study_type_id,
+            report_type
         ))
+
+        sync_template_locations(
+            conn,
+            new_guid,
+            location_ids if report_type == 'inteligente' else []
+        )
         
         # Si es default, actualizar el tipo de estudio
         if is_default:
@@ -417,6 +608,8 @@ def edit_template(template_id):
         
         # Validar que la plantilla existe
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
+        ensure_template_location_schema(conn)
         cur = conn.cursor()
         
         check_query = "SELECT guid FROM nextris.tbinfpredef WHERE guid = %s"
@@ -437,6 +630,22 @@ def edit_template(template_id):
         technique = data.get('technique', '').strip()
         impression = data.get('impression', '').strip()
         conclusion = data.get('conclusion', '').strip()
+        report_type_raw = data.get('report_type')
+        report_type = normalize_report_type(report_type_raw) if report_type_raw is not None else None
+
+        try:
+            location_ids = normalize_location_ids(data.get('location_ids', []))
+        except ValueError as validation_error:
+            return jsonify({
+                'success': False,
+                'message': str(validation_error)
+            }), 400
+
+        if report_type is not None and report_type not in VALID_REPORT_TYPES:
+            return jsonify({
+                'success': False,
+                'message': 'report_type invalido. Valores permitidos: simple, inteligente'
+            }), 400
         
         # Actualizar plantilla
         update_query = """
@@ -446,7 +655,8 @@ def edit_template(template_id):
                 impression = %s,
                 technique = %s,
                 conclusion = %s,
-                studytype_id = %s
+                studytype_id = %s,
+                report_type = COALESCE(%s, report_type)
             WHERE guid = %s
         """
         
@@ -457,8 +667,28 @@ def edit_template(template_id):
             technique,
             conclusion,
             study_type_id,
+            report_type,
             template_id
         ))
+
+        effective_report_type = report_type
+        if effective_report_type is None:
+            cur.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(LOWER(report_type)), ''), 'simple')
+                FROM nextris.tbinfpredef
+                WHERE guid = %s
+                """,
+                (template_id,)
+            )
+            report_type_row = cur.fetchone()
+            effective_report_type = report_type_row[0] if report_type_row else 'simple'
+
+        sync_template_locations(
+            conn,
+            template_id,
+            location_ids if effective_report_type == 'inteligente' else []
+        )
         
         conn.commit()
         cur.close()
@@ -511,6 +741,8 @@ def delete_template(template_id):
             }), 500
         
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
+        ensure_template_location_schema(conn)
         cur = conn.cursor()
         
         # Verificar que la plantilla existe
@@ -545,6 +777,12 @@ def delete_template(template_id):
             cur.execute(clear_default, (template_id,))
             print(f"[API TEMPLATES] Referencias de default eliminadas para la plantilla {template_id}")
         
+        # Eliminar relaciones de locations y luego la plantilla
+        cur.execute(
+            "DELETE FROM nextris.rel_infpredef_location WHERE template_id = %s",
+            (template_id,)
+        )
+
         # Eliminar la plantilla
         delete_query = "DELETE FROM nextris.tbinfpredef WHERE guid = %s"
         cur.execute(delete_query, (template_id,))
@@ -620,6 +858,7 @@ def set_default_template():
             }), 400
         
         conn = psycopg2.connect(**config)
+        ensure_report_type_schema(conn)
         cur = conn.cursor()
         
         # Verificar que el tipo de estudio existe

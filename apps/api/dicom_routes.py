@@ -271,6 +271,7 @@ def manual_unlinked_studies():
     """
     try:
         location_id = request.args.get('location_id', '')
+        all_locations = str(location_id).strip().lower() == 'all'
         
         conn = psycopg2.connect(**config)
         cursor = conn.cursor()
@@ -297,7 +298,7 @@ def manual_unlinked_studies():
         """
 
         params = []
-        if location_id:
+        if location_id and not all_locations:
             query += " AND location_id = %s"
             params.append(location_id)
 
@@ -328,7 +329,131 @@ def manual_unlinked_studies():
                 'file_size_mb': round(row[11] / (1024 * 1024), 2) if row[11] else 0,
                 'location_id': str(row[12]) if row[12] else None,
                 'instance_count': row[13],
+                'source': 'manual',
+                'pacs_study_pk': None,
             })
+
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
+
+        # Complementa el panel con estudios PACS sin vínculo activo.
+        if has_pacs_link_table:
+            if all_locations:
+                cursor.execute("""
+                    SELECT
+                        s.pk,
+                        s.study_iuid,
+                        s.accession_no,
+                        s.study_date,
+                        s.study_time,
+                        s.study_desc,
+                        COALESCE(pn.alphabetic_name, 'PACS SIN NOMBRE') AS patient_name,
+                        s.updated_time,
+                        STRING_AGG(DISTINCT sr.modality, ',') AS modalities
+                    FROM public.study s
+                    LEFT JOIN public.patient p ON p.pk = s.patient_fk
+                    LEFT JOIN public.person_name pn ON pn.pk = p.pat_name_fk
+                    LEFT JOIN nextris.tbpacs_study_link l
+                        ON l.pacs_study_pk = s.pk
+                       AND l.link_status = 'linked'
+                    LEFT JOIN public.series sr ON sr.study_fk = s.pk
+                    WHERE l.id IS NULL
+                    GROUP BY s.pk, s.study_iuid, s.accession_no, s.study_date, s.study_time,
+                             s.study_desc, pn.alphabetic_name, s.updated_time
+                    ORDER BY s.updated_time DESC NULLS LAST, s.pk DESC
+                    LIMIT 500
+                """)
+            elif location_id:
+                cursor.execute("""
+                    SELECT
+                        s.pk,
+                        s.study_iuid,
+                        s.accession_no,
+                        s.study_date,
+                        s.study_time,
+                        s.study_desc,
+                        COALESCE(pn.alphabetic_name, 'PACS SIN NOMBRE') AS patient_name,
+                        s.updated_time,
+                        STRING_AGG(DISTINCT sr.modality, ',') AS modalities
+                    FROM public.study s
+                    LEFT JOIN public.patient p ON p.pk = s.patient_fk
+                    LEFT JOIN public.person_name pn ON pn.pk = p.pat_name_fk
+                    LEFT JOIN nextris.tbpacs_study_link l
+                        ON l.pacs_study_pk = s.pk
+                       AND l.link_status = 'linked'
+                    LEFT JOIN public.series sr ON sr.study_fk = s.pk
+                    WHERE l.id IS NULL
+                      AND s.location_id = %s
+                    GROUP BY s.pk, s.study_iuid, s.accession_no, s.study_date, s.study_time,
+                             s.study_desc, pn.alphabetic_name, s.updated_time
+                    ORDER BY s.updated_time DESC NULLS LAST, s.pk DESC
+                    LIMIT 500
+                """, (location_id,))
+            else:
+                cursor.execute("""
+                    SELECT
+                        s.pk,
+                        s.study_iuid,
+                        s.accession_no,
+                        s.study_date,
+                        s.study_time,
+                        s.study_desc,
+                        COALESCE(pn.alphabetic_name, 'PACS SIN NOMBRE') AS patient_name,
+                        s.updated_time,
+                        STRING_AGG(DISTINCT sr.modality, ',') AS modalities
+                    FROM public.study s
+                    LEFT JOIN public.patient p ON p.pk = s.patient_fk
+                    LEFT JOIN public.person_name pn ON pn.pk = p.pat_name_fk
+                    LEFT JOIN nextris.tbpacs_study_link l
+                        ON l.pacs_study_pk = s.pk
+                       AND l.link_status = 'linked'
+                    LEFT JOIN public.series sr ON sr.study_fk = s.pk
+                    WHERE l.id IS NULL
+                    GROUP BY s.pk, s.study_iuid, s.accession_no, s.study_date, s.study_time,
+                             s.study_desc, pn.alphabetic_name, s.updated_time
+                    ORDER BY s.updated_time DESC NULLS LAST, s.pk DESC
+                    LIMIT 500
+                """)
+
+            pacs_rows = cursor.fetchall()
+
+            for pacs_row in pacs_rows:
+                pacs_pk = pacs_row[0]
+                pacs_iuid = pacs_row[1]
+                accession_no = pacs_row[2]
+                study_date = pacs_row[3]
+                study_time = pacs_row[4]
+                study_desc = pacs_row[5]
+                patient_name = pacs_row[6]
+                updated_time = pacs_row[7]
+                series_modalities = pacs_row[8] if pacs_row[8] else 'PACS'
+
+                studies.append({
+                    'guid': f'pacs:{pacs_pk}',
+                    'filename': None,
+                    'patient_name': patient_name,
+                    'patient_id': accession_no if accession_no else 'N/A',
+                    'study_date': study_date,
+                    'study_time': study_time,
+                    'study_description': study_desc if study_desc else 'PACS Study',
+                    'modality': series_modalities,
+                    'study_instance_uid': pacs_iuid,
+                    'accession_number': accession_no,
+                    'upload_date': updated_time.isoformat() if updated_time else None,
+                    'uploaded_by': 'PACS',
+                    'pacs_status': 'available',
+                    'file_size_mb': 0,
+                    'location_id': str(location_id) if (location_id and not all_locations) else None,
+                    'instance_count': 1,
+                    'source': 'pacs',
+                    'pacs_study_pk': pacs_pk,
+                })
         
         cursor.close()
         conn.close()
@@ -360,6 +485,7 @@ def dicom_search_examinations():
     try:
         # location_id opcional - puede buscar con location_id específico, NULL o todos
         location_id = request.args.get('location_id', '')
+        all_locations = str(location_id).strip().lower() == 'all'
 
         patient_name = request.args.get('patient_name', '')
         patient_id = request.args.get('patient_id', '')
@@ -388,7 +514,7 @@ def dicom_search_examinations():
         params = []
 
         # Filtrar por location_id si se proporciona
-        if location_id and location_id.strip():
+        if location_id and location_id.strip() and not all_locations:
             query += " AND e.location_id = %s"
             params.append(location_id)
         
@@ -456,21 +582,31 @@ def dicom_link_study():
     """
     try:
         data = request.get_json()
+        current_user = get_jwt_identity()
         
         upload_guid = data.get('upload_guid')
+        pacs_study_pk = data.get('pacs_study_pk')
+        request_study_instance_uid = data.get('study_instance_uid')
         examination_guid = data.get('examination_guid')
+        link_source = 'manual' if upload_guid else 'reconcile'
         
-        if not upload_guid or not examination_guid:
+        if not examination_guid:
             return jsonify({
                 'success': False,
-                'error': 'Se requieren upload_guid y examination_guid'
+                'error': 'Se requiere examination_guid'
+            }), 400
+
+        if not upload_guid and not pacs_study_pk and not request_study_instance_uid:
+            return jsonify({
+                'success': False,
+                'error': 'Se requiere upload_guid o pacs_study_pk o study_instance_uid'
             }), 400
         
         conn = psycopg2.connect(**config)
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT guid, localacc FROM nextris.tbexamination WHERE guid = %s",
+            "SELECT guid, localacc, studyinstanceuid FROM nextris.tbexamination WHERE guid = %s",
             (examination_guid,)
         )
         
@@ -483,43 +619,172 @@ def dicom_link_study():
                 'error': 'El examen especificado no existe'
             }), 404
         
-        # Obtener el study_instance_uid del registro seleccionado
-        cursor.execute(
-            "SELECT study_instance_uid, patient_name FROM nextris.tbmanual_uploads WHERE guid = %s",
-            (upload_guid,)
-        )
-        upload_row = cursor.fetchone()
-        if not upload_row:
-            cursor.close()
-            conn.close()
-            return jsonify({
-                'success': False,
-                'error': 'No se encontró el estudio cargado'
-            }), 404
+        study_instance_uid = None
+        patient_name = None
+        manual_upload_guid = None
 
-        study_instance_uid, patient_name = upload_row
+        if upload_guid:
+            # Obtener el study_instance_uid del registro seleccionado
+            cursor.execute(
+                "SELECT study_instance_uid, patient_name FROM nextris.tbmanual_uploads WHERE guid = %s",
+                (upload_guid,)
+            )
+            upload_row = cursor.fetchone()
+            if not upload_row:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró el estudio cargado'
+                }), 404
+            study_instance_uid, patient_name = upload_row
+            manual_upload_guid = upload_guid
+        elif pacs_study_pk:
+            cursor.execute(
+                "SELECT pk, study_iuid FROM public.study WHERE pk = %s",
+                (pacs_study_pk,)
+            )
+            pacs_row = cursor.fetchone()
+            if not pacs_row:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró el estudio PACS especificado'
+                }), 404
+            pacs_study_pk = pacs_row[0]
+            study_instance_uid = pacs_row[1]
+            patient_name = 'PACS Study'
+        else:
+            cursor.execute(
+                """
+                SELECT pk, study_iuid
+                FROM public.study
+                WHERE study_iuid = %s
+                ORDER BY updated_time DESC NULLS LAST, pk DESC
+                LIMIT 1
+                """,
+                (request_study_instance_uid,)
+            )
+            pacs_row = cursor.fetchone()
+            if not pacs_row:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró el estudio PACS para study_instance_uid'
+                }), 404
+            pacs_study_pk = pacs_row[0]
+            study_instance_uid = pacs_row[1]
+            patient_name = 'PACS Study'
 
-        # Marcar TODAS las instancias del mismo estudio como vinculadas
+        order_study_uuid = exam_result[2]
+
         cursor.execute("""
-            UPDATE nextris.tbmanual_uploads
-            SET
-                islinked = 1,
-                linked_examination_guid = %s,
-                linked_date = CURRENT_TIMESTAMP
-            WHERE study_instance_uid = %s AND islinked = 0
-            RETURNING guid, filename, patient_name, study_instance_uid
-        """, (examination_guid, study_instance_uid))
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
 
-        results = cursor.fetchall()
-        result = results[0] if results else None
+        resolved_pacs_study_pk = pacs_study_pk
+        pacs_study_iuid = study_instance_uid
+        if has_pacs_link_table and not resolved_pacs_study_pk:
+            cursor.execute("""
+                SELECT pk, study_iuid
+                FROM public.study
+                WHERE study_iuid = %s
+                ORDER BY updated_time DESC NULLS LAST, pk DESC
+                LIMIT 1
+            """, (study_instance_uid,))
+            pacs_study_row = cursor.fetchone()
+            if not pacs_study_row:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'El estudio no existe en PACS (public.study) para el StudyInstanceUID indicado'
+                }), 404
+            resolved_pacs_study_pk, pacs_study_iuid = pacs_study_row
 
-        if not result:
-            cursor.close()
-            conn.close()
-            return jsonify({
-                'success': False,
-                'error': 'No se encontró el estudio cargado'
-            }), 404
+        linked_by_user_guid = str(current_user) if current_user else None
+        linked_by_username = None
+        if linked_by_user_guid:
+            cursor.execute(
+                "SELECT username FROM nextris.tbuser WHERE guid = %s",
+                (linked_by_user_guid,)
+            )
+            user_row = cursor.fetchone()
+            linked_by_username = user_row[0] if user_row else None
+
+        result = None
+        if upload_guid:
+            # Marcar TODAS las instancias del mismo estudio como vinculadas
+            cursor.execute("""
+                UPDATE nextris.tbmanual_uploads
+                SET
+                    islinked = 1,
+                    linked_examination_guid = %s,
+                    linked_date = CURRENT_TIMESTAMP
+                WHERE study_instance_uid = %s AND islinked = 0
+                RETURNING guid, filename, patient_name, study_instance_uid
+            """, (examination_guid, study_instance_uid))
+
+            results = cursor.fetchall()
+            result = results[0] if results else None
+
+            if not result:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró el estudio cargado'
+                }), 404
+
+        if has_pacs_link_table:
+            # Si existe un vínculo activo previo del estudio o la orden, se cierra para dejar historial consistente.
+            cursor.execute("""
+                UPDATE nextris.tbpacs_study_link
+                SET link_status = 'unlinked',
+                    unlinked_at = CURRENT_TIMESTAMP,
+                    unlinked_reason = 'Relink manual desde /api/dicom/link-study',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE link_status = 'linked'
+                  AND (order_guid = %s OR pacs_study_pk = %s OR pacs_study_iuid = %s)
+            """, (examination_guid, resolved_pacs_study_pk, pacs_study_iuid))
+
+            cursor.execute("""
+                INSERT INTO nextris.tbpacs_study_link (
+                    pacs_study_pk,
+                    pacs_study_iuid,
+                    order_guid,
+                    order_study_uuid,
+                    manual_upload_guid,
+                    link_status,
+                    source,
+                    linked_at,
+                    linked_by_user_guid,
+                    linked_by_username,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    'linked', %s, CURRENT_TIMESTAMP,
+                    %s, %s,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+            """, (
+                resolved_pacs_study_pk,
+                pacs_study_iuid,
+                examination_guid,
+                order_study_uuid,
+                manual_upload_guid,
+                link_source,
+                linked_by_user_guid,
+                linked_by_username
+            ))
         
         # Actualizar tbexamination con el UID real del DICOM y marcar con imagen
         cursor.execute("""
@@ -533,22 +798,372 @@ def dicom_link_study():
         cursor.close()
         conn.close()
         
-        print(f"[LINK] Estudio {result[1]} vinculado a examen {examination_guid}")
+        log_name = result[1] if result else f"PACS:{resolved_pacs_study_pk or 'unknown'}"
+        print(f"[LINK] Estudio {log_name} vinculado a examen {examination_guid}")
         
         return jsonify({
             'success': True,
             'message': 'Estudio vinculado exitosamente',
             'data': {
-                'upload_guid': str(result[0]),
-                'filename': result[1],
-                'patient_name': result[2],
-                'study_instance_uid': result[3],
-                'linked_to': examination_guid
+                'upload_guid': str(result[0]) if result else None,
+                'filename': result[1] if result else None,
+                'patient_name': result[2] if result else patient_name,
+                'study_instance_uid': result[3] if result else study_instance_uid,
+                'pacs_study_pk': resolved_pacs_study_pk,
+                'linked_to': examination_guid,
+                'source': link_source
             }
         }), 200
         
     except Exception as e:
         print(f"[ERROR] Error vinculando estudio: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@api_blueprint.route('/dicom/linked-studies', methods=['GET'])
+@jwt_required()
+def dicom_linked_studies():
+    """
+    Lista vínculos activos entre estudios PACS/DICOM y órdenes RIS.
+    Soporta filtro opcional por location_id y el valor especial all.
+    """
+    try:
+        location_id = request.args.get('location_id', '')
+        all_locations = str(location_id).strip().lower() == 'all'
+
+        conn = psycopg2.connect(**config)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
+
+        links = []
+
+        if has_pacs_link_table:
+            query = """
+                SELECT
+                    l.id,
+                    l.order_guid,
+                    l.order_study_uuid,
+                    l.pacs_study_pk,
+                    l.pacs_study_iuid,
+                    l.manual_upload_guid,
+                    l.source,
+                    l.linked_at,
+                    l.linked_by_username,
+                    e.localacc,
+                    e.createdon,
+                    COALESCE(e.location_id::text, '') as exam_location_id,
+                    p.name as patient_name,
+                    p.nationalcode as patient_id,
+                    COALESCE(st.description, 'N/A') as study_type,
+                    s.accession_no,
+                    s.study_desc,
+                    COALESCE(pn.alphabetic_name, p.name, 'N/A') as pacs_patient_name
+                FROM nextris.tbpacs_study_link l
+                LEFT JOIN nextris.tbexamination e ON e.guid = l.order_guid
+                LEFT JOIN nextris.datapatient p ON p.guid = e.idpatient
+                LEFT JOIN nextris.isstudytype st ON st.guid = e.studytype_id
+                LEFT JOIN public.study s ON s.pk = l.pacs_study_pk
+                LEFT JOIN public.patient pp ON pp.pk = s.patient_fk
+                LEFT JOIN public.person_name pn ON pn.pk = pp.pat_name_fk
+                WHERE l.link_status = 'linked'
+            """
+
+            params = []
+            if location_id and not all_locations:
+                query += " AND e.location_id = %s"
+                params.append(location_id)
+
+            query += " ORDER BY l.linked_at DESC LIMIT 500"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            for row in rows:
+                links.append({
+                    'link_id': row[0],
+                    'examination_guid': str(row[1]) if row[1] else None,
+                    'order_study_uuid': str(row[2]) if row[2] else None,
+                    'pacs_study_pk': row[3],
+                    'study_instance_uid': row[4],
+                    'manual_upload_guid': str(row[5]) if row[5] else None,
+                    'source': row[6],
+                    'linked_at': row[7].isoformat() if row[7] else None,
+                    'linked_by': row[8],
+                    'order_accession': row[9] if row[9] else 'N/A',
+                    'order_date': row[10].isoformat() if row[10] else None,
+                    'location_id': row[11] if row[11] else None,
+                    'patient_name': row[12] if row[12] else 'N/A',
+                    'patient_id': row[13] if row[13] else 'N/A',
+                    'study_type': row[14] if row[14] else 'N/A',
+                    'pacs_accession': row[15] if row[15] else None,
+                    'pacs_study_description': row[16] if row[16] else None,
+                    'pacs_patient_name': row[17] if row[17] else 'N/A',
+                })
+        else:
+            query = """
+                SELECT
+                    MIN(mu.guid) as manual_upload_guid,
+                    mu.study_instance_uid,
+                    mu.linked_examination_guid,
+                    MAX(mu.linked_date) as linked_at,
+                    e.localacc,
+                    e.createdon,
+                    COALESCE(e.location_id::text, '') as exam_location_id,
+                    p.name as patient_name,
+                    p.nationalcode as patient_id,
+                    COALESCE(st.description, 'N/A') as study_type
+                FROM nextris.tbmanual_uploads mu
+                JOIN nextris.tbexamination e ON e.guid = mu.linked_examination_guid
+                LEFT JOIN nextris.datapatient p ON p.guid = e.idpatient
+                LEFT JOIN nextris.isstudytype st ON st.guid = e.studytype_id
+                WHERE mu.islinked = 1
+            """
+
+            params = []
+            if location_id and not all_locations:
+                query += " AND e.location_id = %s"
+                params.append(location_id)
+
+            query += """
+                GROUP BY mu.study_instance_uid, mu.linked_examination_guid,
+                         e.localacc, e.createdon, e.location_id,
+                         p.name, p.nationalcode, st.description
+                ORDER BY MAX(mu.linked_date) DESC
+                LIMIT 500
+            """
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            for row in rows:
+                links.append({
+                    'link_id': None,
+                    'examination_guid': str(row[2]) if row[2] else None,
+                    'order_study_uuid': None,
+                    'pacs_study_pk': None,
+                    'study_instance_uid': row[1],
+                    'manual_upload_guid': str(row[0]) if row[0] else None,
+                    'source': 'manual',
+                    'linked_at': row[3].isoformat() if row[3] else None,
+                    'linked_by': None,
+                    'order_accession': row[4] if row[4] else 'N/A',
+                    'order_date': row[5].isoformat() if row[5] else None,
+                    'location_id': row[6] if row[6] else None,
+                    'patient_name': row[7] if row[7] else 'N/A',
+                    'patient_id': row[8] if row[8] else 'N/A',
+                    'study_type': row[9] if row[9] else 'N/A',
+                    'pacs_accession': None,
+                    'pacs_study_description': None,
+                    'pacs_patient_name': row[7] if row[7] else 'N/A',
+                })
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'data': links,
+                'total': len(links)
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"[ERROR] Error obteniendo estudios vinculados: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@api_blueprint.route('/dicom/unlink-study', methods=['POST'])
+@jwt_required()
+def dicom_unlink_study():
+    """
+    Desvincula un estudio de una orden.
+    Acepta link_id (tbpacs_study_link) o combinación de examination_guid + pacs_study_pk/study_instance_uid.
+    """
+    try:
+        data = request.get_json() or {}
+        link_id = data.get('link_id')
+        examination_guid = data.get('examination_guid')
+        pacs_study_pk = data.get('pacs_study_pk')
+        study_instance_uid = data.get('study_instance_uid')
+        reason = data.get('reason', 'Desvinculación manual desde UI')
+
+        conn = psycopg2.connect(**config)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
+
+        unlinked_order_guid = None
+        unlinked_study_iuid = None
+
+        if has_pacs_link_table:
+            if link_id is not None:
+                cursor.execute("""
+                    UPDATE nextris.tbpacs_study_link
+                    SET link_status = 'unlinked',
+                        unlinked_at = CURRENT_TIMESTAMP,
+                        unlinked_reason = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                      AND link_status = 'linked'
+                    RETURNING order_guid, pacs_study_iuid
+                """, (reason, link_id))
+            else:
+                if not examination_guid:
+                    cursor.close()
+                    conn.close()
+                    return jsonify({
+                        'success': False,
+                        'error': 'Se requiere link_id o examination_guid'
+                    }), 400
+
+                query = """
+                    UPDATE nextris.tbpacs_study_link
+                    SET link_status = 'unlinked',
+                        unlinked_at = CURRENT_TIMESTAMP,
+                        unlinked_reason = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE link_status = 'linked'
+                      AND order_guid = %s
+                """
+                params = [reason, examination_guid]
+
+                if pacs_study_pk is not None:
+                    query += " AND pacs_study_pk = %s"
+                    params.append(pacs_study_pk)
+                elif study_instance_uid:
+                    query += " AND pacs_study_iuid = %s"
+                    params.append(study_instance_uid)
+
+                query += " RETURNING order_guid, pacs_study_iuid"
+                cursor.execute(query, tuple(params))
+
+            updated_rows = cursor.fetchall()
+            if not updated_rows:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró un vínculo activo para desvincular'
+                }), 404
+
+            unlinked_order_guid = updated_rows[0][0]
+            unlinked_study_iuid = updated_rows[0][1]
+        else:
+            if not examination_guid:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'Se requiere examination_guid cuando no existe tbpacs_study_link'
+                }), 400
+
+            manual_query = """
+                UPDATE nextris.tbmanual_uploads
+                SET islinked = 0,
+                    linked_examination_guid = NULL,
+                    linked_date = NULL
+                WHERE islinked = 1
+                  AND linked_examination_guid = %s
+            """
+            manual_params = [examination_guid]
+
+            if study_instance_uid:
+                manual_query += " AND study_instance_uid = %s"
+                manual_params.append(study_instance_uid)
+
+            manual_query += " RETURNING linked_examination_guid, study_instance_uid"
+            cursor.execute(manual_query, tuple(manual_params))
+            updated_rows = cursor.fetchall()
+
+            if not updated_rows:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'No se encontró un vínculo manual activo para desvincular'
+                }), 404
+
+            unlinked_order_guid = updated_rows[0][0]
+            unlinked_study_iuid = updated_rows[0][1]
+
+        if unlinked_order_guid and unlinked_study_iuid:
+            # Limpia legacy manual_uploads para todos los archivos de ese estudio/orden.
+            cursor.execute("""
+                UPDATE nextris.tbmanual_uploads
+                SET islinked = 0,
+                    linked_examination_guid = NULL,
+                    linked_date = NULL
+                WHERE linked_examination_guid = %s
+                  AND study_instance_uid = %s
+                  AND islinked = 1
+            """, (unlinked_order_guid, unlinked_study_iuid))
+
+        active_link_count = 0
+        if has_pacs_link_table and unlinked_order_guid:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM nextris.tbpacs_study_link
+                WHERE order_guid = %s
+                  AND link_status = 'linked'
+            """, (unlinked_order_guid,))
+            active_link_count = cursor.fetchone()[0]
+
+        active_manual_count = 0
+        if unlinked_order_guid:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM nextris.tbmanual_uploads
+                WHERE linked_examination_guid = %s
+                  AND islinked = 1
+            """, (unlinked_order_guid,))
+            active_manual_count = cursor.fetchone()[0]
+
+        if unlinked_order_guid and active_link_count == 0 and active_manual_count == 0:
+            cursor.execute("""
+                UPDATE nextris.tbexamination
+                SET isimage = 0
+                WHERE guid = %s
+            """, (unlinked_order_guid,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Estudio desvinculado exitosamente',
+            'data': {
+                'examination_guid': str(unlinked_order_guid) if unlinked_order_guid else None,
+                'study_instance_uid': unlinked_study_iuid,
+                'remaining_active_links': active_link_count,
+                'remaining_active_manual_links': active_manual_count
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"[ERROR] Error desvinculando estudio: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

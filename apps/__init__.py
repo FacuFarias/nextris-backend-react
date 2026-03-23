@@ -35,14 +35,18 @@ def register_context_processors(app):
         }
 
 
-def register_blueprints(app):
-    for module_name in ('authentication', 'home'):
-        module = import_module('apps.{}.routes'.format(module_name))
-        app.register_blueprint(module.blueprint)
-    
-    # Registrar API blueprint
+def register_blueprints(app, enable_legacy_ui=False):
+    # La API debe estar siempre disponible para frontend React y clientes externos.
     from apps.api import api_blueprint
+    from apps.home.controllers.structured_reports_controller import structured_reports_bp
+
     app.register_blueprint(api_blueprint)
+    app.register_blueprint(structured_reports_bp)
+
+    if enable_legacy_ui:
+        for module_name in ('authentication', 'home'):
+            module = import_module('apps.{}.routes'.format(module_name))
+            app.register_blueprint(module.blueprint)
 
 
 def configure_database(app):
@@ -73,8 +77,12 @@ def configure_database(app):
 def create_app(config):
     app = Flask(__name__)
     app.config.from_object(config)
+
+    enable_legacy_ui = app.config.get('ENABLE_LEGACY_UI', False)
+
     register_extensions(app)
-    register_context_processors(app)
-    register_blueprints(app)
+    if enable_legacy_ui:
+        register_context_processors(app)
+    register_blueprints(app, enable_legacy_ui=enable_legacy_ui)
     configure_database(app)
     return app

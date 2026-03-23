@@ -8,6 +8,8 @@ from flask_login import current_user
 import os
 import uuid
 import shutil
+import html
+import re
 import psycopg2
 import smtplib
 from datetime import datetime
@@ -125,6 +127,61 @@ def draw_text_section(c, title, content, y_pos, max_width):
     
     return y_pos - 10  # Espacio adicional entre secciones
 
+
+def _resolve_pdf_asset_path(path_candidate, app_root):
+    """Resuelve rutas de assets usadas en PDF para no depender del cwd del proceso."""
+    if not path_candidate:
+        return None
+
+    raw_path = str(path_candidate).strip()
+    if not raw_path:
+        return None
+
+    normalized = raw_path.replace('\\', '/')
+
+    # Si ya es absoluta y existe, usarla tal cual.
+    if os.path.isabs(normalized) and os.path.exists(normalized):
+        return normalized
+
+    candidates = [
+        os.path.join(app_root, normalized.lstrip('/')),
+    ]
+
+    if normalized.startswith('/static/'):
+        candidates.append(os.path.join(app_root, 'apps', normalized.lstrip('/')))
+
+    if normalized.startswith('apps/'):
+        candidates.append(os.path.join(app_root, normalized))
+
+    for candidate in candidates:
+        candidate_abs = os.path.abspath(candidate)
+        if os.path.exists(candidate_abs):
+            return candidate_abs
+
+    return None
+
+
+def _normalize_report_text_for_pdf(content):
+    """Convierte HTML/RichText a texto plano legible para el PDF."""
+    if content is None:
+        return ''
+
+    text = str(content)
+
+    # Mantener estructura básica de bloques antes de limpiar etiquetas.
+    text = re.sub(r'(?i)<br\s*/?>', '\n', text)
+    text = re.sub(r'(?i)</p\s*>', '\n', text)
+    text = re.sub(r'(?i)</div\s*>', '\n', text)
+    text = re.sub(r'(?i)</li\s*>', '\n', text)
+
+    # Eliminar etiquetas HTML y decodificar entidades.
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text)
+
+    # Normalizar espacios sin romper saltos de línea.
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
+    return '\n'.join(lines).strip()
+
 def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_filename=None):
     """
     Genera un PDF completo del reporte con firma digital.
@@ -142,6 +199,13 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         from reportlab.lib.pagesizes import letter
         from reportlab.lib.units import inch
         import psycopg2
+
+        # Raíz del proyecto nextris-dev-react (independiente del cwd del servicio)
+        app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+        # Forzar directorio de salida absoluto para que siempre quede en el repo.
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.join(app_root, output_dir)
         
         # Configuración de base de datos
         config = {
@@ -157,28 +221,50 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         
         # Consulta para obtener datos del reporte incluyendo iduser
         query = """
-            SELECT p.Surname, p.Name, st.Description, rep.Date, rep.idreferringphysician, 
+            WITH selected_report AS (
+                SELECT rep.*
+                FROM nextris.tbreport rep
+                WHERE rep.IdExamination = %s
+                ORDER BY
+                    CASE
+                        WHEN COALESCE(NULLIF(BTRIM(rep.Findings), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.Techniques), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.Impressions), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.Conclusions), ''), '') <> ''
+                        THEN 0 ELSE 1
+                    END,
+                    COALESCE(rep.WasSaved, FALSE) DESC,
+                    rep.Date DESC NULLS LAST,
+                    rep.Guid DESC
+                LIMIT 1
+            )
+                 SELECT p.Surname, p.Name, st.Description, rep.Date,
+                     COALESCE(NULLIF(u_ref.username, ''), rep.idreferringphysician::text) AS referring_physician_name,
                    rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
-            FROM nextris.tbreport rep
+            FROM selected_report rep
             LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
             LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.Guid
-            LEFT JOIN nextris.datapatient p ON p.guid = rep.IdPatient
-            WHERE rep.IdExamination = %s
+            LEFT JOIN nextris.datapatient p ON p.guid = COALESCE(rep.IdPatient, tbex.IdPatient)
+                 LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = rep.idreferringphysician
         """
         
         print(f"[PDF_GEN] Ejecutando query para obtener datos del reporte...")
         cursor.execute(query, (report_id,))
-        result = cursor.fetchall()
-        print(f"[PDF_GEN] Resultado de query: {result is not None}, registros: {len(result) if result else 0}")
-        
-        if not result:
+        data = cursor.fetchone()
+        print(f"[PDF_GEN] Resultado de query: {data is not None}")
+
+        if not data:
             print(f"[ERROR] No se encontraron datos para el reporte: {report_id}")
             cursor.close()
             connection.close()
             return None
-            
-        data = result[0]
+
         surname, name, examen, fecha, refmed, findings, techniques, impressions, conclusions, userid = data
+
+        findings = _normalize_report_text_for_pdf(findings)
+        techniques = _normalize_report_text_for_pdf(techniques)
+        impressions = _normalize_report_text_for_pdf(impressions)
+        conclusions = _normalize_report_text_for_pdf(conclusions)
 
         # Crear directorio si no existe
         if not os.path.exists(output_dir):
@@ -193,29 +279,99 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         c = canvas.Canvas(pdf_file_path, pagesize=letter)
         width, height = letter
 
-        # Obtener datos institucionales
-        inst_query = "SELECT name, address, phone, mail, logo_path FROM nextris.isbasicinformation ORDER BY guid ASC LIMIT 1"
-        cursor.execute(inst_query)
-        inst_result = cursor.fetchall()
-        
-        if inst_result:
-            institucion = inst_result[0]
-            nombre_inst = institucion[0] or 'NEXTRIS'
-            direccion_inst = institucion[1] or ''
-            telefono_inst = institucion[2] or ''
-            mail_inst = institucion[3] or ''
-            logo_path_db = institucion[4]
-        else:
-            nombre_inst = 'NEXTRIS'
-            direccion_inst = ''
-            telefono_inst = ''
-            mail_inst = ''
-            logo_path_db = None
+        # Obtener datos institucionales (prioridad: ubicación del examen).
+        nombre_inst = 'NEXTRIS'
+        direccion_inst = ''
+        telefono_inst = ''
+        mail_inst = ''
+        logo_path_db = None
+
+        inst_by_location_query = """
+            SELECT loc.name, loc.address, loc.phone, loc.mail, loc.logo_path, loc.facility_id
+            FROM nextris.tbexamination ex
+            LEFT JOIN nextris.isequipment eq ON eq.guid = ex.idequipment
+            LEFT JOIN nextris.tblocation loc ON loc.guid = COALESCE(ex.location_id, eq.location_id)
+            WHERE ex.guid = %s
+            LIMIT 1
+        """
+
+        inst_fallback = None
+        facility_fallback = None
+
+        try:
+            cursor.execute(inst_by_location_query, (report_id,))
+            inst_location = cursor.fetchone()
+
+            if inst_location:
+                nombre_inst = inst_location[0] or nombre_inst
+                direccion_inst = inst_location[1] or direccion_inst
+                telefono_inst = inst_location[2] or telefono_inst
+                mail_inst = inst_location[3] or mail_inst
+                logo_path_db = inst_location[4] or logo_path_db
+
+                facility_id = inst_location[5]
+                if facility_id:
+                    try:
+                        cursor.execute(
+                            "SELECT name, email FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
+                            (facility_id,),
+                        )
+                        facility_fallback = cursor.fetchone()
+                    except Exception as facility_error:
+                        print(f"[WARNING] No se pudieron cargar datos de facility fallback: {facility_error}")
+        except Exception as inst_error:
+            print(f"[WARNING] No se pudieron cargar datos de location para encabezado PDF: {inst_error}")
+
+        # Fallback legacy opcional: en algunos entornos esta tabla no existe.
+        try:
+            cursor.execute("SELECT name, address, phone, mail, logo_path FROM nextris.isbasicinformation ORDER BY guid ASC LIMIT 1")
+            inst_fallback = cursor.fetchone()
+        except Exception:
+            inst_fallback = None
+
+        if facility_fallback:
+            nombre_inst = nombre_inst or facility_fallback[0] or 'NEXTRIS'
+            mail_inst = mail_inst or facility_fallback[1] or ''
+
+        if inst_fallback:
+            nombre_inst = nombre_inst or inst_fallback[0] or 'NEXTRIS'
+            direccion_inst = direccion_inst or inst_fallback[1] or ''
+            telefono_inst = telefono_inst or inst_fallback[2] or ''
+            mail_inst = mail_inst or inst_fallback[3] or ''
+            logo_path_db = logo_path_db or inst_fallback[4]
 
         # Añadir logo si existe
-        logo_to_use = logo_path_db if logo_path_db else 'apps/static/assets/img/icono.jpg'
+        logo_to_use = _resolve_pdf_asset_path(logo_path_db, app_root)
+        if not logo_to_use:
+            logo_to_use = _resolve_pdf_asset_path('apps/static/assets/img/icono.jpg', app_root)
         try:
-            c.drawImage(logo_to_use, 50, height - 125, width=2*inch, preserveAspectRatio=True, mask='auto')
+            if logo_to_use:
+                from reportlab.lib.utils import ImageReader
+
+                image_reader = ImageReader(logo_to_use)
+                img_width, img_height = image_reader.getSize()
+
+                max_logo_width = 140
+                max_logo_height = 90
+                scale = min(max_logo_width / float(img_width), max_logo_height / float(img_height))
+                draw_width = float(img_width) * scale
+                draw_height = float(img_height) * scale
+
+                logo_x = 50
+                logo_box_top = height - 40
+                logo_y = logo_box_top - draw_height
+
+                c.drawImage(
+                    logo_to_use,
+                    logo_x,
+                    logo_y,
+                    width=draw_width,
+                    height=draw_height,
+                    preserveAspectRatio=True,
+                    mask='auto'
+                )
+            else:
+                print("[PDF_GEN] No se encontró logo institucional ni logo por defecto")
         except Exception as e:
             print(f"No se pudo cargar el logo: {e}")
 
@@ -234,7 +390,7 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         c.setFont("Helvetica", 12)
         c.drawString(50, height - 180, f"Paciente: {name or ''}, {surname or ''}")
         c.drawString(50, height - 200, f"Fecha: {fecha or 'N/A'}")
-        c.drawString(50, height - 220, f"ID del Médico Referente: {refmed or 'N/A'}")
+        c.drawString(50, height - 220, f"Médico Referente: {refmed or 'No proporcionado'}")
 
         # Contenido del reporte
         y_position = height - 260
@@ -247,24 +403,7 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         ]
 
         for title, content in sections:
-            if y_position < 100:  # Nueva página si no hay espacio
-                c.showPage()
-                y_position = height - 50
-                
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(50, y_position, title)
-            y_position -= 20
-            
-            c.setFont("Helvetica", 12)
-            # Dividir el contenido en líneas
-            lines = content.split('\n')
-            for line in lines:
-                if y_position < 50:
-                    c.showPage()
-                    y_position = height - 50
-                c.drawString(50, y_position, line)
-                y_position -= 15
-            y_position -= 10
+            y_position = draw_text_section(c, title, content, y_position, width - 50)
 
         # ===== AGREGAR FIRMA DIGITAL =====
         if userid:
@@ -715,12 +854,14 @@ def firmar_reporte():
             
             # Consulta para obtener datos completos del reporte
             query = """
-                SELECT p.surname, p.name, st.description, rep.date, rep.idreferringphysician, 
+                  SELECT p.surname, p.name, st.description, rep.date,
+                      COALESCE(NULLIF(u_ref.username, ''), rep.idreferringphysician::text) AS referring_physician_name,
                        rep.findings, rep.techniques, rep.impressions, rep.conclusions
                 FROM nextris.tbreport rep
                 LEFT JOIN nextris.tbexamination tbex ON tbex.guid = rep.idexamination
                 LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.guid
                 LEFT JOIN nextris.datapatient p ON p.patientid = rep.idpatient
+                  LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = rep.idreferringphysician
                 WHERE rep.idexamination = %s
             """
             
@@ -734,7 +875,7 @@ def firmar_reporte():
                 surname = name = "Información pendiente"
                 examen = "Examen médico"
                 fecha = datetime.now().strftime('%d/%m/%Y')
-                refmed = "N/A"
+                refmed = "No proporcionado"
                 findings = techniques = impressions = conclusions = ""
             
             # Crear el PDF
@@ -799,7 +940,7 @@ def firmar_reporte():
             y_position -= 20
             c.drawString(50, y_position, f"Fecha: {fecha or 'N/A'}")
             y_position -= 20
-            c.drawString(50, y_position, f"ID del Médico Referente: {refmed or 'N/A'}")
+            c.drawString(50, y_position, f"Médico Referente: {refmed or 'No proporcionado'}")
             y_position -= 40
             
             # Añadir contenido médico usando la nueva función

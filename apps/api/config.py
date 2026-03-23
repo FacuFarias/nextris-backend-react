@@ -5,7 +5,7 @@ Endpoints para gestión de configuraciones, tipos de estudio, equipos, ubicacion
 """
 
 from flask import request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import psycopg2
 from apps.api import api_blueprint
 from apps.api.permissions import (
@@ -15,6 +15,7 @@ from apps.api.permissions import (
     get_user_permission_codes,
     get_default_permissions_for_role,
     replace_user_permissions,
+    normalize_permission_codes,
     require_permission,
 )
 import uuid
@@ -22,9 +23,13 @@ import os
 import smtplib
 import secrets
 import string
+import hashlib
+import json
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from PIL import Image
 
 
 def get_db_config():
@@ -36,6 +41,165 @@ def get_db_config():
         return None
 
 
+def normalize_user_id(identity):
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
+
+
+def _column_exists(connection, schema_name, table_name, column_name):
+    """Check if a column exists to keep API compatible across schema versions."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s AND column_name = %s
+            LIMIT 1
+            """,
+            (schema_name, table_name, column_name),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        cursor.close()
+
+
+def _table_exists(connection, schema_name, table_name):
+    """Check if a table exists before using it in joins."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = %s
+            LIMIT 1
+            """,
+            (schema_name, table_name),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        cursor.close()
+
+
+def ensure_facility_patientdomain_column(connection):
+    """Ensure facility has patient domain column and keep legacy location data synchronized."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tbfacility
+            ADD COLUMN IF NOT EXISTS id_patientdomain VARCHAR(50)
+            """
+        )
+
+        # Backfill facility domain from legacy location-level domain values.
+        cursor.execute(
+            """
+            UPDATE nextris.tbfacility f
+            SET id_patientdomain = src.id_patientdomain
+            FROM (
+                SELECT facility_id, MIN(id_patientdomain) AS id_patientdomain
+                FROM nextris.tblocation
+                WHERE id_patientdomain IS NOT NULL
+                  AND id_patientdomain <> ''
+                  AND facility_id IS NOT NULL
+                GROUP BY facility_id
+            ) src
+            WHERE f.guid = src.facility_id
+              AND (f.id_patientdomain IS NULL OR f.id_patientdomain = '')
+            """
+        )
+
+        # Keep tblocation.id_patientdomain aligned with the inherited facility domain.
+        cursor.execute(
+            """
+            UPDATE nextris.tblocation l
+            SET id_patientdomain = f.id_patientdomain
+            FROM nextris.tbfacility f
+            WHERE l.facility_id = f.guid
+              AND f.id_patientdomain IS NOT NULL
+              AND f.id_patientdomain <> ''
+              AND COALESCE(l.id_patientdomain, '') <> f.id_patientdomain
+            """
+        )
+
+        connection.commit()
+    finally:
+        cursor.close()
+
+
+def ensure_location_status_column(connection):
+    """Ensure tblocation has status column and initialize legacy rows as Active."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tblocation
+            ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Active'
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE nextris.tblocation
+            SET status = 'Active'
+            WHERE status IS NULL OR BTRIM(status) = ''
+            """
+        )
+        connection.commit()
+    finally:
+        cursor.close()
+
+
+def _process_location_logo(logo_file, location_id):
+    """Procesa y guarda el logo de una location y devuelve la ruta relativa."""
+    try:
+        allowed_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp'}
+        safe_name = secure_filename(logo_file.filename or '')
+        ext = os.path.splitext(safe_name)[1].lower()
+
+        if ext not in allowed_extensions:
+            return None
+
+        logo_dir = os.path.join('apps', 'static', 'assets', 'img', 'location_logos')
+        os.makedirs(logo_dir, exist_ok=True)
+
+        logo_filename = f"location_{location_id}{ext}"
+        logo_full_path = os.path.join(logo_dir, logo_filename)
+
+        img = Image.open(logo_file)
+
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+
+        size = (200, 200)
+        canvas = Image.new('RGBA', size, (255, 255, 255, 0))
+        ratio = min(size[0] / img.width, size[1] / img.height)
+        new_size = (int(img.width * ratio), int(img.height * ratio))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+        paste_pos = ((size[0] - new_size[0]) // 2, (size[1] - new_size[1]) // 2)
+        canvas.paste(img, paste_pos)
+
+        if ext in ['.jpg', '.jpeg']:
+            rgb_img = Image.new('RGB', size, (255, 255, 255))
+            rgb_img.paste(canvas, mask=canvas.split()[3])
+            rgb_img.save(logo_full_path, quality=95)
+        else:
+            canvas.save(logo_full_path)
+
+        return logo_full_path.replace('\\', '/')
+    except Exception:
+        return None
+
+
+def _get_signature_upload_dir():
+    """Build an absolute upload path for user signatures under project media/firmas."""
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    return os.path.join(project_root, 'media', 'firmas')
+
+
 def sync_user_patientdomains_from_user_locations(connection, user_id):
     """
     Sincroniza rel_user_patientdomain con las locations del usuario.
@@ -44,14 +208,16 @@ def sync_user_patientdomains_from_user_locations(connection, user_id):
     """
     cursor = connection.cursor()
     try:
+        ensure_facility_patientdomain_column(connection)
+
         cursor.execute(
             """
-            SELECT DISTINCT l.id_patientdomain
+            SELECT DISTINCT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
             FROM nextris.rel_user_location rul
             INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
             WHERE rul.user_id = %s
-              AND l.id_patientdomain IS NOT NULL
-              AND l.id_patientdomain <> ''
+              AND COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) IS NOT NULL
             """,
             (user_id,),
         )
@@ -113,6 +279,185 @@ def ensure_user_medical_table(connection):
 def generate_temporary_password(length=10):
     alphabet = string.ascii_letters + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+DEFAULT_OPTIONAL_MODULES = [
+    {
+        'code': 'appointments',
+        'name': 'Citas',
+        'description': 'Creacion de citas, admision por cita, agendas por medico o maquina.',
+    },
+    {
+        'code': 'structured_reports',
+        'name': 'Reportes estructurados',
+        'description': 'Parsers, mapeo de variables, conceptos y criterios, plantillas inteligentes.',
+    },
+    {
+        'code': 'nexi',
+        'name': 'Nexi',
+        'description': 'Asistente Nexi y sus vistas de interaccion.',
+    },
+    {
+        'code': 'patient_portal',
+        'name': 'Portal de pacientes',
+        'description': 'Acceso para pacientes a sus estudios y reportes.',
+    },
+]
+
+
+def _build_module_change_hash(prev_hash, payload_dict):
+    """Build a deterministic SHA-256 hash for tamper-evident audit records."""
+    envelope = {
+        'prev_hash': prev_hash or '',
+        **payload_dict,
+    }
+    serialized = json.dumps(envelope, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+
+def ensure_facility_module_tables(connection):
+    """Ensure module catalog and facility-module relation tables exist and are seeded."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.ismodule (
+                guid VARCHAR(50) PRIMARY KEY,
+                code VARCHAR(50) NOT NULL UNIQUE,
+                name VARCHAR(120) NOT NULL,
+                description TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.rel_facility_module (
+                guid VARCHAR(50) PRIMARY KEY,
+                facility_id VARCHAR(50) NOT NULL,
+                module_id VARCHAR(50) NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_rel_facility_module UNIQUE (facility_id, module_id),
+                CONSTRAINT fk_rel_facility_module_facility
+                    FOREIGN KEY (facility_id) REFERENCES nextris.tbfacility(guid) ON DELETE CASCADE,
+                CONSTRAINT fk_rel_facility_module_module
+                    FOREIGN KEY (module_id) REFERENCES nextris.ismodule(guid) ON DELETE CASCADE
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.audit_facility_module_change (
+                id BIGSERIAL PRIMARY KEY,
+                guid VARCHAR(50) NOT NULL UNIQUE,
+                facility_id VARCHAR(50) NOT NULL,
+                module_id VARCHAR(50) NOT NULL,
+                module_code VARCHAR(50) NOT NULL,
+                action VARCHAR(20) NOT NULL,
+                previous_is_active BOOLEAN NOT NULL,
+                new_is_active BOOLEAN NOT NULL,
+                changed_by_user_id VARCHAR(50) NOT NULL,
+                changed_by_username VARCHAR(150),
+                changed_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                reason TEXT,
+                request_ip VARCHAR(64),
+                user_agent TEXT,
+                prev_hash VARCHAR(64),
+                row_hash VARCHAR(64) NOT NULL,
+                CONSTRAINT fk_audit_facility_module_change_facility
+                    FOREIGN KEY (facility_id) REFERENCES nextris.tbfacility(guid),
+                CONSTRAINT fk_audit_facility_module_change_module
+                    FOREIGN KEY (module_id) REFERENCES nextris.ismodule(guid),
+                CONSTRAINT ck_audit_facility_module_change_action
+                    CHECK (action IN ('enabled', 'disabled'))
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_audit_facility_module_change_facility_changed_at
+            ON nextris.audit_facility_module_change (facility_id, changed_at DESC)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE OR REPLACE FUNCTION nextris.prevent_audit_facility_module_change_mutation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION 'audit_facility_module_change es append-only y no permite UPDATE/DELETE';
+            END;
+            $$
+            """
+        )
+
+        cursor.execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgname = 'trg_prevent_audit_facility_module_change_mutation'
+                ) THEN
+                    CREATE TRIGGER trg_prevent_audit_facility_module_change_mutation
+                    BEFORE UPDATE OR DELETE ON nextris.audit_facility_module_change
+                    FOR EACH ROW
+                    EXECUTE FUNCTION nextris.prevent_audit_facility_module_change_mutation();
+                END IF;
+            END $$;
+            """
+        )
+
+        cursor.executemany(
+            """
+            INSERT INTO nextris.ismodule (guid, code, name, description, is_active)
+            VALUES (%s, %s, %s, %s, TRUE)
+            ON CONFLICT (code) DO UPDATE SET
+                name = EXCLUDED.name,
+                description = EXCLUDED.description,
+                updated_at = NOW()
+            """,
+            [
+                (str(uuid.uuid4()), module['code'], module['name'], module['description'])
+                for module in DEFAULT_OPTIONAL_MODULES
+            ],
+        )
+
+        cursor.execute(
+            """
+            SELECT f.guid, m.guid
+            FROM nextris.tbfacility f
+            CROSS JOIN nextris.ismodule m
+            LEFT JOIN nextris.rel_facility_module rel
+                ON rel.facility_id = f.guid
+               AND rel.module_id = m.guid
+            WHERE rel.guid IS NULL
+            """
+        )
+        missing_relations = cursor.fetchall()
+
+        if missing_relations:
+            cursor.executemany(
+                """
+                INSERT INTO nextris.rel_facility_module (guid, facility_id, module_id, is_active)
+                VALUES (%s, %s, %s, TRUE)
+                """,
+                [(str(uuid.uuid4()), facility_id, module_id) for facility_id, module_id in missing_relations],
+            )
+
+        connection.commit()
+    finally:
+        cursor.close()
 
 
 def send_new_user_credentials_email(connection, email, username, temporary_password, full_name):
@@ -1761,6 +2106,8 @@ def get_locations():
     }
     """
     try:
+        include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+
         config = get_db_config()
         if not config:
             return jsonify({
@@ -1770,15 +2117,28 @@ def get_locations():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_facility_patientdomain_column(connection)
+        ensure_location_status_column(connection)
         
         query = """
-            SELECT l.guid, l.facility_id, l.name, l.code, l.address, l.phone, l.status, 
-                   l.created_at, l.updated_at, l.id_patientdomain, l.mail, l.logo_path, 
+            SELECT l.guid, l.facility_id, l.name, l.code, l.address, l.phone, l.status,
+                   l.created_at, l.updated_at,
+                   COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) AS id_patientdomain,
+                   pd.description AS patientdomain_name,
+                   l.mail, l.logo_path,
                    l.geographic_location, l.timezone, f.name as facility_name
             FROM nextris.tblocation l
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
-            ORDER BY l.name
+            LEFT JOIN nextris.ispatientdomain pd
+                ON pd.guid = COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
         """
+
+        if include_inactive:
+            query += " ORDER BY l.name"
+        else:
+            query += " WHERE LOWER(COALESCE(NULLIF(BTRIM(l.status), ''), 'Active')) = 'active' ORDER BY l.name"
+
         cursor.execute(query)
         results = cursor.fetchall()
         
@@ -1790,7 +2150,7 @@ def get_locations():
             locations.append({
                 'guid': row[0],
                 'facility_id': row[1],
-                'facility_name': row[14],
+                'facility_name': row[15],
                 'name': row[2],
                 'code': row[3],
                 'address': row[4],
@@ -1799,10 +2159,11 @@ def get_locations():
                 'created_at': row[7].isoformat() if row[7] else None,
                 'updated_at': row[8].isoformat() if row[8] else None,
                 'id_patientdomain': row[9],
-                'mail': row[10],
-                'logo_path': row[11],
-                'geographic_location': row[12],
-                'timezone': row[13]
+                'patientdomain_name': row[10],
+                'mail': row[11],
+                'logo_path': row[12],
+                'geographic_location': row[13],
+                'timezone': row[14]
             })
         
         return jsonify({
@@ -1868,8 +2229,8 @@ def create_location():
         code = data.get('code', '')
         address = data.get('address', '')
         phone = data.get('phone', '')
-        status = data.get('status', 'Active')
-        id_patientdomain = data.get('id_patientdomain', '')
+        raw_status = data.get('status', 'Active')
+        status = 'Inactive' if str(raw_status).strip().lower() == 'inactive' else 'Active'
         mail = data.get('mail', '')
         geographic_location = data.get('geographic_location', '')
         timezone = data.get('timezone', '')
@@ -1883,6 +2244,25 @@ def create_location():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_facility_patientdomain_column(connection)
+        ensure_location_status_column(connection)
+
+        id_patientdomain = ''
+        if facility_id:
+            cursor.execute(
+                "SELECT id_patientdomain FROM nextris.tbfacility WHERE guid = %s",
+                (facility_id,),
+            )
+            facility_row = cursor.fetchone()
+            if not facility_row:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'facility_id no existe'
+                }), 400
+            id_patientdomain = facility_row[0] or ''
         
         new_guid = str(uuid.uuid4())
         
@@ -1928,7 +2308,7 @@ def update_location(location_id):
     Path:
     - location_id: GUID de la ubicación
     
-    Body JSON (todos opcionales):
+    Body JSON o multipart/form-data (todos opcionales):
     {
         "name": "string",
         "code": "string",
@@ -1939,7 +2319,8 @@ def update_location(location_id):
         "id_patientdomain": "string",
         "mail": "string",
         "geographic_location": "string",
-        "timezone": "string"
+        "timezone": "string",
+        "logo": "file"
     }
     
     Returns:
@@ -1949,12 +2330,19 @@ def update_location(location_id):
     }
     """
     try:
-        data = request.get_json()
-        
-        if not data:
+        is_multipart = request.content_type and 'multipart/form-data' in request.content_type
+
+        if is_multipart:
+            data = request.form.to_dict()
+        else:
+            data = request.get_json() or {}
+
+        logo_file = request.files.get('logo') if is_multipart else None
+
+        if not data and not logo_file:
             return jsonify({
                 'success': False,
-                'message': 'Se requiere un cuerpo JSON'
+                'message': 'Se requiere un cuerpo con datos para actualizar'
             }), 400
         
         config = get_db_config()
@@ -1966,6 +2354,8 @@ def update_location(location_id):
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_location_status_column(connection)
         
         # Verificar que existe
         cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
@@ -1998,19 +2388,30 @@ def update_location(location_id):
             params.append(data['phone'])
         if 'status' in data:
             updates.append("status = %s")
-            params.append(data['status'])
-        if 'id_patientdomain' in data:
-            updates.append("id_patientdomain = %s")
-            params.append(data['id_patientdomain'])
-        if 'mail' in data:
+            status_value = 'Inactive' if str(data['status']).strip().lower() == 'inactive' else 'Active'
+            params.append(status_value)
+        # id_patientdomain se hereda desde la facility asociada.
+        if 'mail' in data or 'email' in data:
             updates.append("mail = %s")
-            params.append(data['mail'])
+            params.append(data.get('mail', data.get('email')))
         if 'geographic_location' in data:
             updates.append("geographic_location = %s")
             params.append(data['geographic_location'])
         if 'timezone' in data:
             updates.append("timezone = %s")
             params.append(data['timezone'])
+
+        if logo_file and logo_file.filename:
+            logo_path = _process_location_logo(logo_file, location_id)
+            if not logo_path:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Logo inválido. Use PNG, JPG, JPEG, GIF o BMP.'
+                }), 400
+            updates.append("logo_path = %s")
+            params.append(logo_path)
         
         if not updates:
             cursor.close()
@@ -2025,8 +2426,21 @@ def update_location(location_id):
         
         params.append(location_id)
         query = f"UPDATE nextris.tblocation SET {', '.join(updates)} WHERE guid = %s"
-        
+
         cursor.execute(query, params)
+
+        if _column_exists(connection, 'nextris', 'tblocation', 'id_patientdomain'):
+            cursor.execute(
+                """
+                UPDATE nextris.tblocation l
+                SET id_patientdomain = f.id_patientdomain
+                FROM nextris.tbfacility f
+                WHERE l.guid = %s
+                  AND l.facility_id = f.guid
+                """,
+                (location_id,),
+            )
+
         connection.commit()
         
         cursor.close()
@@ -2037,6 +2451,108 @@ def update_location(location_id):
             'message': 'Ubicación actualizada exitosamente'
         }), 200
         
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations/<location_id>/deactivate', methods=['POST'])
+@jwt_required()
+def deactivate_location(location_id):
+    """Desactiva una ubicación sin eliminarla."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        ensure_location_status_column(connection)
+
+        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+
+        cursor.execute(
+            """
+            UPDATE nextris.tblocation
+            SET status = 'Inactive', updated_at = NOW()
+            WHERE guid = %s
+            """,
+            (location_id,),
+        )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación desactivada exitosamente'
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/locations/<location_id>/activate', methods=['POST'])
+@jwt_required()
+def activate_location(location_id):
+    """Activa una ubicación previamente desactivada."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        ensure_location_status_column(connection)
+
+        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Ubicación no encontrada'
+            }), 404
+
+        cursor.execute(
+            """
+            UPDATE nextris.tblocation
+            SET status = 'Active', updated_at = NOW()
+            WHERE guid = %s
+            """,
+            (location_id,),
+        )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Ubicación activada exitosamente'
+        }), 200
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -2137,16 +2653,36 @@ def get_facilities():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_facility_patientdomain_column(connection)
         
-        query = """
-            SELECT guid, name, code, email, contact_person, status,
-                   smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
-                   db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-                   whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id, 
-                   whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-            FROM nextris.tbfacility
-            ORDER BY name
-        """
+        has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
+        has_patient_domain_table = _table_exists(connection, 'nextris', 'ispatientdomain')
+
+        if has_facility_domain_column and has_patient_domain_table:
+            query = """
+                 SELECT f.guid, f.name, f.code, f.email, f.contact_person, f.status,
+                     f.id_patientdomain, pd.description,
+                       smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                       db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                       whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                       whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                 FROM nextris.tbfacility f
+                 LEFT JOIN nextris.ispatientdomain pd ON pd.guid = f.id_patientdomain
+                 ORDER BY f.name
+            """
+            domain_offset = 2
+        else:
+            query = """
+                SELECT guid, name, code, email, contact_person, status,
+                       smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                       db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                       whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                       whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                FROM nextris.tbfacility
+                ORDER BY name
+            """
+            domain_offset = 0
         cursor.execute(query)
         results = cursor.fetchall()
         
@@ -2162,31 +2698,34 @@ def get_facilities():
                 'email': row[3],
                 'contact_person': row[4],
                 'status': row[5],
+                'id_patientdomain': row[6] if domain_offset else None,
+                'patientdomain_id': row[6] if domain_offset else None,
+                'patientdomain_name': row[7] if domain_offset else None,
                 'smtp_config': {
-                    'smtp_server': row[6],
-                    'smtp_port': row[7],
-                    'smtp_user': row[8],
-                    'smtp_password': row[9],
-                    'smtp_from': row[10],
-                    'smtp_from_name': row[11],
-                    'use_tls': row[12]
+                    'smtp_server': row[6 + domain_offset],
+                    'smtp_port': row[7 + domain_offset],
+                    'smtp_user': row[8 + domain_offset],
+                    'smtp_password': row[9 + domain_offset],
+                    'smtp_from': row[10 + domain_offset],
+                    'smtp_from_name': row[11 + domain_offset],
+                    'use_tls': row[12 + domain_offset]
                 },
                 'backend_config': {
-                    'db_user': row[13],
-                    'db_password': row[14],
-                    'db_host': row[15],
-                    'db_port': row[16],
-                    'db_name': row[17],
-                    'base_folder': row[18],
-                    'ipserver': row[19]
+                    'db_user': row[13 + domain_offset],
+                    'db_password': row[14 + domain_offset],
+                    'db_host': row[15 + domain_offset],
+                    'db_port': row[16 + domain_offset],
+                    'db_name': row[17 + domain_offset],
+                    'base_folder': row[18 + domain_offset],
+                    'ipserver': row[19 + domain_offset]
                 },
                 'whatsapp_config': {
-                    'api_url': row[20],
-                    'api_token': row[21],
-                    'phone_number_id': row[22],
-                    'business_account_id': row[23],
-                    'webhook_verify_token': row[24],
-                    'is_active': row[25]
+                    'api_url': row[20 + domain_offset],
+                    'api_token': row[21 + domain_offset],
+                    'phone_number_id': row[22 + domain_offset],
+                    'business_account_id': row[23 + domain_offset],
+                    'webhook_verify_token': row[24 + domain_offset],
+                    'is_active': row[25 + domain_offset]
                 }
             })
         
@@ -2257,6 +2796,7 @@ def create_facility():
         country = data.get('country', '')
         phone = data.get('phone', '')
         status = data.get('status', 'Active')
+        id_patientdomain = data.get('id_patientdomain') or data.get('patientdomain_id')
         
         # Configuración SMTP (opcional)
         smtp_server = data.get('smtp_server')
@@ -2293,32 +2833,61 @@ def create_facility():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_facility_patientdomain_column(connection)
+
+        has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
         
         new_guid = str(uuid.uuid4())
         
-        query = """
-            INSERT INTO nextris.tbfacility(
-                guid, name, code, email, contact_person, description, 
+        if has_facility_domain_column:
+            query = """
+                INSERT INTO nextris.tbfacility(
+                    guid, name, code, email, contact_person, description,
+                    address, city, country, phone, status, id_patientdomain,
+                    smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                    db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s)
+            """
+            params = (
+                new_guid, name, code, email, contact_person, description,
+                address, city, country, phone, status, id_patientdomain,
+                smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+            )
+        else:
+            query = """
+                INSERT INTO nextris.tbfacility(
+                    guid, name, code, email, contact_person, description,
+                    address, city, country, phone, status,
+                    smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                    db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s)
+            """
+            params = (
+                new_guid, name, code, email, contact_person, description,
                 address, city, country, phone, status,
                 smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                 db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                 whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
                 whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-            ) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s)
-        """
-        
-        cursor.execute(query, (
-            new_guid, name, code, email, contact_person, description,
-            address, city, country, phone, status,
-            smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
-            db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-            whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-            whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-        ))
+            )
+
+        cursor.execute(query, params)
         
         connection.commit()
         cursor.close()
@@ -2332,6 +2901,595 @@ def create_facility():
             }
         }), 201
         
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/modules', methods=['GET'])
+@jwt_required()
+def get_modules_catalog():
+    """Obtiene el catalogo de modulos opcionales del sistema."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_facility_module_tables(connection)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT guid, code, name, description, is_active
+            FROM nextris.ismodule
+            ORDER BY name
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        modules = [
+            {
+                'guid': row[0],
+                'code': row[1],
+                'name': row[2],
+                'description': row[3],
+                'is_active': bool(row[4]),
+            }
+            for row in rows
+        ]
+
+        return jsonify({
+            'success': True,
+            'data': modules,
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/modules', methods=['GET'])
+@jwt_required()
+def get_facility_modules(facility_id):
+    """Obtiene el estado de modulos habilitados para una facility."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_facility_module_tables(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+
+        cursor.execute(
+            """
+            SELECT
+                m.guid,
+                m.code,
+                m.name,
+                m.description,
+                m.is_active,
+                rel.guid,
+                rel.is_active
+            FROM nextris.ismodule m
+            LEFT JOIN nextris.rel_facility_module rel
+                ON rel.module_id = m.guid
+               AND rel.facility_id = %s
+            ORDER BY m.name
+            """,
+            (facility_id,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        modules = [
+            {
+                'module_guid': row[0],
+                'module_code': row[1],
+                'module_name': row[2],
+                'module_description': row[3],
+                'module_active': bool(row[4]),
+                'relation_guid': row[5],
+                'is_active': bool(row[6]) if row[6] is not None else False,
+            }
+            for row in rows
+        ]
+
+        return jsonify({
+            'success': True,
+            'data': modules,
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/modules', methods=['PUT'])
+@jwt_required()
+def sync_facility_modules(facility_id):
+    """Sincroniza los modulos habilitados para una facility."""
+    try:
+        user_id = normalize_user_id(get_jwt_identity())
+        claims = get_jwt() or {}
+        user_type_claim = str(claims.get('user_type', 'staff')).strip().lower()
+
+        if user_type_claim == 'patient':
+            return jsonify({
+                'success': False,
+                'message': 'Operación no permitida para pacientes'
+            }), 403
+
+        data = request.get_json() or {}
+        module_codes = data.get('module_codes', [])
+        current_password = data.get('current_password')
+        reason = data.get('reason')
+
+        if not isinstance(module_codes, list):
+            return jsonify({
+                'success': False,
+                'message': 'module_codes debe ser un arreglo'
+            }), 400
+
+        if not current_password or not str(current_password).strip():
+            return jsonify({
+                'success': False,
+                'message': 'Debe ingresar su contraseña para confirmar el cambio'
+            }), 400
+
+        normalized_codes = list({str(code).strip() for code in module_codes if str(code).strip()})
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_facility_module_tables(connection)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT username, password, COALESCE(isactive, 1)
+            FROM nextris.tbuser
+            WHERE guid = %s
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        user_row = cursor.fetchone()
+        if not user_row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario autenticado no encontrado'
+            }), 404
+
+        actor_username, actor_password_hash, actor_is_active = user_row
+        if not bool(actor_is_active):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Usuario inactivo'
+            }), 403
+
+        if not check_password_hash(actor_password_hash, str(current_password)):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Contraseña incorrecta'
+            }), 401
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+
+        cursor.execute(
+            """
+            SELECT
+                m.guid,
+                m.code,
+                COALESCE(rel.is_active, FALSE) AS current_is_active
+            FROM nextris.ismodule m
+            LEFT JOIN nextris.rel_facility_module rel
+                ON rel.module_id = m.guid
+               AND rel.facility_id = %s
+            WHERE m.is_active = TRUE
+            """,
+            (facility_id,),
+        )
+        module_rows = cursor.fetchall()
+        module_by_code = {row[1]: row[0] for row in module_rows}
+        current_state_by_module_id = {row[0]: bool(row[2]) for row in module_rows}
+
+        unknown_codes = [code for code in normalized_codes if code not in module_by_code]
+        if unknown_codes:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Módulos inválidos: {", ".join(unknown_codes)}'
+            }), 400
+
+        desired_module_ids = {module_by_code[code] for code in normalized_codes}
+
+        changed_modules = []
+        for module_id, current_state in current_state_by_module_id.items():
+            new_state = module_id in desired_module_ids
+            if current_state != new_state:
+                module_code = next((code for code, code_module_id in module_by_code.items() if code_module_id == module_id), None)
+                if module_code:
+                    changed_modules.append({
+                        'module_id': module_id,
+                        'module_code': module_code,
+                        'previous_is_active': current_state,
+                        'new_is_active': new_state,
+                        'action': 'enabled' if new_state else 'disabled',
+                    })
+
+        cursor.execute(
+            """
+            UPDATE nextris.rel_facility_module
+            SET is_active = FALSE,
+                updated_at = NOW()
+            WHERE facility_id = %s
+            """,
+            (facility_id,),
+        )
+
+        if desired_module_ids:
+            cursor.executemany(
+                """
+                INSERT INTO nextris.rel_facility_module (guid, facility_id, module_id, is_active)
+                VALUES (%s, %s, %s, TRUE)
+                ON CONFLICT (facility_id, module_id)
+                DO UPDATE SET
+                    is_active = TRUE,
+                    updated_at = NOW()
+                """,
+                [(str(uuid.uuid4()), facility_id, module_id) for module_id in desired_module_ids],
+            )
+
+        if changed_modules:
+            forwarded_for = request.headers.get('X-Forwarded-For', '')
+            request_ip = forwarded_for.split(',')[0].strip() if forwarded_for else (request.remote_addr or '')
+            user_agent = request.headers.get('User-Agent', '')
+
+            cursor.execute(
+                """
+                SELECT row_hash
+                FROM nextris.audit_facility_module_change
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            )
+            prev_hash_row = cursor.fetchone()
+            prev_hash = prev_hash_row[0] if prev_hash_row else ''
+
+            for changed in changed_modules:
+                hash_payload = {
+                    'facility_id': facility_id,
+                    'module_id': changed['module_id'],
+                    'module_code': changed['module_code'],
+                    'action': changed['action'],
+                    'previous_is_active': changed['previous_is_active'],
+                    'new_is_active': changed['new_is_active'],
+                    'changed_by_user_id': user_id,
+                    'changed_by_username': actor_username,
+                    'reason': str(reason).strip() if reason else '',
+                    'request_ip': request_ip,
+                    'user_agent': user_agent,
+                }
+                row_hash = _build_module_change_hash(prev_hash, hash_payload)
+
+                cursor.execute(
+                    """
+                    INSERT INTO nextris.audit_facility_module_change (
+                        guid,
+                        facility_id,
+                        module_id,
+                        module_code,
+                        action,
+                        previous_is_active,
+                        new_is_active,
+                        changed_by_user_id,
+                        changed_by_username,
+                        reason,
+                        request_ip,
+                        user_agent,
+                        prev_hash,
+                        row_hash
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        facility_id,
+                        changed['module_id'],
+                        changed['module_code'],
+                        changed['action'],
+                        changed['previous_is_active'],
+                        changed['new_is_active'],
+                        user_id,
+                        actor_username,
+                        str(reason).strip() if reason else None,
+                        request_ip,
+                        user_agent,
+                        prev_hash or None,
+                        row_hash,
+                    ),
+                )
+                prev_hash = row_hash
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Módulos de la facility actualizados exitosamente',
+            'data': {
+                'facility_id': facility_id,
+                'module_codes': normalized_codes,
+                'changed_count': len(changed_modules),
+                'changed_modules': changed_modules,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/me/modules', methods=['GET'])
+@jwt_required()
+def get_my_modules():
+    """
+    Obtiene los modulos habilitados para el usuario autenticado segun sus facilities.
+
+    Regla:
+    - Si el usuario tiene acceso a todas las facilities, obtiene la union de modulos activos de todas.
+    - Si tiene acceso a un subconjunto, obtiene la union de modulos activos de sus facilities asignadas.
+    """
+    try:
+        user_id = get_jwt_identity()
+        claims = get_jwt() or {}
+        user_type_claim = str(claims.get('user_type', 'staff')).strip().lower()
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_facility_module_tables(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM nextris.tbfacility")
+        total_facilities = int(cursor.fetchone()[0] or 0)
+
+        if user_type_claim == 'patient':
+            cursor.execute(
+                """
+                SELECT 1
+                FROM nextris.ismodule m
+                INNER JOIN nextris.rel_facility_module rel ON rel.module_id = m.guid
+                WHERE m.code = 'patient_portal'
+                  AND m.is_active = TRUE
+                  AND rel.is_active = TRUE
+                LIMIT 1
+                """
+            )
+            patient_portal_enabled = cursor.fetchone() is not None
+
+            cursor.close()
+            connection.close()
+
+            return jsonify({
+                'success': True,
+                'data': {
+                    'module_codes': ['patient_portal'] if patient_portal_enabled else [],
+                    'facility_ids': [],
+                    'user_facilities_count': 0,
+                    'total_facilities': total_facilities,
+                    'has_all_facilities': False,
+                }
+            }), 200
+
+        cursor.execute(
+            """
+            SELECT COALESCE(r.description, '')
+            FROM nextris.tbuser u
+            LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+            WHERE u.guid = %s
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        user_row = cursor.fetchone()
+        user_type = (user_row[0] or '').strip().lower() if user_row else ''
+
+        cursor.execute(
+            """
+            SELECT DISTINCT l.facility_id
+            FROM nextris.rel_user_location rul
+            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            WHERE rul.user_id = %s
+              AND l.facility_id IS NOT NULL
+              AND l.facility_id <> ''
+            """,
+            (user_id,),
+        )
+        user_facility_ids = [row[0] for row in cursor.fetchall()]
+
+        has_all_facilities = bool(total_facilities > 0 and len(set(user_facility_ids)) >= total_facilities)
+        scoped_to_all = has_all_facilities
+
+        if scoped_to_all:
+            cursor.execute(
+                """
+                SELECT DISTINCT m.code
+                FROM nextris.ismodule m
+                INNER JOIN nextris.rel_facility_module rel ON rel.module_id = m.guid
+                WHERE m.is_active = TRUE
+                  AND rel.is_active = TRUE
+                ORDER BY m.code
+                """
+            )
+        elif user_facility_ids:
+            cursor.execute(
+                """
+                SELECT DISTINCT m.code
+                FROM nextris.ismodule m
+                INNER JOIN nextris.rel_facility_module rel ON rel.module_id = m.guid
+                WHERE m.is_active = TRUE
+                  AND rel.is_active = TRUE
+                  AND rel.facility_id = ANY(%s)
+                ORDER BY m.code
+                """,
+                (user_facility_ids,),
+            )
+        else:
+            cursor.execute("SELECT code FROM nextris.ismodule WHERE 1=0")
+
+        module_codes = [row[0] for row in cursor.fetchall()]
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'module_codes': module_codes,
+                'facility_ids': user_facility_ids,
+                'user_facilities_count': len(set(user_facility_ids)),
+                'total_facilities': total_facilities,
+                'has_all_facilities': scoped_to_all,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/module-change-logs', methods=['GET'])
+@jwt_required()
+def get_facility_module_change_logs(facility_id):
+    """Obtiene el historial de cambios de modulos por facility (append-only)."""
+    try:
+        limit_param = request.args.get('limit', '100')
+        try:
+            limit = max(1, min(int(limit_param), 500))
+        except (TypeError, ValueError):
+            limit = 100
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_facility_module_tables(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Facility no encontrada'
+            }), 404
+
+        cursor.execute(
+            """
+            SELECT
+                guid,
+                module_code,
+                action,
+                previous_is_active,
+                new_is_active,
+                changed_by_user_id,
+                changed_by_username,
+                changed_at,
+                reason,
+                request_ip,
+                prev_hash,
+                row_hash
+            FROM nextris.audit_facility_module_change
+            WHERE facility_id = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (facility_id, limit),
+        )
+        rows = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        logs = [
+            {
+                'guid': row[0],
+                'module_code': row[1],
+                'action': row[2],
+                'previous_is_active': bool(row[3]),
+                'new_is_active': bool(row[4]),
+                'changed_by_user_id': row[5],
+                'changed_by_username': row[6],
+                'changed_at': row[7].isoformat() if row[7] else None,
+                'reason': row[8],
+                'request_ip': row[9],
+                'prev_hash': row[10],
+                'row_hash': row[11],
+            }
+            for row in rows
+        ]
+
+        return jsonify({
+            'success': True,
+            'data': logs,
+        }), 200
     except Exception as e:
         return jsonify({
             'success': False,
@@ -2386,6 +3544,9 @@ def update_facility(facility_id):
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        ensure_facility_patientdomain_column(connection)
+        has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
         
         # Verificar que existe
         cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
@@ -2431,6 +3592,9 @@ def update_facility(facility_id):
         if 'status' in data:
             updates.append("status = %s")
             params.append(data['status'])
+        if has_facility_domain_column and ('id_patientdomain' in data or 'patientdomain_id' in data):
+            updates.append("id_patientdomain = %s")
+            params.append(data.get('id_patientdomain') or data.get('patientdomain_id'))
         
         # Configuración SMTP
         if 'smtp_server' in data:
@@ -3150,29 +4314,48 @@ def create_config_user():
 
         result = cursor.fetchone()
 
-        default_permission_codes = get_default_permissions_for_role(role_description)
+        # '*' representa permiso global por rol y no debe persistirse como permiso custom.
+        default_permission_codes = [
+            code for code in get_default_permissions_for_role(role_description)
+            if code and code != '*'
+        ]
         if default_permission_codes:
             replace_user_permissions(new_guid, default_permission_codes, connection=connection)
 
-        full_name = f"{name} {surname}".strip()
-        send_new_user_credentials_email(
-            connection=connection,
-            email=email,
-            username=username,
-            temporary_password=temporary_password,
-            full_name=full_name
-        )
-        
         connection.commit()
+
+        email_error = None
+        full_name = f"{name} {surname}".strip()
+        try:
+            send_new_user_credentials_email(
+                connection=connection,
+                email=email,
+                username=username,
+                temporary_password=temporary_password,
+                full_name=full_name
+            )
+        except Exception as email_exc:
+            # El usuario ya fue creado; no se revierte por un fallo de SMTP.
+            email_error = str(email_exc)
+
         cursor.close()
         connection.close()
+
+        message = 'Usuario creado exitosamente'
+        if email_error:
+            message = (
+                'Usuario creado, pero no se pudo enviar el correo con credenciales. '
+                f'Detalle: {email_error}'
+            )
         
         return jsonify({
             'success': True,
-            'message': 'Usuario creado exitosamente',
+            'message': message,
             'data': {
                 'user_id': result[0],
-                'username': result[1]
+                'username': result[1],
+                'credentials_email_sent': email_error is None,
+                'credentials_email_error': email_error
             }
         }), 201
         
@@ -3654,7 +4837,7 @@ def get_user_permissions_endpoint(user_id):
             """,
             (resolved_user_id,),
         )
-        custom_permissions = [row[0] for row in cursor.fetchall()]
+        custom_permissions = normalize_permission_codes([row[0] for row in cursor.fetchall()])
         cursor.close()
         connection.close()
 
@@ -3862,6 +5045,14 @@ def save_user_medical_data(user_id):
             file = request.files['firma_digital']
             if file and file.filename:
                 allowed_extensions = {'png', 'jpg', 'jpeg'}
+                if '.' not in file.filename:
+                    cursor.close()
+                    connection.close()
+                    return jsonify({
+                        'success': False,
+                        'message': 'Nombre de archivo invalido'
+                    }), 400
+
                 file_extension = file.filename.rsplit('.', 1)[1].lower()
                 if file_extension not in allowed_extensions:
                     cursor.close()
@@ -3871,13 +5062,21 @@ def save_user_medical_data(user_id):
                         'message': 'Tipo de archivo no permitido'
                     }), 400
 
-                upload_dir = os.path.join(os.getcwd(), 'media', 'firmas')
+                upload_dir = _get_signature_upload_dir()
                 os.makedirs(upload_dir, exist_ok=True)
 
                 safe_name = secure_filename(file.filename)
                 unique_filename = f"{user_id}_{uuid.uuid4().hex}_{safe_name}"
                 firma_path = os.path.join(upload_dir, unique_filename)
-                file.save(firma_path)
+                try:
+                    file.save(firma_path)
+                except PermissionError:
+                    cursor.close()
+                    connection.close()
+                    return jsonify({
+                        'success': False,
+                        'message': f'Sin permisos de escritura en carpeta de firmas: {upload_dir}'
+                    }), 500
 
                 firma_filename = unique_filename
 

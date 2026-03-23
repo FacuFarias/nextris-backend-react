@@ -14,7 +14,8 @@ from apps.api import api_blueprint
 
 def get_db_config():
     """Obtiene la configuración de la base de datos"""
-    from apps.home.routes import config as db_config
+    from apps.home.services import ConfigService
+    db_config = ConfigService.get_db_config()
     return db_config
 
 
@@ -572,6 +573,35 @@ def cancel_worklist(exam_id):
             SET Status = 'Cancelled', IsExecuted = 1
             WHERE Guid = %s
         """, (exam_id,))
+
+        # Desvincular imágenes DICOM asociadas al examen
+        cursor.execute("""
+            UPDATE nextris.tbmanual_uploads
+            SET islinked = 0,
+                linked_examination_guid = NULL,
+                linked_date = NULL
+            WHERE linked_examination_guid = %s
+        """, (exam_id,))
+
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'nextris' AND table_name = 'tbpacs_study_link'
+            )
+        """)
+        has_pacs_link_table = cursor.fetchone()[0]
+
+        if has_pacs_link_table:
+            cursor.execute("""
+                UPDATE nextris.tbpacs_study_link
+                SET link_status = 'unlinked',
+                    unlinked_at = CURRENT_TIMESTAMP,
+                    unlinked_reason = 'Orden cancelada desde /api/worklist/<exam_id>',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE order_guid = %s
+                  AND link_status = 'linked'
+            """, (exam_id,))
         
         connection.commit()
         cursor.close()

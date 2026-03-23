@@ -23,7 +23,9 @@ PERMISSION_CATALOG = [
     {'code': 'tabs.reports.view', 'module': 'reports', 'action': 'view', 'description': 'Ver pestaña Redacción/Informes'},
     {'code': 'tabs.distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
     {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
-    {'code': 'tabs.preferences.view', 'module': 'preferences', 'action': 'view', 'description': 'Ver pestaña Preferencias'},
+    {'code': 'tabs.gestion.view', 'module': 'gestion', 'action': 'view', 'description': 'Ver pestaña Gestión'},
+    {'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'},
+    {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'},
     # Permisos de acciones
     {'code': 'reports.sign', 'module': 'reports', 'action': 'sign', 'description': 'Firmar informe'},
     {'code': 'reports.unsign', 'module': 'reports', 'action': 'unsign', 'description': 'Desfirmar informe'},
@@ -53,6 +55,35 @@ PERMISSION_CATALOG = [
     {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
     {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
 ]
+
+
+DEPRECATED_PERMISSION_ALIASES = {
+    # Backward compatibility for renamed permissions.
+    'tabs.preferences.view': 'tabs.gestion.view',
+}
+
+
+def normalize_permission_code(code):
+    if not code:
+        return code
+    return DEPRECATED_PERMISSION_ALIASES.get(code, code)
+
+
+def normalize_permission_codes(permission_codes):
+    normalized = []
+    seen = set()
+
+    for code in permission_codes or []:
+        normalized_code = normalize_permission_code(code)
+        if normalized_code == '*':
+            # '*' es un permiso efectivo por rol, no un permiso personalizado persistible.
+            continue
+        if not normalized_code or normalized_code in seen:
+            continue
+        seen.add(normalized_code)
+        normalized.append(normalized_code)
+
+    return normalized
 
 
 ROLE_BASED_PERMISSIONS = {
@@ -162,6 +193,18 @@ def seed_permissions(connection):
             """,
             values,
         )
+
+        deprecated_codes = list(DEPRECATED_PERMISSION_ALIASES.keys())
+        if deprecated_codes:
+            cursor.execute(
+                """
+                UPDATE nextris.ispermission
+                SET is_active = FALSE
+                WHERE code = ANY(%s)
+                """,
+                (deprecated_codes,),
+            )
+
         connection.commit()
     except Exception:
         connection.rollback()
@@ -264,7 +307,7 @@ def get_user_permission_codes(user_id, connection=None, include_role_permissions
         finally:
             cursor.close()
 
-        permissions.update(row[0] for row in rows)
+        permissions.update(normalize_permission_code(row[0]) for row in rows)
         return sorted(permissions)
     finally:
         if own_connection and connection:
@@ -298,7 +341,7 @@ def replace_user_permissions(user_id, permission_codes, connection=None):
             cursor.close()
             raise ValueError('Usuario no encontrado')
 
-        normalized_codes = [code for code in dict.fromkeys(permission_codes or []) if code]
+        normalized_codes = normalize_permission_codes(permission_codes)
         if normalized_codes:
             cursor.execute(
                 """

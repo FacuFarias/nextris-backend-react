@@ -525,7 +525,8 @@ def get_locations():
                    CASE WHEN l.logo_path IS NOT NULL AND l.logo_path != '' THEN '✔' ELSE '' END as has_logo
             FROM nextris.tblocation l
             LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
-            LEFT JOIN nextris.ispatientdomain pd ON pd.guid = l.id_patientdomain
+            LEFT JOIN nextris.ispatientdomain pd
+                ON pd.guid = COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
             ORDER BY l.name
         """
         result = DatabaseService.execute_query(query)
@@ -541,9 +542,13 @@ def get_location_data():
         location_id = request.args.get('location_id')
         query = """
             SELECT l.guid, l.name, l.code, l.facility_id, f.name as facility_name, 
-                   l.id_patientdomain, l.mail, l.address, l.phone, l.status, l.logo_path
+                   COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) as id_patientdomain,
+                   pd.description as patientdomain_name,
+                   l.mail, l.address, l.phone, l.status, l.logo_path
             FROM nextris.tblocation l
             LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.ispatientdomain pd
+                ON pd.guid = COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
             WHERE l.guid = %s
         """
         result = DatabaseService.execute_query(query, (location_id,))
@@ -556,12 +561,13 @@ def get_location_data():
                 'code': row[2],
                 'facility_id': row[3],
                 'facility_name': row[4],
-                'patientdomain': row[5],
-                'mail': row[6],
-                'address': row[7],
-                'phone': row[8],
-                'status': row[9],
-                'logo_path': row[10]
+                'patientdomain_id': row[5],
+                'patientdomain': row[6] or row[5],
+                'mail': row[7],
+                'address': row[8],
+                'phone': row[9],
+                'status': row[10],
+                'logo_path': row[11]
             })
         else:
             return jsonify({'error': 'Location no encontrada'}), 404
@@ -579,7 +585,6 @@ def agregar_location():
         name = request.form.get('name_location')
         code = request.form.get('code_location')
         facility_id = request.form.get('facility_location')
-        patientdomain = request.form.get('patientdomain_location')
         description = request.form.get('description_location')
         address = request.form.get('address_location')
         phone = request.form.get('phone_location')
@@ -594,15 +599,25 @@ def agregar_location():
         query = """
             INSERT INTO nextris.tblocation 
             (guid, name, code, facility_id, id_patientdomain, mail, address, phone, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s,
+                (SELECT id_patientdomain FROM nextris.tbfacility WHERE guid = %s),
+                %s, %s, %s, %s
+            )
         """
-        params = (guid, name, code, facility_id, patientdomain, email, address, phone, status)
+        params = (guid, name, code, facility_id, facility_id, email, address, phone, status)
         DatabaseService.execute_query(query, params, commit=True)
         
         # Obtener el nombre de la facility para retornar
-        facility_query = "SELECT name FROM nextris.tbfacility WHERE guid=%s"
+        facility_query = """
+            SELECT f.name, f.id_patientdomain, pd.description
+            FROM nextris.tbfacility f
+            LEFT JOIN nextris.ispatientdomain pd ON pd.guid = f.id_patientdomain
+            WHERE f.guid=%s
+        """
         facility_result = DatabaseService.execute_query(facility_query, (facility_id,))
         facility_name = facility_result[0][0] if facility_result else ''
+        facility_domain = facility_result[0][2] if facility_result else ''
         
         # Retornar los datos para agregar a la tabla
         return jsonify({
@@ -612,7 +627,7 @@ def agregar_location():
                 'name': name,
                 'code': code,
                 'facility_name': facility_name,
-                'patientdomain': patientdomain,
+                'patientdomain': facility_domain,
                 'mail': email,
                 'address': address,
                 'phone': phone
@@ -632,7 +647,6 @@ def actualizar_location():
         name = request.form.get('name_location')
         code = request.form.get('code_location')
         facility_id = request.form.get('facility_location')
-        patientdomain = request.form.get('patientdomain_location')
         description = request.form.get('description_location')
         address = request.form.get('address_location')
         phone = request.form.get('phone_location')
@@ -643,17 +657,24 @@ def actualizar_location():
         # Actualizar en la base de datos
         query = """
             UPDATE nextris.tblocation 
-            SET name=%s, code=%s, facility_id=%s, id_patientdomain=%s, 
+            SET name=%s, code=%s, facility_id=%s,
+                id_patientdomain=(SELECT id_patientdomain FROM nextris.tbfacility WHERE guid=%s),
                 mail=%s, address=%s, phone=%s, status=%s
             WHERE guid=%s
         """
-        params = (name, code, facility_id, patientdomain, email, address, phone, status, guid)
+        params = (name, code, facility_id, facility_id, email, address, phone, status, guid)
         DatabaseService.execute_query(query, params, commit=True)
         
         # Obtener el nombre de la facility para retornar
-        facility_query = "SELECT name FROM nextris.tbfacility WHERE guid=%s"
+        facility_query = """
+            SELECT f.name, f.id_patientdomain, pd.description
+            FROM nextris.tbfacility f
+            LEFT JOIN nextris.ispatientdomain pd ON pd.guid = f.id_patientdomain
+            WHERE f.guid=%s
+        """
         facility_result = DatabaseService.execute_query(facility_query, (facility_id,))
         facility_name = facility_result[0][0] if facility_result else ''
+        facility_domain = facility_result[0][2] if facility_result else ''
         
         return jsonify({
             'status': 'OK',
@@ -662,7 +683,7 @@ def actualizar_location():
                 'name': name,
                 'code': code,
                 'facility_name': facility_name,
-                'patientdomain': patientdomain,
+                'patientdomain': facility_domain,
                 'mail': email,
                 'address': address,
                 'phone': phone
@@ -1758,20 +1779,33 @@ def get_medical_data():
 def save_medical_data():
     """Guardar datos médicos de un usuario - Solo Sysadmin"""
     try:
-        import os
-        import uuid
         from werkzeug.utils import secure_filename
         
         user_id = request.form.get('user_id_medical')
         aclaracion_firma = request.form.get('aclaracion_firma')
         matricula_nacional = request.form.get('matricula_nacional')
-        firma_habilitada = 'firma_habilitada' in request.form
+        firma_habilitada_raw = request.form.get('firma_habilitada')
         
         if not user_id or not aclaracion_firma or not matricula_nacional:
             return jsonify({'status': 'error', 'message': 'Campos obligatorios faltantes'}), 400
         
         # Verificar si la tabla existe, si no crearla
         create_table_if_not_exists()
+
+        # Leer estado actual para evitar deshabilitar por error cuando el checkbox no llega en el form.
+        existing_data_query = """
+            SELECT firma_habilitada, firma_digital
+            FROM nextris.tbuser_medical_data
+            WHERE user_id = %s
+            LIMIT 1
+        """
+        existing_data = DatabaseService.execute_query(existing_data_query, (user_id,))
+
+        if firma_habilitada_raw is None:
+            # Si el form no envía el flag, conservamos el estado existente.
+            firma_habilitada = bool(existing_data[0][0]) if existing_data else False
+        else:
+            firma_habilitada = str(firma_habilitada_raw).strip().lower() in {'1', 'true', 'on', 'yes'}
         
         # Manejar archivo de firma
         firma_filename = None
@@ -1785,8 +1819,8 @@ def save_medical_data():
                 if file_extension not in allowed_extensions:
                     return jsonify({'status': 'error', 'message': 'Tipo de archivo no permitido'}), 400
                 
-                # Crear directorio de firmas si no existe
-                upload_dir = os.path.join(os.getcwd(), 'media', 'firmas')
+                # Crear directorio de firmas en una ruta estable (independiente del cwd del proceso)
+                upload_dir = _get_signature_storage_dir()
                 os.makedirs(upload_dir, exist_ok=True)
                 
                 print(f"[DEBUG] Directorio de firmas: {upload_dir}")
@@ -1802,6 +1836,8 @@ def save_medical_data():
                 
                 # Solo guardar el nombre del archivo en la BD, no la ruta completa
                 firma_filename = unique_filename
+                # Regla de negocio: si se sube firma, queda habilitada automáticamente.
+                firma_habilitada = True
         
         # Verificar si ya existen datos para este usuario
         check_query = "SELECT user_id FROM nextris.tbuser_medical_data WHERE user_id = %s"
@@ -1947,12 +1983,16 @@ def remove_signature():
             # Eliminar archivo físico del servidor
             firma_filename = result[0][0]
             if firma_filename:  # Solo eliminar si hay un archivo
-                firma_path = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'media'), 'firmas', firma_filename)
+                firma_path = os.path.join(_get_signature_storage_dir(), firma_filename)
                 if os.path.exists(firma_path):
                     os.remove(firma_path)
         
         # Actualizar base de datos para eliminar referencia a la firma
-        update_query = "UPDATE nextris.tbuser_medical_data SET firma_digital = NULL WHERE user_id = %s"
+        update_query = """
+            UPDATE nextris.tbuser_medical_data
+            SET firma_digital = NULL, firma_habilitada = FALSE, fecha_actualizacion = NOW()
+            WHERE user_id = %s
+        """
         DatabaseService.execute_query(update_query, (user_id,), commit=True)
         
         return jsonify({
@@ -1992,7 +2032,7 @@ def get_user_signature_data(user_id):
                 'matricula_nacional': data[1],
                 'firma_digital': data[2],
                 'firma_habilitada': bool(data[3]),
-                'firma_path': os.path.join(os.getcwd(), 'media', 'firmas', data[2]) if data[2] else None
+                'firma_path': os.path.join(_get_signature_storage_dir(), data[2]) if data[2] else None
             }
     except Exception as e:
         print(f"Error al obtener datos de firma del usuario {user_id}: {e}")
@@ -2008,6 +2048,12 @@ def get_signature_image_path(user_id):
     if signature_data and signature_data['firma_digital']:
         return signature_data['firma_path']
     return None
+
+
+def _get_signature_storage_dir():
+    """Devuelve la ruta absoluta del directorio de firmas dentro del proyecto backend."""
+    app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    return os.path.join(app_root, 'media', 'firmas')
 
 
 @config_bp.route('/create_patient', methods=['POST'])
