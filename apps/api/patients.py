@@ -797,11 +797,14 @@ def create_patient_quick():
     try:
         data = request.get_json()
         
+        user_id = normalize_user_id(get_jwt_identity())
+
         nombre = data.get('nombre', '')
         apellido = data.get('apellido', '')
         dni = data.get('dni', '')
         fecha_nac = data.get('fecha_nac', None)
         sexo = data.get('sexo', 'I')
+        location_id = data.get('location_id')
         
         # Generar PatientId
         patient_id = dni if dni else str(uuid.uuid4())[:8]
@@ -809,12 +812,56 @@ def create_patient_quick():
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
+
+        patientdomain_id = None
+
+        if location_id:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbfacility'
+                  AND column_name = 'id_patientdomain'
+                LIMIT 1
+                """
+            )
+            has_facility_domain_column = cursor.fetchone() is not None
+
+            if has_facility_domain_column:
+                cursor.execute(
+                    """
+                    SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
+                    FROM nextris.tblocation l
+                    LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+                    WHERE l.guid = %s
+                    LIMIT 1
+                    """,
+                    (location_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT NULLIF(l.id_patientdomain, '')
+                    FROM nextris.tblocation l
+                    WHERE l.guid = %s
+                    LIMIT 1
+                    """,
+                    (location_id,),
+                )
+
+            domain_row = cursor.fetchone()
+            patientdomain_id = (domain_row[0] if domain_row else None) or None
+
+        if not patientdomain_id and user_id:
+            domains = get_user_patientdomain_ids(cursor, user_id)
+            patientdomain_id = domains[0] if domains else None
         
         cursor.execute("""
-            INSERT INTO nextris.datapatient (guid, patientid, surname, name, nationalcode, sexcode, birthdate)
-            VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s)
+            INSERT INTO nextris.datapatient (guid, patientid, surname, name, nationalcode, sexcode, birthdate, id_patientdomain)
+            VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s)
             RETURNING guid
-        """, (patient_id, apellido, nombre, dni, sexo, fecha_nac))
+        """, (patient_id, apellido, nombre, dni, sexo, fecha_nac, patientdomain_id))
         
         guid = cursor.fetchone()[0]
         

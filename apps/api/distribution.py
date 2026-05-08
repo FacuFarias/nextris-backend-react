@@ -13,6 +13,12 @@ import uuid
 import os
 import smtplib
 import requests
+import html
+from apps.api.facility_plan_usage import (
+    ensure_plan_management_schema,
+    check_limit_before_action,
+    increment_usage_counter,
+)
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -39,6 +45,42 @@ def get_user_locations(user_id, connection):
     locations = [row[0] for row in cursor.fetchall()]
     cursor.close()
     return locations
+
+
+def get_smtp_fallback_from_any_facility(connection):
+    """Obtiene una configuración SMTP válida desde cualquier facility activa como fallback."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT smtp_server,
+                   smtp_port,
+                   smtp_user,
+                   smtp_password,
+                   smtp_from,
+                   smtp_from_name,
+                   use_tls
+            FROM nextris.tbfacility
+            WHERE COALESCE(TRIM(smtp_user), '') <> ''
+              AND COALESCE(TRIM(smtp_password), '') <> ''
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            LIMIT 1
+            """
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            'smtp_server': row[0],
+            'smtp_port': row[1],
+            'smtp_user': row[2],
+            'smtp_password': row[3],
+            'smtp_from': row[4],
+            'smtp_from_name': row[5],
+            'use_tls': row[6],
+        }
+    finally:
+        cursor.close()
 
 
 # ====================================================================
@@ -93,11 +135,13 @@ def get_examinations_for_distribution():
         all_reported = request.args.get('all_reported', 'false').lower() == 'true'
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
+        facility_id = request.args.get('facility_id')
         per_page = min(per_page, 100)
         offset = (page - 1) * per_page
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+        ensure_plan_management_schema(connection)
         
         # Obtener ubicaciones del usuario
         user_locations = get_user_locations(user_id, connection)
@@ -140,10 +184,11 @@ def get_examinations_for_distribution():
             LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
             LEFT JOIN nextris.isequipment eq ON e.idequipment = eq.guid
+            LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
             LEFT JOIN nextris.isrequestingphysician rp ON e.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = e.guid
             LEFT JOIN nextris.tbuser u ON r.iduser = u.guid
-            WHERE eq.location_id = ANY(%s)
+            WHERE COALESCE(e.location_id, eq.location_id) = ANY(%s)
             AND e.isreported = 1
         """
         
@@ -152,6 +197,10 @@ def get_examinations_for_distribution():
         # Si no se quieren los ya enviados, filtrar
         if not all_reported:
             query += " AND (e.ispublicated IS NULL OR e.ispublicated = 0)"
+
+        if facility_id:
+            query += " AND loc.facility_id = %s"
+            params.append(facility_id)
         
         query += " ORDER BY e.createdon DESC"
         
@@ -269,13 +318,15 @@ def send_report_email(exam_id):
                 f.smtp_from_name,
                 f.use_tls,
                 ex.studyinstanceuid,
-                COALESCE(ex.isimage, 0) as has_images
+                COALESCE(ex.isimage, 0) as has_images,
+                f.guid as facility_id,
+                COALESCE(ex.ispublicated, 0) as is_publicated
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
             LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-            LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+            LEFT JOIN nextris.tblocation l ON COALESCE(ex.location_id, eq.location_id) = l.guid
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
             WHERE ex.guid = %s
         """
@@ -296,17 +347,47 @@ def send_report_email(exam_id):
         study_type = result[2]
         accession_number = result[3]
         
-        # Configuración SMTP con valores por defecto
-        smtp_server = result[4] or os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-        smtp_port = result[5] or int(os.environ.get('SMTP_PORT', '587'))
-        smtp_user = result[6] or os.environ.get('SMTP_USER')
-        smtp_password = result[7] or os.environ.get('SMTP_PASSWORD')
-        smtp_from = result[8] or smtp_user or os.environ.get('SMTP_FROM')
-        smtp_from_name = result[9] or os.environ.get('SMTP_FROM_NAME', 'NextRIS')
+        # Configuración SMTP (primero por facility, con fallback a variables globales)
+        env_smtp_server = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+        env_smtp_port_raw = os.environ.get('SMTP_PORT', '587')
+        env_smtp_user = os.environ.get('SMTP_USER')
+        env_smtp_password = os.environ.get('SMTP_PASSWORD')
+        env_smtp_from = os.environ.get('SMTP_FROM')
+        env_smtp_from_name = os.environ.get('SMTP_FROM_NAME', 'NextRIS')
+
+        def _safe_port(value, default=587):
+            try:
+                return int(value)
+            except Exception:
+                return int(default)
+
+        smtp_server = result[4] or env_smtp_server
+        smtp_port = _safe_port(result[5] or env_smtp_port_raw, 587)
+        smtp_user = result[6] or env_smtp_user
+        smtp_password = result[7] or env_smtp_password
+        smtp_from = result[8] or smtp_user or env_smtp_from
+        smtp_from_name = result[9] or env_smtp_from_name
         use_tls = result[10] if result[10] is not None else True
         
         study_uid = result[11]
         has_images = bool(result[12])
+        facility_id = result[13]
+        already_publicated = bool(result[14])
+
+        if facility_id:
+            is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'distribute')
+            if not is_allowed:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': limit_payload.get('message', 'Límite de distribución alcanzado para el plan actual'),
+                    'code': limit_payload.get('reason', 'DISTRIBUTE_LIMIT_REACHED'),
+                    'data': {
+                        'limits': limit_payload.get('limits'),
+                        'usage': limit_payload.get('usage'),
+                    }
+                }), 409
         
         if not pdf_path or not os.path.exists(pdf_path):
             cursor.close()
@@ -317,11 +398,23 @@ def send_report_email(exam_id):
             }), 404
         
         if not smtp_user or not smtp_password:
+            smtp_fallback = get_smtp_fallback_from_any_facility(connection)
+            if smtp_fallback:
+                smtp_server = smtp_fallback.get('smtp_server') or smtp_server
+                smtp_port = _safe_port(smtp_fallback.get('smtp_port') or smtp_port, 587)
+                smtp_user = smtp_fallback.get('smtp_user') or smtp_user
+                smtp_password = smtp_fallback.get('smtp_password') or smtp_password
+                smtp_from = smtp_fallback.get('smtp_from') or smtp_user or smtp_from
+                smtp_from_name = smtp_fallback.get('smtp_from_name') or smtp_from_name
+                if smtp_fallback.get('use_tls') is not None:
+                    use_tls = bool(smtp_fallback.get('use_tls'))
+
+        if not smtp_user or not smtp_password:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
-                'message': 'Configuración SMTP incompleta. Configure SMTP_USER y SMTP_PASSWORD en las variables de entorno o en la base de datos.',
+                'message': 'Configuración SMTP incompleta. Configure SMTP_USER y SMTP_PASSWORD en la institución activa o en variables de entorno.',
                 'data': {
                     'smtp_configured': False,
                     'smtp_server': smtp_server,
@@ -332,29 +425,97 @@ def send_report_email(exam_id):
             }), 500
         
         # Crear mensaje de email
-        msg = MIMEMultipart()
+        msg = MIMEMultipart('mixed')
         msg['From'] = f"{smtp_from_name} <{smtp_from}>"
         msg['To'] = email
         msg['Subject'] = f'Informe Médico - {study_type}'
-        
+
         # Generar link del visor DICOM si hay imágenes
-        viewer_link = ""
+        viewer_url = ""
+        viewer_text_block = ""
+        viewer_html_block = ""
         if has_images and study_uid:
-            viewer_link = f"\n\nPara visualizar las imágenes médicas, acceda al siguiente enlace:\nhttps://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}\n"
-        
-        body = f"""
-Estimado/a {patient_name},
+            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_text_block = (
+                "\n\nPuede visualizar las imágenes médicas en el siguiente enlace:\n"
+                f"{viewer_url}\n"
+            )
+            viewer_html_block = f"""
+            <div style=\"margin: 20px 0 0 0;\">
+                <a href=\"{viewer_url}\" style=\"display:inline-block; background:#6f2cff; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; padding:12px 18px; border-radius:8px;\" target=\"_blank\" rel=\"noopener noreferrer\">Ver Imágenes Médicas</a>
+            </div>
+            """
 
-Adjunto encontrará el informe médico correspondiente al estudio: {study_type}
-Número de acceso: {accession_number}
-{viewer_link}
-Este es un mensaje automático, por favor no responder.
+        patient_name_safe = html.escape(patient_name or "Paciente")
+        study_type_safe = html.escape(study_type or "Estudio")
+        accession_safe = html.escape(accession_number or "N/A")
+        sender_name_safe = html.escape(smtp_from_name or "NextRIS")
 
-Saludos cordiales,
-{smtp_from_name}
+        body_text = (
+            f"Estimado/a {patient_name or 'Paciente'},\n\n"
+            "Le enviamos adjunto su informe médico en formato PDF.\n\n"
+            f"Estudio: {study_type or 'Estudio'}\n"
+            f"Número de acceso: {accession_number or 'N/A'}"
+            f"{viewer_text_block}\n"
+            "Este es un mensaje automático. Por favor, no responder a este correo.\n\n"
+            f"Atentamente,\n{smtp_from_name or 'NextRIS'}"
+        )
+
+        body_html = f"""
+<!DOCTYPE html>
+<html lang=\"es\">
+<head>
+    <meta charset=\"UTF-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+    <title>Informe Médico - NextRIS</title>
+</head>
+<body style=\"margin:0; padding:0; background:#0f1226; font-family:Arial, Helvetica, sans-serif;\">
+    <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background:#0f1226; padding:24px 12px;\">
+        <tr>
+            <td align=\"center\">
+                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"max-width:640px; background:#161a33; border:1px solid #2a2f57; border-radius:14px; overflow:hidden;\">
+                    <tr>
+                        <td style=\"padding:20px 24px; background:linear-gradient(135deg,#7b2cff 0%,#4e1cd2 100%); color:#ffffff;\">
+                            <div style=\"font-size:22px; font-weight:700; letter-spacing:0.2px;\">NextRIS</div>
+                            <div style=\"font-size:13px; opacity:0.9; margin-top:4px;\">Distribución de Informes Médicos</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:24px; color:#e8ebff;\">
+                            <p style=\"margin:0 0 14px 0; font-size:16px; line-height:1.5;\">Estimado/a <strong>{patient_name_safe}</strong>:</p>
+                            <p style=\"margin:0 0 18px 0; font-size:15px; line-height:1.6; color:#cdd3ff;\">Le enviamos adjunto su informe médico en formato PDF.</p>
+
+                            <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background:#11152d; border:1px solid #2b325f; border-radius:10px;\">
+                                <tr>
+                                    <td style=\"padding:14px 16px; font-size:14px; color:#dbe1ff;\">
+                                        <div style=\"margin-bottom:6px;\"><strong>Estudio:</strong> {study_type_safe}</div>
+                                        <div><strong>Número de acceso:</strong> {accession_safe}</div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            {viewer_html_block}
+
+                            <p style=\"margin:24px 0 0 0; font-size:12px; color:#97a0d6; line-height:1.5;\">Este es un mensaje automático generado por NextRIS. Por favor, no responder a este correo.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:14px 24px; border-top:1px solid #2a2f57; background:#131731; color:#9aa3da; font-size:12px;\">
+                            Atentamente, {sender_name_safe}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
         """
-        
-        msg.attach(MIMEText(body, 'plain'))
+
+        alternative_part = MIMEMultipart('alternative')
+        alternative_part.attach(MIMEText(body_text, 'plain', 'utf-8'))
+        alternative_part.attach(MIMEText(body_html, 'html', 'utf-8'))
+        msg.attach(alternative_part)
         
         # Adjuntar PDF
         with open(pdf_path, 'rb') as attachment:
@@ -376,14 +537,61 @@ Saludos cordiales,
                 'success': False,
                 'message': 'Configuración SMTP incompleta'
             }), 500
-        
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        if use_tls:
-            server.starttls()
-        server.login(smtp_user, smtp_password)
+
         text = msg.as_string()
-        server.sendmail(smtp_from, email, text)
-        server.quit()
+
+        def _send_with_smtp(server_host, server_port, user_name, password_value, sender_email, sender_name, tls_enabled):
+            smtp_client = smtplib.SMTP(server_host, server_port)
+            sent_ok = False
+            try:
+                if tls_enabled:
+                    smtp_client.starttls()
+                smtp_client.login(user_name, password_value)
+                smtp_client.sendmail(sender_email, email, text)
+                sent_ok = True
+            finally:
+                try:
+                    smtp_client.quit()
+                except Exception:
+                    # Evita reintentos/doble envío cuando el correo ya salió pero falló el cierre SMTP.
+                    if not sent_ok:
+                        raise
+
+        send_error = None
+        try:
+            _send_with_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls)
+        except Exception as smtp_error:
+            send_error = smtp_error
+
+            # Fallback: reintentar con SMTP global si el principal era configuración de facility.
+            fallback_server = env_smtp_server
+            fallback_port = _safe_port(env_smtp_port_raw, 587)
+            fallback_user = env_smtp_user
+            fallback_password = env_smtp_password
+            fallback_from = env_smtp_from or fallback_user
+            fallback_name = env_smtp_from_name
+
+            can_retry_with_env = bool(fallback_user and fallback_password)
+            primary_is_different = (
+                str(smtp_server or '') != str(fallback_server or '')
+                or str(smtp_user or '') != str(fallback_user or '')
+                or int(smtp_port or 0) != int(fallback_port or 0)
+            )
+
+            if can_retry_with_env and primary_is_different:
+                _send_with_smtp(
+                    fallback_server,
+                    fallback_port,
+                    fallback_user,
+                    fallback_password,
+                    fallback_from,
+                    fallback_name,
+                    True,
+                )
+                send_error = None
+
+        if send_error is not None:
+            raise send_error
         
         # Registrar envío en cola de emails
         # Nota: tbemailqueue table doesn't exist yet, so we skip this for now
@@ -402,6 +610,10 @@ Saludos cordiales,
             WHERE guid = %s
         """
         cursor.execute(update_query, (exam_id,))
+
+        if facility_id and not already_publicated:
+            increment_usage_counter(connection, facility_id, 'distributed', 1)
+
         connection.commit()
         
         cursor.close()
@@ -413,6 +625,8 @@ Saludos cordiales,
         }), 200
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'message': f'Error al enviar email: {str(e)}'
@@ -838,7 +1052,9 @@ def send_report_whatsapp(exam_id):
                 f.whatsapp_is_active,
                 ex.studyinstanceuid,
                 COALESCE(ex.isimage, 0) as has_images,
-                COALESCE(f.smtp_from_name, f.name, 'NextRIS') as sender_name
+                COALESCE(f.smtp_from_name, f.name, 'NextRIS') as sender_name,
+                f.guid as facility_id,
+                COALESCE(ex.ispublicated, 0) as is_publicated
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
@@ -871,6 +1087,23 @@ def send_report_whatsapp(exam_id):
         study_uid = result[8]
         has_images = bool(result[9])
         sender_name = result[10]
+        facility_id = result[11]
+        already_publicated = bool(result[12])
+
+        if facility_id and not already_publicated:
+            is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'distribute')
+            if not is_allowed:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': limit_payload.get('message', 'Límite de distribución alcanzado para el plan actual'),
+                    'code': limit_payload.get('reason', 'DISTRIBUTE_LIMIT_REACHED'),
+                    'data': {
+                        'limits': limit_payload.get('limits'),
+                        'usage': limit_payload.get('usage'),
+                    }
+                }), 409
 
         # Validar configuración WhatsApp
         if not wa_is_active:
@@ -947,6 +1180,10 @@ def send_report_whatsapp(exam_id):
             WHERE guid = %s
         """
         cursor.execute(update_query, (exam_id,))
+
+        if facility_id and not already_publicated:
+            increment_usage_counter(connection, facility_id, 'distributed', 1)
+
         connection.commit()
 
         cursor.close()

@@ -124,6 +124,107 @@ def normalize_location_ids(raw_location_ids):
     return normalized
 
 
+def _get_current_user_id() -> str:
+    """Retorna el GUID del usuario autenticado desde el JWT."""
+    identity = get_jwt_identity()
+    if isinstance(identity, str):
+        return identity
+    if isinstance(identity, dict):
+        return (
+            identity.get("id") or
+            identity.get("guid") or
+            identity.get("user_id") or
+            ""
+        )
+    return ""
+
+
+def _is_sysadmin_templates(conn, user_id: str) -> bool:
+    """Verifica si el usuario tiene rol sysadmin/admin."""
+    if not user_id:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT r.description
+            FROM nextris.tbuser u
+            JOIN nextris.isrole r ON r.guid = u.idrole
+            WHERE u.guid = %s
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return False
+        role_name = (row[0] or "").strip().lower()
+        return role_name in ("sysadmin", "admin", "administrador")
+    except Exception:
+        return False
+
+
+def ensure_owner_id_schema(conn):
+    """Garantiza columna owner_id con backfill de históricos a 'nextris'."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name   = 'tbinfpredef'
+                  AND column_name  = 'owner_id'
+            )
+            """
+        )
+        if not cur.fetchone()[0]:
+            cur.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN owner_id VARCHAR(45) NOT NULL DEFAULT 'nextris'
+                """
+            )
+            cur.execute(
+                """
+                UPDATE nextris.tbinfpredef
+                SET owner_id = 'nextris'
+                WHERE owner_id IS NULL OR TRIM(owner_id) = ''
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tbinfpredef_owner_id
+                ON nextris.tbinfpredef (owner_id)
+                """
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def ensure_user_default_schema(conn):
+    """Crea tabla para defaults personales de usuario si no existe."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nextris.tbinfpredef_user_default (
+                user_id       VARCHAR(45) NOT NULL,
+                template_id   VARCHAR(45) NOT NULL,
+                study_type_id VARCHAR(45) NOT NULL,
+                created_on    TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, study_type_id)
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def sync_template_locations(conn, template_id, location_ids):
     """Sincroniza las locations asociadas a una plantilla."""
     cur = conn.cursor()
@@ -210,8 +311,13 @@ def get_templates():
         conn = psycopg2.connect(**config)
         ensure_report_type_schema(conn)
         ensure_template_location_schema(conn)
+        ensure_owner_id_schema(conn)
+        ensure_user_default_schema(conn)
         cur = conn.cursor()
-        
+
+        user_id = _get_current_user_id()
+        is_admin = _is_sysadmin_templates(conn, user_id)
+
         # Construir query con filtros dinámicos
         query = """
             SELECT 
@@ -235,7 +341,13 @@ def get_templates():
                         WHERE rel.template_id = ip.guid
                     ),
                     ARRAY[]::VARCHAR[]
-                ) AS location_ids
+                ) AS location_ids,
+                COALESCE(ip.owner_id, 'nextris') AS owner_id,
+                EXISTS (
+                    SELECT 1 FROM nextris.tbinfpredef_user_default ud
+                    WHERE ud.user_id = %s AND ud.template_id = ip.guid
+                ) AS is_user_default,
+                (ist.default_predef_id = ip.guid) AS is_system_default
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -243,7 +355,12 @@ def get_templates():
             WHERE 1=1
         """
         
-        params = []
+        params = [user_id]  # primer param para is_user_default
+
+        # Filtro de visibilidad: sistema + propias (sysadmin ve todo)
+        if not is_admin:
+            query += " AND (ip.owner_id = 'nextris' OR ip.owner_id = %s)"
+            params.append(user_id)
         
         if study_type_id:
             query += " AND ip.studytype_id = %s"
@@ -271,13 +388,23 @@ def get_templates():
         
         templates = []
         for row in results:
+            owner_id = row[14] or 'nextris'
+            can_edit = is_admin or owner_id == user_id
+            can_delete = is_admin or owner_id == user_id
+            is_user_default = bool(row[15])
+            is_system_default = bool(row[16]) if row[16] is not None else False
             if simple:
                 templates.append({
                     'guid': row[0],
                     'title': row[1] or '',
                     'study_type_description': row[3] or '',
                     'report_type': row[12] or 'simple',
-                    'location_ids': row[13] or []
+                    'location_ids': row[13] or [],
+                    'owner_id': owner_id,
+                    'can_edit': can_edit,
+                    'can_delete': can_delete,
+                    'is_user_default': is_user_default,
+                    'is_system_default': is_system_default,
                 })
             else:
                 templates.append({
@@ -294,7 +421,12 @@ def get_templates():
                     'impression': row[10] or '',
                     'conclusion': row[11] or '',
                     'report_type': row[12] or 'simple',
-                    'location_ids': row[13] or []
+                    'location_ids': row[13] or [],
+                    'owner_id': owner_id,
+                    'can_edit': can_edit,
+                    'can_delete': can_delete,
+                    'is_user_default': is_user_default,
+                    'is_system_default': is_system_default,
                 })
         
         return jsonify({
@@ -352,8 +484,13 @@ def get_template(template_id):
         conn = psycopg2.connect(**config)
         ensure_report_type_schema(conn)
         ensure_template_location_schema(conn)
+        ensure_owner_id_schema(conn)
+        ensure_user_default_schema(conn)
         cur = conn.cursor()
-        
+
+        user_id = _get_current_user_id()
+        is_admin = _is_sysadmin_templates(conn, user_id)
+
         query = """
             SELECT 
                 ip.guid, 
@@ -376,20 +513,36 @@ def get_template(template_id):
                         WHERE rel.template_id = ip.guid
                     ),
                     ARRAY[]::VARCHAR[]
-                ) AS location_ids
+                ) AS location_ids,
+                COALESCE(ip.owner_id, 'nextris') AS owner_id,
+                EXISTS (
+                    SELECT 1 FROM nextris.tbinfpredef_user_default ud
+                    WHERE ud.user_id = %s AND ud.template_id = ip.guid
+                ) AS is_user_default,
+                (ist.default_predef_id = ip.guid) AS is_system_default
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
             LEFT JOIN nextris.isanatomicalpart iap ON ist.bodypart_id = iap.guid
             WHERE ip.guid = %s
         """
-        
-        cur.execute(query, (template_id,))
+
+        params = [user_id, template_id]
+        if not is_admin:
+            query += " AND (ip.owner_id = 'nextris' OR ip.owner_id = %s)"
+            params.append(user_id)
+
+        cur.execute(query, params)
         result = cur.fetchone()
         cur.close()
         conn.close()
         
         if result:
+            owner_id = result[14] or 'nextris'
+            can_edit = is_admin or owner_id == user_id
+            can_delete = is_admin or owner_id == user_id
+            is_user_default = bool(result[15])
+            is_system_default = bool(result[16]) if result[16] is not None else False
             template = {
                 'guid': result[0],
                 'title': result[1] or '',
@@ -404,7 +557,12 @@ def get_template(template_id):
                 'impression': result[10] or '',
                 'conclusion': result[11] or '',
                 'report_type': result[12] or 'simple',
-                'location_ids': result[13] or []
+                'location_ids': result[13] or [],
+                'owner_id': owner_id,
+                'can_edit': can_edit,
+                'can_delete': can_delete,
+                'is_user_default': is_user_default,
+                'is_system_default': is_system_default,
             }
             
             return jsonify({
@@ -508,13 +666,19 @@ def create_template():
         conn = psycopg2.connect(**config)
         ensure_report_type_schema(conn)
         ensure_template_location_schema(conn)
+        ensure_owner_id_schema(conn)
+        ensure_user_default_schema(conn)
         cur = conn.cursor()
-        
+
+        # El creador de la plantilla es el usuario autenticado
+        owner_id = _get_current_user_id()
+        is_admin = _is_sysadmin_templates(conn, owner_id)
+
         # Insertar plantilla
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id, report_type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (guid, tittle, findings, impression, technique, conclusion, studytype_id, report_type, owner_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cur.execute(insert_query, (
@@ -525,7 +689,8 @@ def create_template():
             technique,
             conclusion,
             study_type_id,
-            report_type
+            report_type,
+            owner_id
         ))
 
         sync_template_locations(
@@ -534,14 +699,24 @@ def create_template():
             location_ids if report_type == 'inteligente' else []
         )
         
-        # Si es default, actualizar el tipo de estudio
+        # Si es default: sysadmin actualiza global; usuario normal registra su default personal
         if is_default:
-            update_query = """
-                UPDATE nextris.isstudytype 
-                SET default_predef_id = %s 
-                WHERE guid = %s
-            """
-            cur.execute(update_query, (new_guid, study_type_id))
+            if is_admin:
+                cur.execute(
+                    "UPDATE nextris.isstudytype SET default_predef_id = %s WHERE guid = %s",
+                    (new_guid, study_type_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO nextris.tbinfpredef_user_default (user_id, template_id, study_type_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, study_type_id) DO UPDATE
+                        SET template_id = EXCLUDED.template_id,
+                            created_on  = CURRENT_TIMESTAMP
+                    """,
+                    (owner_id, new_guid, study_type_id)
+                )
         
         conn.commit()
         cur.close()
@@ -606,22 +781,38 @@ def edit_template(template_id):
         
         data = request.get_json()
         
-        # Validar que la plantilla existe
+        # Validar que la plantilla existe y obtener su owner
         conn = psycopg2.connect(**config)
         ensure_report_type_schema(conn)
         ensure_template_location_schema(conn)
+        ensure_owner_id_schema(conn)
         cur = conn.cursor()
-        
-        check_query = "SELECT guid FROM nextris.tbinfpredef WHERE guid = %s"
+
+        user_id = _get_current_user_id()
+        is_admin = _is_sysadmin_templates(conn, user_id)
+
+        check_query = "SELECT guid, COALESCE(owner_id, 'nextris') FROM nextris.tbinfpredef WHERE guid = %s"
         cur.execute(check_query, (template_id,))
+        existing = cur.fetchone()
         
-        if not cur.fetchone():
+        if not existing:
             cur.close()
             conn.close()
             return jsonify({
                 'success': False,
                 'message': 'Plantilla no encontrada'
             }), 404
+
+        template_owner_id = existing[1]
+
+        # Control de permisos: solo el dueño o sysadmin puede editar
+        if not is_admin and template_owner_id != user_id:
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'No tiene permiso para editar esta plantilla'
+            }), 403
         
         # Extraer datos para actualizar
         title = data.get('title', '').strip()
@@ -743,19 +934,35 @@ def delete_template(template_id):
         conn = psycopg2.connect(**config)
         ensure_report_type_schema(conn)
         ensure_template_location_schema(conn)
+        ensure_owner_id_schema(conn)
         cur = conn.cursor()
-        
-        # Verificar que la plantilla existe
-        check_query = "SELECT guid FROM nextris.tbinfpredef WHERE guid = %s"
+
+        user_id = _get_current_user_id()
+        is_admin = _is_sysadmin_templates(conn, user_id)
+
+        # Verificar que la plantilla existe y obtener su owner
+        check_query = "SELECT guid, COALESCE(owner_id, 'nextris') FROM nextris.tbinfpredef WHERE guid = %s"
         cur.execute(check_query, (template_id,))
+        existing = cur.fetchone()
         
-        if not cur.fetchone():
+        if not existing:
             cur.close()
             conn.close()
             return jsonify({
                 'success': False,
                 'message': 'Plantilla no encontrada'
             }), 404
+
+        template_owner_id = existing[1]
+
+        # Control de permisos: solo el dueño o sysadmin puede eliminar
+        if not is_admin and template_owner_id != user_id:
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'No tiene permiso para eliminar esta plantilla'
+            }), 403
         
         # Verificar si está siendo usada como default en algún tipo de estudio
         default_check = """
@@ -777,9 +984,13 @@ def delete_template(template_id):
             cur.execute(clear_default, (template_id,))
             print(f"[API TEMPLATES] Referencias de default eliminadas para la plantilla {template_id}")
         
-        # Eliminar relaciones de locations y luego la plantilla
+        # Eliminar relaciones de locations, user-defaults y luego la plantilla
         cur.execute(
             "DELETE FROM nextris.rel_infpredef_location WHERE template_id = %s",
+            (template_id,)
+        )
+        cur.execute(
+            "DELETE FROM nextris.tbinfpredef_user_default WHERE template_id = %s",
             (template_id,)
         )
 
@@ -926,3 +1137,88 @@ def set_default_template():
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/templates/<template_id>/set-user-default', methods=['POST'])
+@jwt_required()
+def set_user_default_template(template_id):
+    """Establece una plantilla propia como el default personal del usuario para ese tipo de estudio."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de BD'}), 500
+
+        conn = psycopg2.connect(**config)
+        ensure_user_default_schema(conn)
+        cur = conn.cursor()
+
+        user_id = _get_current_user_id()
+
+        # Obtener study_type_id y verificar que el usuario tiene acceso
+        cur.execute(
+            "SELECT studytype_id, COALESCE(owner_id, 'nextris') FROM nextris.tbinfpredef WHERE guid = %s",
+            (template_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close(); conn.close()
+            return jsonify({'success': False, 'message': 'Plantilla no encontrada'}), 404
+
+        study_type_id, owner_id = row
+        is_admin = _is_sysadmin_templates(conn, user_id)
+
+        if not is_admin and owner_id != user_id:
+            cur.close(); conn.close()
+            return jsonify({'success': False, 'message': 'Solo puedes establecer como default tus propias plantillas'}), 403
+
+        cur.execute(
+            """
+            INSERT INTO nextris.tbinfpredef_user_default (user_id, template_id, study_type_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, study_type_id) DO UPDATE
+                SET template_id = EXCLUDED.template_id,
+                    created_on  = CURRENT_TIMESTAMP
+            """,
+            (user_id, template_id, study_type_id)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'success': True, 'data': {'message': 'Default personal establecido'}}), 200
+
+    except Exception as e:
+        print(f"[API TEMPLATES] Error en set_user_default_template: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/templates/<template_id>/set-user-default', methods=['DELETE'])
+@jwt_required()
+def unset_user_default_template(template_id):
+    """Quita el default personal del usuario para la plantilla indicada."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de BD'}), 500
+
+        conn = psycopg2.connect(**config)
+        ensure_user_default_schema(conn)
+        cur = conn.cursor()
+
+        user_id = _get_current_user_id()
+
+        cur.execute(
+            "DELETE FROM nextris.tbinfpredef_user_default WHERE user_id = %s AND template_id = %s",
+            (user_id, template_id)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'success': True, 'data': {'message': 'Default personal eliminado'}}), 200
+
+    except Exception as e:
+        print(f"[API TEMPLATES] Error en unset_user_default_template: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500

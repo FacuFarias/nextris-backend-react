@@ -13,7 +13,12 @@ import os
 import re
 import html
 from decimal import Decimal, InvalidOperation
+from apps.api.facility_plan_usage import ensure_plan_management_schema, increment_usage_counter, check_limit_before_action
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
+
+# Flags para ejecutar migraciones de esquema solo una vez por ciclo de vida del proceso
+_schema_report_type_ensured = False
+_schema_template_location_ensured = False
 
 
 def get_db_config():
@@ -37,8 +42,77 @@ def get_user_locations(user_id, connection):
     cursor.close()
     return locations
 
+
+def resolve_facility_id_for_usage(connection, exam_facility_id, requested_facility_id, user_id):
+    """Resolve facility for plan usage counters with safe fallbacks."""
+    if exam_facility_id:
+        return str(exam_facility_id)
+
+    cursor = connection.cursor()
+    try:
+        requested = str(requested_facility_id or '').strip()
+        if requested:
+            cursor.execute(
+                "SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
+                (requested,),
+            )
+            if cursor.fetchone():
+                return requested
+
+        user_locations = get_user_locations(user_id, connection)
+        if user_locations:
+            cursor.execute(
+                """
+                SELECT facility_id
+                FROM nextris.tblocation
+                WHERE guid = ANY(%s)
+                  AND facility_id IS NOT NULL
+                LIMIT 1
+                """,
+                (user_locations,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0])
+    finally:
+        cursor.close()
+
+    return None
+
+
+def ensure_location_report_execution_column(connection):
+    """Ensure workflow execution requirement flag exists on locations."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tblocation
+            ADD COLUMN IF NOT EXISTS require_execution_before_reporting BOOLEAN NOT NULL DEFAULT TRUE
+            """
+        )
+        connection.commit()
+    finally:
+        cursor.close()
+
+
+def can_edit_or_sign_report(is_executed, requires_execution):
+    """Validate if report actions are allowed based on location workflow settings."""
+    return (not requires_execution) or bool(is_executed)
+
+
+def workflow_execution_error_response():
+    """Standard workflow validation error payload."""
+    return {
+        'success': False,
+        'message': 'La ubicación requiere ejecución previa del examen antes de redactar o firmar el reporte.',
+        'code': 'WORKFLOW_EXECUTION_REQUIRED',
+    }
+
 def ensure_report_type_schema(connection):
-    """Garantiza columna report_type y normaliza datos historicos."""
+    """Garantiza columna report_type y normaliza datos historicos. Solo corre una vez por proceso."""
+    global _schema_report_type_ensured
+    if _schema_report_type_ensured:
+        return
     cursor = connection.cursor()
     try:
         cursor.execute(
@@ -84,11 +158,15 @@ def ensure_report_type_schema(connection):
         )
 
         connection.commit()
+        _schema_report_type_ensured = True
     finally:
         cursor.close()
 
 def ensure_template_location_schema(connection):
-    """Garantiza tabla de relacion plantilla-location."""
+    """Garantiza tabla de relacion plantilla-location. Solo corre una vez por proceso."""
+    global _schema_template_location_ensured
+    if _schema_template_location_ensured:
+        return
     cursor = connection.cursor()
     try:
         cursor.execute(
@@ -103,6 +181,7 @@ def ensure_template_location_schema(connection):
             """
         )
         connection.commit()
+        _schema_template_location_ensured = True
     finally:
         cursor.close()
 
@@ -1197,10 +1276,12 @@ def get_examinations_for_reporting():
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
+        facility_id = request.args.get('facility_id')
         
         print(f"[PARAMS] modality_id={modality_id}, body_part_id={body_part_id}, study_group_id={study_group_id}")
         
         connection = psycopg2.connect(**config)
+        ensure_location_report_execution_column(connection)
         user_locations = get_user_locations(user_id, connection)
         
         if not user_locations:
@@ -1270,14 +1351,17 @@ def get_examinations_for_reporting():
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-            LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
+            LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
             LEFT JOIN nextris.tbreport rep ON e.Guid = rep.IdExamination
             LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
             LEFT JOIN nextris.tbuser ub ON e.blockby::text = ub.guid
-            WHERE eq.location_id IN ({location_placeholders})
-            AND e.IsExecuted = 1
+            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
+            AND (
+                COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
+                OR e.IsExecuted = 1
+            )
             {reported_filter}
         """
         
@@ -1310,6 +1394,10 @@ def get_examinations_for_reporting():
             print(f"[FILTER] Aplicando filtro study_group_id: {study_group_id}")
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
+
+        if facility_id:
+            base_query += " AND loc.facility_id = %s"
+            params.append(facility_id)
         
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
@@ -1683,12 +1771,22 @@ def update_examination_report(exam_id):
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+        ensure_location_report_execution_column(connection)
+        ensure_plan_management_schema(connection)
         
         # Verificar que el examen existe
         cursor.execute("""
-            SELECT IdPatient, AdmisionNumber
-            FROM nextris.tbexamination
-            WHERE Guid = %s
+            SELECT e.IdPatient,
+                   e.AdmisionNumber,
+                   COALESCE(e.IsExecuted, 0) AS is_executed,
+                     COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
+                     COALESCE(e.IsReported, 0) AS is_reported,
+                     l.facility_id
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
+              LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
+                  LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
+            WHERE e.Guid = %s
         """, (exam_id,))
         
         exam = cursor.fetchone()
@@ -1702,6 +1800,15 @@ def update_examination_report(exam_id):
         
         patient_id = exam[0]
         admission_number = exam[1]
+        is_executed = bool(exam[2])
+        require_execution_before_reporting = bool(exam[3])
+        already_reported = bool(exam[4])
+        facility_id = exam[5]
+
+        if not can_edit_or_sign_report(is_executed, require_execution_before_reporting):
+            cursor.close()
+            connection.close()
+            return jsonify(workflow_execution_error_response()), 400
         
         # Verificar si ya existe un reporte
         cursor.execute("""
@@ -1761,11 +1868,26 @@ def update_examination_report(exam_id):
         
         # Marcar examen como reportado si se solicita
         if mark_as_reported:
+            if not already_reported and facility_id:
+                is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'read')
+                if not is_allowed:
+                    cursor.close()
+                    connection.close()
+                    return jsonify({
+                        'success': False,
+                        'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
+                        'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
+                        'data': limit_payload,
+                    }), 403
+
             cursor.execute("""
                 UPDATE nextris.tbexamination
                 SET IsReported = 1
                 WHERE Guid = %s
             """, (exam_id,))
+
+            if not already_reported and facility_id:
+                increment_usage_counter(connection, facility_id, 'read', 1)
         
         connection.commit()
         cursor.close()
@@ -2520,6 +2642,7 @@ def get_next_exam():
         modality_id = data.get('modality_id')
         body_part_id = data.get('body_part_id')
         study_group_id = data.get('study_group_id')
+        facility_id = data.get('facility_id')
         
         config = get_db_config()
         if not config:
@@ -2572,8 +2695,12 @@ def get_next_exam():
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-            WHERE eq.location_id IN ({location_placeholders})
-            AND e.IsExecuted = 1
+            LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
+            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
+            AND (
+                COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
+                OR e.IsExecuted = 1
+            )
             AND e.Guid != %s
             {reported_filter}
         """
@@ -2598,6 +2725,10 @@ def get_next_exam():
         if study_group_id:
             query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
+
+        if facility_id:
+            query += " AND loc.facility_id = %s"
+            params.append(facility_id)
         
         # Ordenar y limitar a 1
         if current_created_on:
@@ -2675,6 +2806,7 @@ def sign_report(exam_id):
     """
     try:
         data = request.get_json(force=True, silent=True) or {}
+        requested_facility_id = data.get('facility_id')
         
         # Obtener ID del médico que firma
         reporter_physician_id = data.get('reporter_physician_id')
@@ -2691,12 +2823,25 @@ def sign_report(exam_id):
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+        ensure_location_report_execution_column(connection)
+        ensure_plan_management_schema(connection)
         
         # Obtener datos del examen para el nombre del PDF
         cursor.execute("""
-            SELECT e.LocalAcc, p.PatientId, p.Name, p.Surname, e.IdPatient
+            SELECT e.LocalAcc,
+                   p.PatientId,
+                   p.Name,
+                   p.Surname,
+                   e.IdPatient,
+                   COALESCE(e.IsExecuted, 0) AS is_executed,
+                   COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
+                   COALESCE(e.IsReported, 0) AS is_reported,
+                   l.facility_id
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
+            LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
+            LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
+            LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -2709,7 +2854,19 @@ def sign_report(exam_id):
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
         
-        accession_number, patient_id, patient_name, patient_surname, patient_guid = exam_data
+        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_executed, require_execution_before_reporting, is_reported, facility_id = exam_data
+        already_reported = bool(is_reported)
+        usage_facility_id = resolve_facility_id_for_usage(
+            connection,
+            facility_id,
+            requested_facility_id,
+            reporter_physician_id,
+        )
+
+        if not can_edit_or_sign_report(bool(is_executed), bool(require_execution_before_reporting)):
+            cursor.close()
+            connection.close()
+            return jsonify(workflow_execution_error_response()), 400
         
         # Crear nombre del PDF: <acc_number>_<patient_id>_<patient_name>.pdf
         # Limpiar caracteres especiales del nombre y manejar valores None
@@ -2784,6 +2941,18 @@ def sign_report(exam_id):
             SET IsReported=1, assignto=%s, reportdate=CURRENT_TIMESTAMP
             WHERE Guid=%s
         """
+        if not already_reported and usage_facility_id:
+            is_allowed, limit_payload = check_limit_before_action(connection, usage_facility_id, 'read')
+            if not is_allowed:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
+                    'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
+                    'data': limit_payload,
+                }), 403
+
         cursor.execute(query, (reporter_physician_id, exam_id))
 
         if cursor.rowcount == 0:
@@ -2800,6 +2969,9 @@ def sign_report(exam_id):
             SET pdfpath = %s, iduser = %s
             WHERE idexamination = %s
         """, (pdf_relative_path, reporter_physician_id, exam_id))
+
+        if not already_reported and usage_facility_id:
+            increment_usage_counter(connection, usage_facility_id, 'read', 1)
 
         connection.commit()
 
@@ -2860,8 +3032,12 @@ def sign_report(exam_id):
                         LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
                         LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
                         LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-                        WHERE eq.location_id IN ({location_placeholders})
-                        AND e.IsExecuted = 1
+                        LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
+                        WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
+                        AND (
+                            COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
+                            OR e.IsExecuted = 1
+                        )
                         AND e.Guid != %s
                         {reported_filter}
                     """
@@ -2886,6 +3062,10 @@ def sign_report(exam_id):
                     if study_group_id:
                         query += " AND st.studygroup_id = %s"
                         params.append(study_group_id)
+
+                    if requested_facility_id:
+                        query += " AND loc.facility_id = %s"
+                        params.append(requested_facility_id)
                     
                     # Ordenar y limitar a 1
                     if current_created_on:

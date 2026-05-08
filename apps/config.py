@@ -39,6 +39,13 @@ class Config(object):
     # DICOM Viewer URL
     DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'http://192.168.1.42:8082/viewer.html')
 
+    # Analytics
+    ANALYTICS_ENABLED    = os.getenv('ANALYTICS_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+    ANALYTICS_STORE_IP   = os.getenv('ANALYTICS_STORE_IP', 'true').lower() in ('1', 'true', 'yes', 'on')
+    ANALYTICS_GEO_LOOKUP = os.getenv('ANALYTICS_GEO_LOOKUP', 'true').lower() in ('1', 'true', 'yes', 'on')
+    # Rutas que no se registran en analítica (prefix match)
+    ANALYTICS_EXCLUDE_PREFIXES = ['/api/health', '/api/analytics', '/static']
+
     USE_SQLITE  = False
 
     # try to set up a Relational DBMS
@@ -61,7 +68,12 @@ class Config(object):
         except Exception as e:
 
             print('> Error: DBMS Exception: ' + str(e) )
-            print('> Fallback to SQLite ')    
+            print('> Fallback to SQLite ')
+            USE_SQLITE = True
+
+    else:
+        # No DB_ENGINE configured, use SQLite
+        USE_SQLITE = True
 
     if USE_SQLITE:
 

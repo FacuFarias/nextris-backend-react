@@ -1,0 +1,28 @@
+                                            Table "nextris.tb_analytics_events"
+   Column    |            Type             | Collation | Nullable |                         Default                         
+-------------+-----------------------------+-----------+----------+---------------------------------------------------------
+ id          | bigint                      |           | not null | nextval('nextris.tb_analytics_events_id_seq'::regclass)
+ event_id    | uuid                        |           | not null | gen_random_uuid()
+ user_id     | character varying(100)      |           |          | 
+ session_id  | character varying(100)      |           |          | 
+ facility_id | character varying(100)      |           |          | 
+ event_type  | character varying(50)       |           | not null | 'api_request'::character varying
+ route       | character varying(500)      |           |          | 
+ http_method | character varying(10)       |           |          | 
+ http_status | smallint                    |           |          | 
+ duration_ms | integer                     |           |          | 
+ ip_address  | character varying(45)       |           |          | 
+ country     | character varying(100)      |           |          | 
+ city        | character varying(100)      |           |          | 
+ user_agent  | text                        |           |          | 
+ extra_data  | jsonb                       |           |          | 
+ created_at  | timestamp without time zone |           | not null | now()
+Indexes:
+    "tb_analytics_events_pkey" PRIMARY KEY, btree (id)
+    "idx_analytics_created_at" btree (created_at DESC)
+    "idx_analytics_event_type" btree (event_type)
+    "idx_analytics_facility" btree (facility_id) WHERE facility_id IS NOT NULL
+    "idx_analytics_ip" btree (ip_address) WHERE ip_address IS NOT NULL
+    "idx_analytics_session_id" btree (session_id) WHERE session_id IS NOT NULL
+    "idx_analytics_user_id" btree (user_id) WHERE user_id IS NOT NULL
+

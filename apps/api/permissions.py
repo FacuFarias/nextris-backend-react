@@ -24,6 +24,7 @@ PERMISSION_CATALOG = [
     {'code': 'tabs.distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
     {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
     {'code': 'tabs.gestion.view', 'module': 'gestion', 'action': 'view', 'description': 'Ver pestaña Gestión'},
+    {'code': 'tabs.images.view', 'module': 'images', 'action': 'view', 'description': 'Ver pestaña Imágenes'},
     {'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'},
     {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'},
     # Permisos de acciones
@@ -51,6 +52,9 @@ PERMISSION_CATALOG = [
 
     {'code': 'patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pacientes'},
     {'code': 'patients.manage', 'module': 'patients', 'action': 'manage', 'description': 'Generar nuevos pacientes / editar pacientes'},
+
+    {'code': 'images.view', 'module': 'images', 'action': 'view', 'description': 'Ver imágenes DICOM'},
+    {'code': 'images.share_link', 'module': 'images', 'action': 'share_link', 'description': 'Generar enlace compartido de imágenes'},
 
     {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
     {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
@@ -100,8 +104,17 @@ ROLE_BASED_PERMISSIONS = {
     },
     'medico': {
         'tabs.patients.view',
+        'patients.manage',
+        'tabs.admissions.view',
+        'admissions.view',
+        'admissions.create_spontaneous',
         'tabs.reports.view',
         'tabs.distribution.view',
+        'distribution.view',
+        'distribution.perform',
+        'distribution.send_report',
+        'distribution.send_report_whatsapp',
+        'distribution.update_email',
         'reports.sign',
     },
 }
@@ -271,7 +284,7 @@ def _get_user_role_name(user_id, connection):
     return row[0] if row and row[0] else None
 
 
-def get_user_permission_codes(user_id, connection=None, include_role_permissions=True):
+def get_user_permission_codes(user_id, connection=None, include_role_permissions=False):
     own_connection = connection is None
     if own_connection:
         config = get_db_config()
@@ -314,7 +327,7 @@ def get_user_permission_codes(user_id, connection=None, include_role_permissions
             connection.close()
 
 
-def user_has_permission_code(user_id, permission_code, connection=None, include_role_permissions=True):
+def user_has_permission_code(user_id, permission_code, connection=None, include_role_permissions=False):
     codes = get_user_permission_codes(
         user_id,
         connection=connection,

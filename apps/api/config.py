@@ -30,6 +30,12 @@ from werkzeug.security import check_password_hash
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from PIL import Image
+from apps.api.facility_plan_usage import (
+    ensure_plan_management_schema,
+    get_facility_plan_snapshot,
+    get_current_usage,
+    append_plan_change_audit,
+)
 
 
 def get_db_config():
@@ -45,6 +51,26 @@ def normalize_user_id(identity):
     if isinstance(identity, dict):
         return identity.get('id') or identity.get('guid') or identity.get('user_id')
     return identity
+
+
+def _get_default_smtp_settings():
+    """Resolve default SMTP settings from environment variables.
+
+    Resend defaults are used when SMTP-specific env vars are not defined.
+    """
+    smtp_password = os.environ.get('SMTP_PASSWORD') or os.environ.get('RESEND_API_KEY')
+    smtp_from = os.environ.get('SMTP_FROM') or os.environ.get('RESEND_FROM_EMAIL') or 'no-reply@nextris.cloud'
+    smtp_from_name = os.environ.get('SMTP_FROM_NAME') or os.environ.get('RESEND_FROM_NAME') or 'NextRIS'
+
+    return {
+        'smtp_server': os.environ.get('SMTP_SERVER', 'smtp.resend.com'),
+        'smtp_port': int(os.environ.get('SMTP_PORT', '587')),
+        'smtp_user': os.environ.get('SMTP_USER', 'resend'),
+        'smtp_password': smtp_password,
+        'smtp_from': smtp_from,
+        'smtp_from_name': smtp_from_name,
+        'use_tls': os.environ.get('SMTP_USE_TLS', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
+    }
 
 
 def _column_exists(connection, schema_name, table_name, column_name):
@@ -150,6 +176,57 @@ def ensure_location_status_column(connection):
         connection.commit()
     finally:
         cursor.close()
+
+
+def ensure_location_report_execution_column(connection):
+    """Ensure tblocation has workflow execution requirement flag."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tblocation
+            ADD COLUMN IF NOT EXISTS require_execution_before_reporting BOOLEAN NOT NULL DEFAULT TRUE
+            """
+        )
+        connection.commit()
+    finally:
+        cursor.close()
+
+
+def parse_bool_value(value, default=None):
+    """Parse bool values sent as bool/int/string from JSON or multipart payloads."""
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    normalized = str(value).strip().lower()
+    if normalized in ('true', '1', 'yes', 'y', 'on'):
+        return True
+    if normalized in ('false', '0', 'no', 'n', 'off'):
+        return False
+
+    return default
+
+
+def _normalize_active_status(value, default='Active'):
+    normalized = str(value if value is not None else default).strip().lower()
+    return 'Inactive' if normalized == 'inactive' else 'Active'
+
+
+def _get_facility_status(cursor, facility_id):
+    cursor.execute(
+        "SELECT status FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
+        (facility_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return _normalize_active_status(row[0])
 
 
 def _process_location_logo(logo_file, location_id):
@@ -461,6 +538,7 @@ def ensure_facility_module_tables(connection):
 
 
 def send_new_user_credentials_email(connection, email, username, temporary_password, full_name):
+    default_smtp = _get_default_smtp_settings()
     cursor = connection.cursor()
     cursor.execute(
         """
@@ -472,13 +550,13 @@ def send_new_user_credentials_email(connection, email, username, temporary_passw
     smtp_result = cursor.fetchone()
     cursor.close()
 
-    smtp_server = (smtp_result[0] if smtp_result else None) or os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-    smtp_port = (smtp_result[1] if smtp_result else None) or int(os.environ.get('SMTP_PORT', '587'))
-    smtp_user = (smtp_result[2] if smtp_result else None) or os.environ.get('SMTP_USER')
-    smtp_password = (smtp_result[3] if smtp_result else None) or os.environ.get('SMTP_PASSWORD')
-    smtp_from = (smtp_result[4] if smtp_result else None) or smtp_user or os.environ.get('SMTP_FROM')
-    smtp_from_name = (smtp_result[5] if smtp_result else None) or os.environ.get('SMTP_FROM_NAME', 'NextRIS')
-    use_tls = (smtp_result[6] if smtp_result and smtp_result[6] is not None else True)
+    smtp_server = (smtp_result[0] if smtp_result else None) or default_smtp['smtp_server']
+    smtp_port = (smtp_result[1] if smtp_result else None) or default_smtp['smtp_port']
+    smtp_user = (smtp_result[2] if smtp_result else None) or default_smtp['smtp_user']
+    smtp_password = (smtp_result[3] if smtp_result else None) or default_smtp['smtp_password']
+    smtp_from = (smtp_result[4] if smtp_result else None) or default_smtp['smtp_from'] or smtp_user
+    smtp_from_name = (smtp_result[5] if smtp_result else None) or default_smtp['smtp_from_name']
+    use_tls = (smtp_result[6] if smtp_result and smtp_result[6] is not None else default_smtp['use_tls'])
 
     if not smtp_user or not smtp_password:
         raise Exception('Configuración SMTP incompleta para enviar credenciales')
@@ -2120,6 +2198,7 @@ def get_locations():
 
         ensure_facility_patientdomain_column(connection)
         ensure_location_status_column(connection)
+        ensure_location_report_execution_column(connection)
         
         query = """
             SELECT l.guid, l.facility_id, l.name, l.code, l.address, l.phone, l.status,
@@ -2127,7 +2206,9 @@ def get_locations():
                    COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) AS id_patientdomain,
                    pd.description AS patientdomain_name,
                    l.mail, l.logo_path,
-                   l.geographic_location, l.timezone, f.name as facility_name
+                   l.geographic_location, l.timezone, f.name as facility_name,
+                     l.gateway_aet, l.gateway_ip, l.transmission_type, l.retention_days,
+                     COALESCE(l.require_execution_before_reporting, TRUE)
             FROM nextris.tblocation l
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
             LEFT JOIN nextris.ispatientdomain pd
@@ -2163,7 +2244,12 @@ def get_locations():
                 'mail': row[11],
                 'logo_path': row[12],
                 'geographic_location': row[13],
-                'timezone': row[14]
+                'timezone': row[14],
+                'gateway_aet': row[16],
+                'gateway_ip': row[17],
+                'transmission_type': row[18],
+                'retention_days': row[19],
+                'require_execution_before_reporting': bool(row[20])
             })
         
         return jsonify({
@@ -2234,6 +2320,39 @@ def create_location():
         mail = data.get('mail', '')
         geographic_location = data.get('geographic_location', '')
         timezone = data.get('timezone', '')
+        gateway_aet = data.get('gateway_aet')
+        gateway_ip = data.get('gateway_ip')
+        transmission_type = data.get('transmission_type', 'Manual')
+        retention_days = data.get('retention_days')
+        require_execution_before_reporting = parse_bool_value(
+            data.get('require_execution_before_reporting'),
+            default=True,
+        )
+
+        # Compatibilidad con frontend que envía email
+        if 'email' in data and not mail:
+            mail = data.get('email', '')
+
+        if transmission_type not in ('Manual', 'Automatic'):
+            return jsonify({
+                'success': False,
+                'message': "transmission_type debe ser 'Manual' o 'Automatic'"
+            }), 400
+
+        if retention_days in ('', None):
+            retention_days = None
+        elif str(retention_days).isdigit():
+            retention_days = int(retention_days)
+            if retention_days <= 0:
+                return jsonify({
+                    'success': False,
+                    'message': 'retention_days debe ser mayor a 0'
+                }), 400
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'retention_days debe ser numérico'
+            }), 400
         
         config = get_db_config()
         if not config:
@@ -2247,11 +2366,12 @@ def create_location():
 
         ensure_facility_patientdomain_column(connection)
         ensure_location_status_column(connection)
+        ensure_location_report_execution_column(connection)
 
         id_patientdomain = ''
         if facility_id:
             cursor.execute(
-                "SELECT id_patientdomain FROM nextris.tbfacility WHERE guid = %s",
+                "SELECT id_patientdomain, status FROM nextris.tbfacility WHERE guid = %s",
                 (facility_id,),
             )
             facility_row = cursor.fetchone()
@@ -2263,6 +2383,14 @@ def create_location():
                     'message': 'facility_id no existe'
                 }), 400
             id_patientdomain = facility_row[0] or ''
+            facility_status = _normalize_active_status(facility_row[1])
+            if status == 'Active' and facility_status == 'Inactive':
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'No se puede crear una ubicación activa para una institución inactiva'
+                }), 400
         
         new_guid = str(uuid.uuid4())
         
@@ -2270,14 +2398,18 @@ def create_location():
             INSERT INTO nextris.tblocation(
                 guid, facility_id, name, code, address, phone, status,
                 created_at, updated_at, id_patientdomain, mail, 
-                geographic_location, timezone
+                geographic_location, timezone,
+                gateway_aet, gateway_ip, transmission_type, retention_days,
+                require_execution_before_reporting
             ) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cursor.execute(query, (
             new_guid, facility_id, name, code, address, phone, status,
-            id_patientdomain, mail, geographic_location, timezone
+            id_patientdomain, mail, geographic_location, timezone,
+            gateway_aet, gateway_ip, transmission_type, retention_days,
+            require_execution_before_reporting
         ))
         
         connection.commit()
@@ -2356,16 +2488,19 @@ def update_location(location_id):
         cursor = connection.cursor()
 
         ensure_location_status_column(connection)
+        ensure_location_report_execution_column(connection)
         
         # Verificar que existe
-        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT facility_id FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        existing_location_row = cursor.fetchone()
+        if not existing_location_row:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Ubicación no encontrada'
             }), 404
+        current_facility_id = existing_location_row[0]
         
         # Construir query dinámicamente
         updates = []
@@ -2377,18 +2512,22 @@ def update_location(location_id):
         if 'code' in data:
             updates.append("code = %s")
             params.append(data['code'])
+        next_facility_id = current_facility_id
         if 'facility_id' in data:
             updates.append("facility_id = %s")
             params.append(data['facility_id'])
+            next_facility_id = data['facility_id']
         if 'address' in data:
             updates.append("address = %s")
             params.append(data['address'])
         if 'phone' in data:
             updates.append("phone = %s")
             params.append(data['phone'])
+        requested_status = None
         if 'status' in data:
             updates.append("status = %s")
-            status_value = 'Inactive' if str(data['status']).strip().lower() == 'inactive' else 'Active'
+            status_value = _normalize_active_status(data['status'])
+            requested_status = status_value
             params.append(status_value)
         # id_patientdomain se hereda desde la facility asociada.
         if 'mail' in data or 'email' in data:
@@ -2400,6 +2539,59 @@ def update_location(location_id):
         if 'timezone' in data:
             updates.append("timezone = %s")
             params.append(data['timezone'])
+        if 'gateway_aet' in data:
+            updates.append("gateway_aet = %s")
+            params.append(data['gateway_aet'])
+        if 'gateway_ip' in data:
+            updates.append("gateway_ip = %s")
+            params.append(data['gateway_ip'])
+        if 'transmission_type' in data:
+            transmission_value = data['transmission_type']
+            if transmission_value not in ('Manual', 'Automatic'):
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': "transmission_type debe ser 'Manual' o 'Automatic'"
+                }), 400
+            updates.append("transmission_type = %s")
+            params.append(transmission_value)
+        if 'retention_days' in data:
+            retention_value = data.get('retention_days')
+            if retention_value in ('', None):
+                updates.append("retention_days = NULL")
+            elif str(retention_value).isdigit():
+                retention_value = int(retention_value)
+                if retention_value <= 0:
+                    cursor.close()
+                    connection.close()
+                    return jsonify({
+                        'success': False,
+                        'message': 'retention_days debe ser mayor a 0'
+                    }), 400
+                updates.append("retention_days = %s")
+                params.append(retention_value)
+            else:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'retention_days debe ser numérico'
+                }), 400
+        if 'require_execution_before_reporting' in data:
+            require_execution_value = parse_bool_value(
+                data.get('require_execution_before_reporting'),
+                default=None,
+            )
+            if require_execution_value is None:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'require_execution_before_reporting debe ser booleano'
+                }), 400
+            updates.append("require_execution_before_reporting = %s")
+            params.append(require_execution_value)
 
         if logo_file and logo_file.filename:
             logo_path = _process_location_logo(logo_file, location_id)
@@ -2420,6 +2612,23 @@ def update_location(location_id):
                 'success': False,
                 'message': 'No hay campos para actualizar'
             }), 400
+
+        if next_facility_id and requested_status == 'Active':
+            facility_status = _get_facility_status(cursor, next_facility_id)
+            if facility_status is None:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'La institución asociada no existe'
+                }), 400
+            if facility_status == 'Inactive':
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'No se puede activar una ubicación si la institución está desactivada'
+                }), 400
         
         # Agregar updated_at
         updates.append("updated_at = NOW()")
@@ -2526,14 +2735,26 @@ def activate_location(location_id):
 
         ensure_location_status_column(connection)
 
-        cursor.execute("SELECT 1 FROM nextris.tblocation WHERE guid=%s", (location_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT facility_id FROM nextris.tblocation WHERE guid=%s", (location_id,))
+        row = cursor.fetchone()
+        if not row:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Ubicación no encontrada'
             }), 404
+        facility_id = row[0]
+
+        if facility_id:
+            facility_status = _get_facility_status(cursor, facility_id)
+            if facility_status == 'Inactive':
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'No se puede activar una ubicación si la institución está desactivada'
+                }), 409
 
         cursor.execute(
             """
@@ -2655,6 +2876,7 @@ def get_facilities():
         cursor = connection.cursor()
 
         ensure_facility_patientdomain_column(connection)
+        ensure_plan_management_schema(connection)
         
         has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
         has_patient_domain_table = _table_exists(connection, 'nextris', 'ispatientdomain')
@@ -2666,21 +2888,35 @@ def get_facilities():
                        smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                        db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                        whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                       whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                                             whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                                             p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
+                                             COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
                  FROM nextris.tbfacility f
                  LEFT JOIN nextris.ispatientdomain pd ON pd.guid = f.id_patientdomain
+                                 LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+                                 LEFT JOIN nextris.facility_plan_usage_monthly u
+                                     ON u.facility_id = f.guid
+                                    AND u.usage_year = EXTRACT(YEAR FROM NOW())::INT
+                                    AND u.usage_month = EXTRACT(MONTH FROM NOW())::INT
                  ORDER BY f.name
             """
             domain_offset = 2
         else:
             query = """
-                SELECT guid, name, code, email, contact_person, status,
+                                SELECT f.guid, f.name, f.code, f.email, f.contact_person, f.status,
                        smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                        db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                        whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                       whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-                FROM nextris.tbfacility
-                ORDER BY name
+                                             whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                                             p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
+                                             COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
+                                FROM nextris.tbfacility f
+                                LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+                                LEFT JOIN nextris.facility_plan_usage_monthly u
+                                    ON u.facility_id = f.guid
+                                 AND u.usage_year = EXTRACT(YEAR FROM NOW())::INT
+                                 AND u.usage_month = EXTRACT(MONTH FROM NOW())::INT
+                                ORDER BY f.name
             """
             domain_offset = 0
         cursor.execute(query)
@@ -2726,7 +2962,20 @@ def get_facilities():
                     'business_account_id': row[23 + domain_offset],
                     'webhook_verify_token': row[24 + domain_offset],
                     'is_active': row[25 + domain_offset]
-                }
+                },
+                'plan': {
+                    'code': row[26 + domain_offset],
+                    'name': row[27 + domain_offset],
+                    'max_receive_monthly': row[28 + domain_offset],
+                    'max_distribute_monthly': row[29 + domain_offset],
+                    'max_users': row[30 + domain_offset],
+                },
+                'usage_monthly': {
+                    'received_count': int(row[31 + domain_offset] or 0),
+                    'read_count': int(row[32 + domain_offset] or 0),
+                    'distributed_count': int(row[33 + domain_offset] or 0),
+                    'users_count_snapshot': int(row[34 + domain_offset] or 0),
+                },
             })
         
         return jsonify({
@@ -2771,6 +3020,7 @@ def create_facility():
     }
     """
     try:
+        actor_user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         
         if not data:
@@ -2797,15 +3047,17 @@ def create_facility():
         phone = data.get('phone', '')
         status = data.get('status', 'Active')
         id_patientdomain = data.get('id_patientdomain') or data.get('patientdomain_id')
+        plan_code = (data.get('plan_code') or data.get('plan_type') or 'free').strip().lower()
         
-        # Configuración SMTP (opcional)
-        smtp_server = data.get('smtp_server')
-        smtp_port = data.get('smtp_port', 587)
-        smtp_user = data.get('smtp_user')
-        smtp_password = data.get('smtp_password')
-        smtp_from = data.get('smtp_from')
-        smtp_from_name = data.get('smtp_from_name')
-        use_tls = data.get('use_tls', True)
+        # Configuración SMTP (opcional, con fallback a defaults globales)
+        default_smtp = _get_default_smtp_settings()
+        smtp_server = data.get('smtp_server') or default_smtp['smtp_server']
+        smtp_port = data.get('smtp_port', default_smtp['smtp_port'])
+        smtp_user = data.get('smtp_user') or default_smtp['smtp_user']
+        smtp_password = data.get('smtp_password') or default_smtp['smtp_password']
+        smtp_from = data.get('smtp_from') or default_smtp['smtp_from']
+        smtp_from_name = data.get('smtp_from_name') or default_smtp['smtp_from_name']
+        use_tls = data.get('use_tls', default_smtp['use_tls'])
         
         # Configuración Backend (opcional)
         db_user = data.get('db_user')
@@ -2835,6 +3087,18 @@ def create_facility():
         cursor = connection.cursor()
 
         ensure_facility_patientdomain_column(connection)
+        ensure_plan_management_schema(connection)
+
+        cursor.execute("SELECT guid FROM nextris.isplan WHERE LOWER(code) = %s LIMIT 1", (plan_code,))
+        plan_row = cursor.fetchone()
+        if not plan_row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': f'Plan inválido: {plan_code}'
+            }), 400
+        plan_id = plan_row[0]
 
         has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
         
@@ -2845,6 +3109,32 @@ def create_facility():
                 INSERT INTO nextris.tbfacility(
                     guid, name, code, email, contact_person, description,
                     address, city, country, phone, status, id_patientdomain,
+                    plan_id,
+                    smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                    db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s)
+            """
+            params = (
+                new_guid, name, code, email, contact_person, description,
+                address, city, country, phone, status, id_patientdomain,
+                plan_id,
+                smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
+                db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
+                whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+            )
+        else:
+            query = """
+                INSERT INTO nextris.tbfacility(
+                    guid, name, code, email, contact_person, description,
+                    address, city, country, phone, status,
+                    plan_id,
                     smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                     db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                     whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
@@ -2857,30 +3147,8 @@ def create_facility():
             """
             params = (
                 new_guid, name, code, email, contact_person, description,
-                address, city, country, phone, status, id_patientdomain,
-                smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
-                db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-                whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-            )
-        else:
-            query = """
-                INSERT INTO nextris.tbfacility(
-                    guid, name, code, email, contact_person, description,
-                    address, city, country, phone, status,
-                    smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
-                    db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s)
-            """
-            params = (
-                new_guid, name, code, email, contact_person, description,
                 address, city, country, phone, status,
+                plan_id,
                 smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                 db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                 whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
@@ -2888,6 +3156,18 @@ def create_facility():
             )
 
         cursor.execute(query, params)
+
+        forwarded_for = request.headers.get('X-Forwarded-For', '')
+        request_ip = forwarded_for.split(',')[0].strip() if forwarded_for else (request.remote_addr or '')
+        append_plan_change_audit(
+            connection,
+            new_guid,
+            None,
+            plan_id,
+            changed_by_user_id=actor_user_id,
+            reason='Asignación inicial de plan al crear facility',
+            request_ip=request_ip,
+        )
         
         connection.commit()
         cursor.close()
@@ -2955,6 +3235,430 @@ def get_modules_catalog():
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/config/plans', methods=['GET'])
+@jwt_required()
+def get_plans_catalog():
+    """Obtiene el catálogo de planes disponible para facilities."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT guid, code, name, description, max_receive_monthly, max_read_monthly, max_distribute_monthly, dicom_retention_days, max_users, is_active
+            FROM nextris.isplan
+            WHERE is_active = TRUE
+            ORDER BY CASE LOWER(code)
+                WHEN 'free' THEN 1
+                WHEN 'standard' THEN 2
+                WHEN 'pro' THEN 3
+                WHEN 'enterprise' THEN 4
+                ELSE 99
+            END
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        plans = [
+            {
+                'guid': row[0],
+                'code': row[1],
+                'name': row[2],
+                'description': row[3],
+                'max_receive_monthly': row[4],
+                'max_read_monthly': row[5],
+                'max_distribute_monthly': row[6],
+                'dicom_retention_days': row[7],
+                'max_users': row[8],
+                'is_active': bool(row[9]),
+            }
+            for row in rows
+        ]
+
+        return jsonify({'success': True, 'data': plans}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/plan', methods=['GET'])
+@jwt_required()
+def get_facility_plan(facility_id):
+    """Obtiene el plan y uso del mes actual de una facility."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Facility no encontrada'}), 404
+
+        plan = get_facility_plan_snapshot(cursor, facility_id)
+        usage = get_current_usage(cursor, facility_id)
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'data': {'plan': plan, 'usage_monthly': usage}}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/plan', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_facility_plan(facility_id):
+    """Actualiza el plan asignado a una facility."""
+    try:
+        actor_user_id = normalize_user_id(get_jwt_identity())
+        data = request.get_json() or {}
+        plan_code = (data.get('plan_code') or '').strip().lower()
+        reason = data.get('reason')
+
+        if not plan_code:
+            return jsonify({'success': False, 'message': 'plan_code es requerido'}), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Facility no encontrada'}), 404
+
+        cursor.execute("SELECT guid FROM nextris.isplan WHERE LOWER(code) = %s LIMIT 1", (plan_code,))
+        plan_row = cursor.fetchone()
+        if not plan_row:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': f'Plan inválido: {plan_code}'}), 400
+
+        cursor.execute("SELECT plan_id FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        old_plan_row = cursor.fetchone()
+        previous_plan_id = old_plan_row[0] if old_plan_row else None
+
+        cursor.execute(
+            """
+            UPDATE nextris.tbfacility
+            SET plan_id = %s
+            WHERE guid = %s
+            """,
+            (plan_row[0], facility_id),
+        )
+
+        if plan_code == 'free' and _column_exists(connection, 'nextris', 'tblocation', 'retention_days'):
+            cursor.execute(
+                """
+                UPDATE nextris.tblocation
+                SET retention_days = 30
+                WHERE facility_id = %s
+                  AND COALESCE(retention_days, 0) <> 30
+                """,
+                (facility_id,),
+            )
+
+        forwarded_for = request.headers.get('X-Forwarded-For', '')
+        request_ip = forwarded_for.split(',')[0].strip() if forwarded_for else (request.remote_addr or '')
+        append_plan_change_audit(
+            connection,
+            facility_id,
+            previous_plan_id,
+            plan_row[0],
+            changed_by_user_id=actor_user_id,
+            reason=reason,
+            request_ip=request_ip,
+        )
+
+        connection.commit()
+
+        plan = get_facility_plan_snapshot(cursor, facility_id)
+        usage = get_current_usage(cursor, facility_id)
+
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Plan actualizado exitosamente', 'data': {'plan': plan, 'usage_monthly': usage}}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/usage-monthly', methods=['GET'])
+@jwt_required()
+def get_facility_usage_monthly(facility_id):
+    """Obtiene histórico mensual de uso por facility."""
+    try:
+        months_param = request.args.get('months', '6')
+        try:
+            months = max(1, min(int(months_param), 24))
+        except (TypeError, ValueError):
+            months = 6
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Facility no encontrada'}), 404
+
+        cursor.execute(
+            """
+            SELECT usage_year, usage_month, received_count, read_count, distributed_count, users_count_snapshot, updated_at
+            FROM nextris.facility_plan_usage_monthly
+            WHERE facility_id = %s
+            ORDER BY usage_year DESC, usage_month DESC
+            LIMIT %s
+            """,
+            (facility_id, months),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        usage = [
+            {
+                'usage_year': row[0],
+                'usage_month': row[1],
+                'received_count': int(row[2] or 0),
+                'read_count': int(row[3] or 0),
+                'distributed_count': int(row[4] or 0),
+                'users_count_snapshot': int(row[5] or 0),
+                'updated_at': row[6].isoformat() if row[6] else None,
+            }
+            for row in rows
+        ]
+
+        return jsonify({'success': True, 'data': usage}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/config/facilities/<facility_id>/plan-change-logs', methods=['GET'])
+@jwt_required()
+def get_facility_plan_change_logs(facility_id):
+    """Obtiene historial de cambios de plan de una facility."""
+    try:
+        limit_param = request.args.get('limit', '100')
+        try:
+            limit = max(1, min(int(limit_param), 500))
+        except (TypeError, ValueError):
+            limit = 100
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1", (facility_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Facility no encontrada'}), 404
+
+        cursor.execute(
+            """
+            SELECT guid,
+                   previous_plan_id,
+                   new_plan_id,
+                   previous_plan_code,
+                   new_plan_code,
+                   action,
+                   changed_by_user_id,
+                   reason,
+                   request_ip,
+                   changed_at
+            FROM nextris.audit_facility_plan_change
+            WHERE facility_id = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (facility_id, limit),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        logs = [
+            {
+                'guid': row[0],
+                'previous_plan_id': row[1],
+                'new_plan_id': row[2],
+                'previous_plan_code': row[3],
+                'new_plan_code': row[4],
+                'action': row[5],
+                'changed_by_user_id': row[6],
+                'reason': row[7],
+                'request_ip': row[8],
+                'changed_at': row[9].isoformat() if row[9] else None,
+            }
+            for row in rows
+        ]
+
+        return jsonify({'success': True, 'data': logs}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/config/dashboard/plan-usage-summary', methods=['GET'])
+@jwt_required()
+def get_dashboard_plan_usage_summary():
+    """Resumen para dashboard: plan y estudios realizados/restantes del mes actual."""
+    try:
+        user_id = normalize_user_id(get_jwt_identity())
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_plan_management_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT DISTINCT l.facility_id
+            FROM nextris.rel_user_location rul
+            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
+            WHERE rul.user_id = %s
+              AND l.facility_id IS NOT NULL
+              AND l.facility_id <> ''
+            """,
+            (user_id,),
+        )
+        facility_ids = [row[0] for row in cursor.fetchall()]
+
+        if not facility_ids:
+            cursor.execute("SELECT guid FROM nextris.tbfacility")
+            facility_ids = [row[0] for row in cursor.fetchall()]
+
+        if not facility_ids:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': True, 'data': {
+                'plan_code': None,
+                'plan_name': None,
+                'performed_studies': 0,
+                'remaining_studies': 0,
+                'limit_studies': 0,
+                'received_studies': 0,
+                'received_remaining': 0,
+                'received_limit': 0,
+                'distributed_studies': 0,
+                'distributed_remaining': 0,
+                'distributed_limit': 0,
+            }}), 200
+
+        cursor.execute(
+            """
+            SELECT p.code,
+                   p.name,
+                   p.max_receive_monthly,
+                 p.max_read_monthly,
+                   p.max_distribute_monthly,
+                   COALESCE(u.received_count, 0),
+                 COALESCE(u.read_count, 0),
+                   COALESCE(u.distributed_count, 0)
+            FROM nextris.tbfacility f
+            LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+            LEFT JOIN nextris.facility_plan_usage_monthly u
+              ON u.facility_id = f.guid
+             AND u.usage_year = EXTRACT(YEAR FROM NOW())::INT
+             AND u.usage_month = EXTRACT(MONTH FROM NOW())::INT
+            WHERE f.guid = ANY(%s)
+            """,
+            (facility_ids,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        if not rows:
+            return jsonify({'success': True, 'data': {
+                'plan_code': None,
+                'plan_name': None,
+                'performed_studies': 0,
+                'remaining_studies': 0,
+                'limit_studies': 0,
+                'received_studies': 0,
+                'received_remaining': 0,
+                'received_limit': 0,
+                'distributed_studies': 0,
+                'distributed_remaining': 0,
+                'distributed_limit': 0,
+            }}), 200
+
+        plan_codes = {str(row[0]).lower() for row in rows if row[0]}
+        plan_names = {row[1] for row in rows if row[1]}
+
+        received_studies = sum(int(row[5] or 0) for row in rows)
+        performed_studies = sum(int(row[6] or 0) for row in rows)
+        distributed_studies = sum(int(row[7] or 0) for row in rows)
+
+        receive_limits = [row[2] for row in rows if row[2] is not None]
+        read_limits = [row[3] for row in rows if row[3] is not None]
+        distribute_limits = [row[4] for row in rows if row[4] is not None]
+
+        total_receive_limit = sum(int(val or 0) for val in receive_limits) if len(receive_limits) == len(rows) else None
+        total_read_limit = sum(int(val or 0) for val in read_limits) if len(read_limits) == len(rows) else None
+        total_distribute_limit = sum(int(val or 0) for val in distribute_limits) if len(distribute_limits) == len(rows) else None
+
+        # Para plan FREE mostramos el cupo del tier (no la suma por múltiples facilities).
+        if len(plan_codes) == 1 and 'free' in plan_codes:
+            total_receive_limit = 50
+            total_read_limit = 30
+            total_distribute_limit = 30
+
+        remaining_receive = None if total_receive_limit is None else max(total_receive_limit - received_studies, 0)
+        remaining_read = None if total_read_limit is None else max(total_read_limit - performed_studies, 0)
+        remaining_distribute = None if total_distribute_limit is None else max(total_distribute_limit - distributed_studies, 0)
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'plan_code': list(plan_codes)[0] if len(plan_codes) == 1 else 'mixed',
+                'plan_name': list(plan_names)[0] if len(plan_names) == 1 else 'Mixto',
+                'performed_studies': performed_studies,
+                'remaining_studies': remaining_read,
+                'limit_studies': total_read_limit,
+                'received_studies': received_studies,
+                'received_remaining': remaining_receive,
+                'received_limit': total_receive_limit,
+                'distributed_studies': distributed_studies,
+                'distributed_remaining': remaining_distribute,
+                'distributed_limit': total_distribute_limit,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
 @api_blueprint.route('/config/facilities/<facility_id>/modules', methods=['GET'])
@@ -3527,6 +4231,7 @@ def update_facility(facility_id):
     }
     """
     try:
+        actor_user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         
         if not data:
@@ -3546,17 +4251,21 @@ def update_facility(facility_id):
         cursor = connection.cursor()
 
         ensure_facility_patientdomain_column(connection)
+        ensure_plan_management_schema(connection)
         has_facility_domain_column = _column_exists(connection, 'nextris', 'tbfacility', 'id_patientdomain')
         
         # Verificar que existe
-        cursor.execute("SELECT 1 FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT plan_id, status FROM nextris.tbfacility WHERE guid=%s", (facility_id,))
+        facility_row = cursor.fetchone()
+        if not facility_row:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Facility no encontrada'
             }), 404
+        previous_plan_id = facility_row[0]
+        previous_status = _normalize_active_status(facility_row[1])
         
         # Construir query dinámicamente
         updates = []
@@ -3589,12 +4298,38 @@ def update_facility(facility_id):
         if 'phone' in data:
             updates.append("phone = %s")
             params.append(data['phone'])
+        next_status = previous_status
         if 'status' in data:
             updates.append("status = %s")
-            params.append(data['status'])
+            next_status = _normalize_active_status(data['status'])
+            params.append(next_status)
         if has_facility_domain_column and ('id_patientdomain' in data or 'patientdomain_id' in data):
             updates.append("id_patientdomain = %s")
             params.append(data.get('id_patientdomain') or data.get('patientdomain_id'))
+
+        plan_code = data.get('plan_code')
+        plan_id = data.get('plan_id')
+        next_plan_id_for_audit = None
+        if plan_code is not None:
+            normalized_plan_code = str(plan_code).strip().lower()
+            cursor.execute("SELECT guid FROM nextris.isplan WHERE LOWER(code) = %s LIMIT 1", (normalized_plan_code,))
+            plan_row = cursor.fetchone()
+            if not plan_row:
+                cursor.close()
+                connection.close()
+                return jsonify({'success': False, 'message': f'Plan inválido: {plan_code}'}), 400
+            updates.append("plan_id = %s")
+            params.append(plan_row[0])
+            next_plan_id_for_audit = plan_row[0]
+        elif plan_id is not None:
+            cursor.execute("SELECT 1 FROM nextris.isplan WHERE guid = %s LIMIT 1", (plan_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                connection.close()
+                return jsonify({'success': False, 'message': 'plan_id inválido'}), 400
+            updates.append("plan_id = %s")
+            params.append(plan_id)
+            next_plan_id_for_audit = plan_id
         
         # Configuración SMTP
         if 'smtp_server' in data:
@@ -3674,6 +4409,30 @@ def update_facility(facility_id):
         query = f"UPDATE nextris.tbfacility SET {', '.join(updates)} WHERE guid = %s"
         
         cursor.execute(query, params)
+
+        if previous_status != 'Inactive' and next_status == 'Inactive':
+            cursor.execute(
+                """
+                UPDATE nextris.tblocation
+                SET status = 'Inactive', updated_at = NOW()
+                WHERE facility_id = %s
+                """,
+                (facility_id,),
+            )
+
+        if next_plan_id_for_audit is not None:
+            forwarded_for = request.headers.get('X-Forwarded-For', '')
+            request_ip = forwarded_for.split(',')[0].strip() if forwarded_for else (request.remote_addr or '')
+            append_plan_change_audit(
+                connection,
+                facility_id,
+                previous_plan_id,
+                next_plan_id_for_audit,
+                changed_by_user_id=actor_user_id,
+                reason='Cambio de plan desde actualización de facility',
+                request_ip=request_ip,
+            )
+
         connection.commit()
         
         cursor.close()
@@ -4841,7 +5600,7 @@ def get_user_permissions_endpoint(user_id):
         cursor.close()
         connection.close()
 
-        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=True)
+        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=False)
         catalog = get_permission_catalog()
 
         return jsonify({
@@ -4911,7 +5670,7 @@ def set_user_permissions_endpoint(user_id):
         resolved_user_id = user_row[0]
 
         assigned_codes = replace_user_permissions(resolved_user_id, permission_codes)
-        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=True)
+        effective_permissions = get_user_permission_codes(resolved_user_id, include_role_permissions=False)
 
         return jsonify({
             'success': True,

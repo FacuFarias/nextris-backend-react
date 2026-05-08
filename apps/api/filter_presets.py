@@ -18,6 +18,12 @@ def get_db_config():
     return db_config
 
 
+def get_scope_condition(scope):
+    if scope:
+        return " AND COALESCE(filters->>'scope', '') = %s", [scope]
+    return "", []
+
+
 # ==================== ENDPOINTS DE FILTER PRESETS ====================
 
 
@@ -47,6 +53,7 @@ def get_filter_presets():
     """
     try:
         user_id = get_jwt_identity()
+        scope = request.args.get('scope', '').strip()
         db_config = get_db_config()
         if not db_config:
             return jsonify({'success': False, 'message': 'Error de configuración'}), 500
@@ -54,12 +61,14 @@ def get_filter_presets():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        cursor.execute("""
+        scope_condition, scope_params = get_scope_condition(scope)
+        query = f"""
             SELECT guid, name, filters, sort_order, is_active, created_on, updated_on
             FROM nextris.tb_filter_preset
-            WHERE user_id = %s
+            WHERE user_id = %s{scope_condition}
             ORDER BY sort_order ASC, created_on ASC
-        """, (user_id,))
+        """
+        cursor.execute(query, [user_id, *scope_params])
 
         presets = cursor.fetchall()
 
@@ -101,7 +110,10 @@ def create_filter_preset():
         data = request.get_json()
 
         name = data.get('name', '').strip()
-        filters = data.get('filters', {})
+        filters = data.get('filters', {}) or {}
+        scope = (data.get('scope') or filters.get('scope') or '').strip()
+        if scope:
+            filters['scope'] = scope
 
         if not name:
             return jsonify({'success': False, 'message': 'El nombre es requerido'}), 400
@@ -113,20 +125,24 @@ def create_filter_preset():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+        scope_condition, scope_params = get_scope_condition(scope)
+
         # Obtener el próximo sort_order
-        cursor.execute("""
+        next_order_query = f"""
             SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
             FROM nextris.tb_filter_preset
-            WHERE user_id = %s
-        """, (user_id,))
+            WHERE user_id = %s{scope_condition}
+        """
+        cursor.execute(next_order_query, [user_id, *scope_params])
         next_order = cursor.fetchone()['next_order']
 
-        # Desactivar todos los presets del usuario
-        cursor.execute("""
+        # Desactivar presets del mismo scope del usuario
+        deactivate_query = f"""
             UPDATE nextris.tb_filter_preset
             SET is_active = false
-            WHERE user_id = %s
-        """, (user_id,))
+            WHERE user_id = %s{scope_condition}
+        """
+        cursor.execute(deactivate_query, [user_id, *scope_params])
 
         # Crear el nuevo preset como activo
         cursor.execute("""
@@ -296,31 +312,38 @@ def activate_filter_preset(guid):
     """
     try:
         user_id = get_jwt_identity()
+        requested_scope = request.args.get('scope', '').strip()
 
         db_config = get_db_config()
         if not db_config:
             return jsonify({'success': False, 'message': 'Error de configuración'}), 500
 
         connection = psycopg2.connect(**db_config)
-        cursor = connection.cursor()
+        cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Verificar que el preset pertenece al usuario
+        # Verificar que el preset pertenece al usuario y resolver scope
         cursor.execute("""
-            SELECT guid FROM nextris.tb_filter_preset
+            SELECT guid, COALESCE(filters->>'scope', '') AS scope
+            FROM nextris.tb_filter_preset
             WHERE guid = %s AND user_id = %s
         """, (guid, user_id))
 
-        if not cursor.fetchone():
+        preset_row = cursor.fetchone()
+        if not preset_row:
             cursor.close()
             connection.close()
             return jsonify({'success': False, 'message': 'Preset no encontrado'}), 404
 
-        # Desactivar todos los presets del usuario
-        cursor.execute("""
+        scope = requested_scope or preset_row['scope']
+        scope_condition, scope_params = get_scope_condition(scope)
+
+        # Desactivar presets del mismo scope del usuario
+        deactivate_query = f"""
             UPDATE nextris.tb_filter_preset
             SET is_active = false
-            WHERE user_id = %s
-        """, (user_id,))
+            WHERE user_id = %s{scope_condition}
+        """
+        cursor.execute(deactivate_query, [user_id, *scope_params])
 
         # Activar el preset seleccionado
         cursor.execute("""
@@ -349,6 +372,7 @@ def deactivate_all_filter_presets():
     """
     try:
         user_id = get_jwt_identity()
+        scope = request.args.get('scope', '').strip()
 
         db_config = get_db_config()
         if not db_config:
@@ -357,11 +381,13 @@ def deactivate_all_filter_presets():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
 
-        cursor.execute("""
+        scope_condition, scope_params = get_scope_condition(scope)
+        deactivate_query = f"""
             UPDATE nextris.tb_filter_preset
             SET is_active = false
-            WHERE user_id = %s
-        """, (user_id,))
+            WHERE user_id = %s{scope_condition}
+        """
+        cursor.execute(deactivate_query, [user_id, *scope_params])
 
         connection.commit()
         cursor.close()

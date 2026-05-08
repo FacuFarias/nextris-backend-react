@@ -332,6 +332,22 @@ def create_admission_from_appointment(appointment_guid):
             }), 404
         
         patient_id, equipment_id, study_type_id, physician_id, location_id, is_admitted = appointment_row
+
+        # Resolver plan de la facility para aplicar comportamiento por tier.
+        cursor.execute(
+            """
+            SELECT LOWER(COALESCE(p.code, ''))
+            FROM nextris.tblocation l
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+            WHERE l.guid = %s
+            LIMIT 1
+            """,
+            (location_id,),
+        )
+        plan_row = cursor.fetchone()
+        is_free_plan = bool(plan_row and plan_row[0] == 'free')
+        initial_is_executed = 1 if is_free_plan else 0
         
         # Verificar si ya está admitida
         if is_admitted:
@@ -390,7 +406,7 @@ def create_admission_from_appointment(appointment_guid):
                 admisionnumber, localacc, createdon, status, isexecuted,
                 idrequestingphysician, isadmitted, location_id
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, 1, %s
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -399,6 +415,7 @@ def create_admission_from_appointment(appointment_guid):
             final_equipment_id,
             new_admission,
             new_accession,
+            initial_is_executed,
             physician_id,
             location_id
         ))
@@ -432,7 +449,8 @@ def create_admission_from_appointment(appointment_guid):
                 'admission_number': new_admission,
                 'accession_number': new_accession,
                 'examination_guid': str(examination_guid),
-                'appointment_guid': str(appointment_guid)
+                'appointment_guid': str(appointment_guid),
+                'auto_executed': bool(initial_is_executed),
             }
         }), 201
         
@@ -599,11 +617,9 @@ def create_admission_order():
                 'message': 'exam.study_type_id es obligatorio'
             }), 400
             
-        if not exam_data.get('equipment_id'):
-            return jsonify({
-                'success': False,
-                'message': 'exam.equipment_id es obligatorio'
-            }), 400
+        equipment_id = exam_data.get('equipment_id')
+        unassigned_equipment = bool(exam_data.get('unassigned_equipment'))
+        is_unassigned_equipment = unassigned_equipment or not equipment_id or str(equipment_id).upper() == 'UNASSIGNED'
         
         config = get_db_config()
         if not config:
@@ -624,6 +640,21 @@ def create_admission_order():
         
         timezone_result = cursor.fetchone()
         timezone = timezone_result[0] if timezone_result else 'America/Argentina/Buenos_Aires'
+
+        # Detectar plan de la facility de la ubicación para aplicar reglas de negocio por tier.
+        cursor.execute(
+            """
+            SELECT LOWER(COALESCE(p.code, ''))
+            FROM nextris.tblocation l
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+            WHERE l.guid = %s
+            LIMIT 1
+            """,
+            (location_id,),
+        )
+        plan_row = cursor.fetchone()
+        is_free_plan = bool(plan_row and plan_row[0] == 'free')
         
         # 2. Obtener datos del paciente
         cursor.execute("""
@@ -661,23 +692,25 @@ def create_admission_order():
         admission_number = f"ADM{(last_adm + 1):03d}"
         accession_number = f"ACC{(last_acc + 1):03d}"
         
-        # 4. Obtener datos del equipo y modalidad
-        cursor.execute("""
-            SELECT e.guid, e.aetitle, e.description, e.idmodality,
-                   m.externalcode
-            FROM nextris.isequipment e
-            LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
-            WHERE e.guid = %s
-        """, (exam_data['equipment_id'],))
-        
-        equipment = cursor.fetchone()
-        if not equipment:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Equipo no encontrado'
-            }), 404
+        # 4. Obtener datos del equipo y modalidad (solo cuando aplica)
+        equipment = None
+        if not is_unassigned_equipment:
+            cursor.execute("""
+                SELECT e.guid, e.aetitle, e.description, e.idmodality,
+                       m.externalcode
+                FROM nextris.isequipment e
+                LEFT JOIN nextris.ismodality m ON e.idmodality = m.guid
+                WHERE e.guid = %s
+            """, (equipment_id,))
+
+            equipment = cursor.fetchone()
+            if not equipment:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'Equipo no encontrado'
+                }), 404
         
         # 5. Obtener descripción del estudio
         cursor.execute("""
@@ -703,38 +736,45 @@ def create_admission_order():
         patient_hash = int(hashlib.md5(str(patient[0]).encode()).hexdigest()[:12], 16)
         study_instance_uid = f"1.2.840.{timestamp}.{patient_hash}"
         
-        # Nota: Envío HL7 al worklist DICOM comentado para compatibilidad con BD de prueba
-        # En producción, descomentar y verificar HL7Service
-        # study_instance_uid, hl7_success = HL7Service.send_exam_to_worklist(...)
-        # if not hl7_success: return error
+        # Si el examen se crea sin equipo, explícitamente no se debe generar worklist/PACS.
+        # Nota: El envío HL7 está comentado globalmente en este endpoint; esta rama
+        # evita además cualquier dependencia de equipo para worklist.
         
         # 7. Insertar examen en tbexamination
         severity_id = None
-        if exam_data.get('severity') == 'urgent':
+        effective_severity = 'normal' if is_free_plan else exam_data.get('severity')
+        effective_physician_id = None if is_free_plan else exam_data.get('physician_id')
+        effective_referring_physician_id = None if is_free_plan else exam_data.get('referring_physician_id')
+        effective_insurance_id = None if is_free_plan else exam_data.get('insurance_id')
+
+        if effective_severity == 'urgent':
             # Obtener ID de severidad "Urgente"
             cursor.execute("SELECT guid FROM nextris.isseverity WHERE description ILIKE '%urgente%' LIMIT 1")
             severity_result = cursor.fetchone()
             severity_id = severity_result[0] if severity_result else None
         
+        initial_is_executed = 1 if is_free_plan else 0
+
         cursor.execute("""
             INSERT INTO nextris.tbexamination (
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
                 idseverity, idrequestingphysician, idreferringphysician, idpricelist, isadmitted, location_id
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0, %s, %s, %s, %s, 1, %s
+                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, %s, %s, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
             patient[0],
             exam_data['study_type_id'],
-            exam_data['equipment_id'],
+            None if is_unassigned_equipment else equipment_id,
             admission_number,
             accession_number,
+            initial_is_executed,
             severity_id,
-            exam_data.get('physician_id'),
-            exam_data.get('referring_physician_id'),
-            exam_data.get('insurance_id'),
+            effective_physician_id,
+            effective_referring_physician_id,
+            effective_insurance_id,
             location_id
         ))
         
@@ -760,9 +800,12 @@ def create_admission_order():
                 'accession_number': accession_number,
                 'exam_id': exam_guid,
                 'study_instance_uid': study_instance_uid,
-                'timezone': timezone
+                'timezone': timezone,
+                'worklist_created': False if is_unassigned_equipment else None,
+                'unassigned_equipment': is_unassigned_equipment,
+                'auto_executed': bool(initial_is_executed),
             },
-            'message': 'Orden creada exitosamente'
+            'message': 'Orden creada exitosamente' if not is_unassigned_equipment else 'Orden creada sin asignación de equipo (sin worklist PACS)'
         }), 201
         
     except Exception as e:

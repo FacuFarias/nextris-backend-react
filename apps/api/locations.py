@@ -11,6 +11,42 @@ import pytz
 from datetime import datetime
 from apps.home.services.config_service import ConfigService
 
+
+def parse_bool_value(value, default=None):
+    """Parse bool values sent as bool/int/string from JSON payloads."""
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    normalized = str(value).strip().lower()
+    if normalized in ('true', '1', 'yes', 'y', 'on'):
+        return True
+    if normalized in ('false', '0', 'no', 'n', 'off'):
+        return False
+
+    return default
+
+
+def ensure_location_report_execution_column(connection):
+    """Ensure tblocation has workflow execution requirement flag."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tblocation
+            ADD COLUMN IF NOT EXISTS require_execution_before_reporting BOOLEAN NOT NULL DEFAULT TRUE
+            """
+        )
+        connection.commit()
+    finally:
+        cursor.close()
+
+
 def get_db_config():
     """Obtiene la configuración de la base de datos"""
     return ConfigService.get_db_config()
@@ -33,12 +69,15 @@ def get_locations():
         
         config = get_db_config()
         connection = psycopg2.connect(**config)
+        ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
         query = """
             SELECT 
                 guid, facility_id, name, code, address, phone, 
-                status, geographic_location, timezone, created_at, updated_at
+                status, geographic_location, timezone, created_at, updated_at,
+                gateway_aet, gateway_ip, transmission_type, retention_days,
+                COALESCE(require_execution_before_reporting, TRUE)
             FROM nextris.tblocation
             WHERE 1=1
         """
@@ -70,7 +109,12 @@ def get_locations():
                 'geographic_location': loc[7],
                 'timezone': loc[8],
                 'created_at': loc[9].isoformat() if loc[9] else None,
-                'updated_at': loc[10].isoformat() if loc[10] else None
+                'updated_at': loc[10].isoformat() if loc[10] else None,
+                'gateway_aet': loc[11],
+                'gateway_ip': loc[12],
+                'transmission_type': loc[13],
+                'retention_days': loc[14],
+                'require_execution_before_reporting': bool(loc[15])
             })
         
         cursor.close()
@@ -96,12 +140,15 @@ def get_location(guid):
     try:
         config = get_db_config()
         connection = psycopg2.connect(**config)
+        ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
         cursor.execute("""
             SELECT 
                 guid, facility_id, name, code, address, phone, 
-                status, geographic_location, timezone, created_at, updated_at
+                status, geographic_location, timezone, created_at, updated_at,
+                gateway_aet, gateway_ip, transmission_type, retention_days,
+                COALESCE(require_execution_before_reporting, TRUE)
             FROM nextris.tblocation
             WHERE guid = %s
         """, (guid,))
@@ -129,7 +176,12 @@ def get_location(guid):
                 'geographic_location': location[7],
                 'timezone': location[8],
                 'created_at': location[9].isoformat() if location[9] else None,
-                'updated_at': location[10].isoformat() if location[10] else None
+                'updated_at': location[10].isoformat() if location[10] else None,
+                'gateway_aet': location[11],
+                'gateway_ip': location[12],
+                'transmission_type': location[13],
+                'retention_days': location[14],
+                'require_execution_before_reporting': bool(location[15])
             }
         }), 200
         
@@ -181,8 +233,22 @@ def create_location():
                     'message': f'Zona horaria inválida: {timezone}'
                 }), 400
         
+        # Validar transmission_type si se proporciona
+        transmission_type = data.get('transmission_type', 'Manual')
+        if transmission_type not in ('Manual', 'Automatic'):
+            return jsonify({
+                'success': False,
+                'message': "transmission_type debe ser 'Manual' o 'Automatic'"
+            }), 400
+
+        require_execution_before_reporting = parse_bool_value(
+            data.get('require_execution_before_reporting'),
+            default=True,
+        )
+        
         config = get_db_config()
         connection = psycopg2.connect(**config)
+        ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
         # Verificar que facility_id exista
@@ -201,8 +267,10 @@ def create_location():
         # Crear la ubicación
         cursor.execute("""
             INSERT INTO nextris.tblocation 
-            (facility_id, name, code, address, phone, geographic_location, timezone, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (facility_id, name, code, address, phone, geographic_location, timezone, status,
+             gateway_aet, gateway_ip, transmission_type, retention_days,
+             require_execution_before_reporting)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING guid, created_at
         """, (
             data.get('facility_id'),
@@ -212,7 +280,12 @@ def create_location():
             data.get('phone', ''),
             data.get('geographic_location', ''),
             timezone,
-            data.get('status', 'Active')
+            data.get('status', 'Active'),
+            data.get('gateway_aet'),
+            data.get('gateway_ip'),
+            transmission_type,
+            data.get('retention_days'),
+            require_execution_before_reporting
         ))
         
         result = cursor.fetchone()
@@ -261,6 +334,7 @@ def update_location(guid):
         
         config = get_db_config()
         connection = psycopg2.connect(**config)
+        ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
         # Verificar que la ubicación exista
@@ -277,6 +351,29 @@ def update_location(guid):
         update_fields = []
         params = []
         
+        # Validar transmission_type si se proporciona
+        if 'transmission_type' in data and data['transmission_type'] not in ('Manual', 'Automatic'):
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': "transmission_type debe ser 'Manual' o 'Automatic'"
+            }), 400
+
+        if 'require_execution_before_reporting' in data:
+            require_execution_value = parse_bool_value(
+                data.get('require_execution_before_reporting'),
+                default=None,
+            )
+            if require_execution_value is None:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'require_execution_before_reporting debe ser booleano'
+                }), 400
+            data['require_execution_before_reporting'] = require_execution_value
+        
         allowed_fields = {
             'name': 'name',
             'code': 'code',
@@ -284,7 +381,12 @@ def update_location(guid):
             'phone': 'phone',
             'geographic_location': 'geographic_location',
             'timezone': 'timezone',
-            'status': 'status'
+            'status': 'status',
+            'gateway_aet': 'gateway_aet',
+            'gateway_ip': 'gateway_ip',
+            'transmission_type': 'transmission_type',
+            'retention_days': 'retention_days',
+            'require_execution_before_reporting': 'require_execution_before_reporting'
         }
         
         for key, db_field in allowed_fields.items():

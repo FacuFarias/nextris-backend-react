@@ -308,6 +308,8 @@ def get_institutional_locations():
                 "name": "Nombre de ubicación",
                 "code": "Código",
                 "facility_id": "UUID de la facility",
+                "facility_name": "Nombre de la facility",
+                "facility_code": "Código de la facility",
                 "address": "Dirección",
                 "city": "Ciudad",
                 "phone": "Teléfono",
@@ -337,9 +339,12 @@ def get_institutional_locations():
                 l.name,
                 l.code,
                 l.facility_id,
+                COALESCE(f.name, '') as facility_name,
+                COALESCE(f.code, '') as facility_code,
                 COALESCE(rul.is_default, false) as is_default
             FROM nextris.tblocation l
             LEFT JOIN nextris.rel_user_location rul ON l.guid = rul.location_id AND rul.user_id = %s
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
             WHERE rul.user_id = %s
             ORDER BY COALESCE(rul.is_default, false) DESC, l.name
         """
@@ -354,7 +359,9 @@ def get_institutional_locations():
                 'name': row[1],
                 'code': row[2],
                 'facility_id': row[3],
-                'is_default': row[4]
+                'facility_name': row[4],
+                'facility_code': row[5],
+                'is_default': row[6]
             })
         
         cursor.close()

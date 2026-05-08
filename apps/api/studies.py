@@ -10,6 +10,11 @@ import psycopg2
 import pytz
 from datetime import datetime, timedelta
 from apps.api import api_blueprint
+from apps.api.facility_plan_usage import (
+    ensure_plan_management_schema,
+    check_limit_before_action,
+    increment_usage_counter,
+)
 
 
 def get_db_config():
@@ -69,6 +74,7 @@ def get_examination_details(guid):
         
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
+        ensure_plan_management_schema(connection)
         
         # Obtener examen
         cursor.execute("""
@@ -453,6 +459,28 @@ def create_worklist():
         
         for exam in exams:
             try:
+                equipment_id = exam.get('equipmentId')
+                facility_id = None
+                if equipment_id:
+                    cursor.execute(
+                        """
+                        SELECT l.facility_id
+                        FROM nextris.isequipment eq
+                        LEFT JOIN nextris.tblocation l ON l.guid = eq.location_id
+                        WHERE eq.guid = %s
+                        LIMIT 1
+                        """,
+                        (equipment_id,),
+                    )
+                    facility_row = cursor.fetchone()
+                    facility_id = facility_row[0] if facility_row else None
+
+                if facility_id:
+                    is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'receive')
+                    if not is_allowed:
+                        errors.append(limit_payload.get('message', 'Límite de plan alcanzado para recibir estudios'))
+                        continue
+
                 # Generar admnumber
                 cursor.execute("""
                     SELECT COALESCE(MAX(CAST(SUBSTRING(admnumber FROM 4) AS INTEGER)), 0) + 1
@@ -483,7 +511,7 @@ def create_worklist():
                 """, (
                     patient_id,
                     exam.get('studyTypeId'),
-                    exam.get('equipmentId'),
+                    equipment_id,
                     exam.get('severityId'),
                     exam.get('referringPhysicianId'),
                     exam.get('requestingPhysicianId'),
@@ -502,6 +530,9 @@ def create_worklist():
                         %s, %s, %s, NOW(), 0
                     )
                 """, (exam_guid, patient_id, adm_number))
+
+                if facility_id:
+                    increment_usage_counter(connection, facility_id, 'received', 1)
                 
                 created_exams.append(exam_guid)
                 
