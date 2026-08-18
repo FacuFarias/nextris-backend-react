@@ -347,7 +347,8 @@ def get_templates():
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default
+                (ist.default_predef_id = ip.guid) AS is_system_default,
+                ist.code AS study_type_code
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -398,6 +399,7 @@ def get_templates():
                     'guid': row[0],
                     'title': row[1] or '',
                     'study_type_description': row[3] or '',
+                    'study_type_code': row[17] or '',
                     'report_type': row[12] or 'simple',
                     'location_ids': row[13] or [],
                     'owner_id': owner_id,
@@ -412,6 +414,7 @@ def get_templates():
                     'title': row[1] or '',
                     'study_type_id': row[2],
                     'study_type_description': row[3] or '',
+                    'study_type_code': row[17] or '',
                     'modality_id': row[4],
                     'modality_description': row[5] or '',
                     'bodypart_id': row[6],
@@ -519,7 +522,8 @@ def get_template(template_id):
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default
+                (ist.default_predef_id = ip.guid) AS is_system_default,
+                ist.code AS study_type_code
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -548,6 +552,7 @@ def get_template(template_id):
                 'title': result[1] or '',
                 'study_type_id': result[2],
                 'study_type_description': result[3] or '',
+                'study_type_code': result[17] or '',
                 'modality_id': result[4],
                 'modality_description': result[5] or '',
                 'bodypart_id': result[6],

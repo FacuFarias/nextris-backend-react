@@ -462,12 +462,12 @@ def _build_images_link(study_instance_uid: str | None, exam_guid: str | None = N
     viewer_url = (os.getenv('DICOM_VIEWER_URL') or '').strip()
     # Guard against malformed/sensitive env values; fallback to canonical viewer URL.
     if not viewer_url or 'anthropic' in viewer_url.lower() or 'api_key' in viewer_url.lower():
-        viewer_url = 'https://viewer.nextris.cloud/viewer'
+        viewer_url = 'https://clinicacp.ddns.net:3000/viewer'
 
     viewer_url = viewer_url.replace('viewer.html', 'viewer')
     base = viewer_url.split('?', 1)[0].rstrip('/')
-    if not base.lower().startswith('http') or 'viewer.nextris.cloud' not in base.lower():
-        base = 'https://viewer.nextris.cloud/viewer'
+    if not base.lower().startswith('http'):
+        base = 'https://clinicacp.ddns.net:3000/viewer'
 
     url = f"{base}?StudyInstanceUIDs={uid}"
     if exam_guid:

@@ -37,7 +37,12 @@ class Config(object):
     DB_NAME     = os.getenv('DB_NAME'     , 'pacsdb')
     
     # DICOM Viewer URL
-    DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'http://192.168.1.42:8082/viewer.html')
+    DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'https://clinicacp.ddns.net:3000/viewer')
+    DICOMWEB_INTERNAL_URL = os.getenv('DICOMWEB_INTERNAL_URL', 'http://127.0.0.1:8088')
+
+    # Public API URL (used for building share links, emails, etc.)
+    PUBLIC_API_URL = os.getenv('PUBLIC_API_URL', '')
+    VIEWER_SHARE_EXPIRATION_HOURS = int(os.getenv('VIEWER_SHARE_EXPIRATION_HOURS', '720'))
 
     # Analytics
     ANALYTICS_ENABLED    = os.getenv('ANALYTICS_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')

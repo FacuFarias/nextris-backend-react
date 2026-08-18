@@ -61,7 +61,9 @@ def get_all_tags():
         cursor = connection.cursor()
         cursor.execute(
             """
-            SELECT guid, facility_id, description, is_active, created_at, updated_at
+            -- Algunas instalaciones antiguas no tienen facility_id en tbtags.
+            -- El listado global no necesita ese campo para resolver tags.
+            SELECT guid, NULL::varchar AS facility_id, description, is_active, created_at, updated_at
             FROM nextris.tbtags
             WHERE is_active = TRUE
             ORDER BY description

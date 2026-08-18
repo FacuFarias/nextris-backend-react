@@ -8,12 +8,12 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 import uuid
 import os
 import re
 import html
 from decimal import Decimal, InvalidOperation
-from apps.api.facility_plan_usage import ensure_plan_management_schema, increment_usage_counter, check_limit_before_action
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
 
 # Flags para ejecutar migraciones de esquema solo una vez por ciclo de vida del proceso
@@ -31,6 +31,12 @@ def get_db_config():
         return None
 
 
+def normalize_user_id(identity):
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
+
+
 def get_user_locations(user_id, connection):
     """Obtener ubicaciones del usuario"""
     cursor = connection.cursor()
@@ -41,43 +47,6 @@ def get_user_locations(user_id, connection):
     locations = [row[0] for row in cursor.fetchall()]
     cursor.close()
     return locations
-
-
-def resolve_facility_id_for_usage(connection, exam_facility_id, requested_facility_id, user_id):
-    """Resolve facility for plan usage counters with safe fallbacks."""
-    if exam_facility_id:
-        return str(exam_facility_id)
-
-    cursor = connection.cursor()
-    try:
-        requested = str(requested_facility_id or '').strip()
-        if requested:
-            cursor.execute(
-                "SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
-                (requested,),
-            )
-            if cursor.fetchone():
-                return requested
-
-        user_locations = get_user_locations(user_id, connection)
-        if user_locations:
-            cursor.execute(
-                """
-                SELECT facility_id
-                FROM nextris.tblocation
-                WHERE guid = ANY(%s)
-                  AND facility_id IS NOT NULL
-                LIMIT 1
-                """,
-                (user_locations,),
-            )
-            row = cursor.fetchone()
-            if row and row[0]:
-                return str(row[0])
-    finally:
-        cursor.close()
-
-    return None
 
 
 def ensure_location_report_execution_column(connection):
@@ -187,23 +156,8 @@ def ensure_template_location_schema(connection):
 
 def _is_structured_reports_enabled(cursor, facility_id):
     """Indica si la facility tiene habilitado el modulo structured_reports."""
-    if not facility_id:
-        return False
-
-    cursor.execute(
-        """
-        SELECT 1
-        FROM nextris.rel_facility_module rel
-        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
-        WHERE rel.facility_id = %s
-          AND rel.is_active = TRUE
-          AND mod.is_active = TRUE
-          AND mod.code = 'structured_reports'
-        LIMIT 1
-        """,
-        (facility_id,),
-    )
-    return bool(cursor.fetchone())
+    # Deshabilitado temporalmente — forzado a False
+    return False
 
 def _fetch_template_content(cursor, template_id):
     """Obtiene el contenido base de una plantilla por ID."""
@@ -1203,7 +1157,7 @@ def _collect_placeholder_candidates(content):
 def get_examinations_for_reporting():
     """
     Obtiene lista de exámenes listos para reportar
-    Filtra por ubicaciones del usuario
+    No restringe por ubicación; la ubicación solo se devuelve como información.
     
     Query Parameters:
     - status (optional): Filtrar por estado (default: todos)
@@ -1273,6 +1227,15 @@ def get_examinations_for_reporting():
         show_reported = request.args.get('show_reported', 'false').lower() == 'true'
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
+        show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
+        show_without_order = request.args.get('show_without_order', 'false').lower() == 'true'
+        show_only_with_notes = request.args.get('show_only_with_notes', 'false').lower() == 'true'
+        search = request.args.get('search', '').strip()
+        flag_filter = [value.strip().lower() for value in request.args.get('flag_filter', '').split(',') if value.strip()]
+        date_range = request.args.get('date_range', 'all').strip().lower()
+        date_field = request.args.get('date_field', 'admision').strip().lower()
+        sort_column = request.args.get('sort_column', '').strip().lower()
+        sort_direction = request.args.get('sort_direction', 'desc').strip().lower()
         modality_id = request.args.get('modality_id')
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
@@ -1282,23 +1245,7 @@ def get_examinations_for_reporting():
         
         connection = psycopg2.connect(**config)
         ensure_location_report_execution_column(connection)
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'data': [],
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0
-                }
-            }), 200
-        
         cursor = connection.cursor()
-        
-        location_placeholders = ','.join(['%s'] * len(user_locations))
         
         # Query base - exámenes ejecutados
         # Lógica de filtrado por estado de reporte:
@@ -1335,6 +1282,10 @@ def get_examinations_for_reporting():
                    eq.Description as equipment,
                    loc.name as location,
                    e.assignto,
+                   COALESCE(
+                       NULLIF(TRIM(CONCAT(COALESCE(ua.name, ''), ' ', COALESCE(ua.surname, ''))), ''),
+                       ua.username
+                   ) as assignto_name,
                    rep.pdfpath,
                    st.modality_id,
                    mod.description as modality_description,
@@ -1346,7 +1297,11 @@ def get_examinations_for_reporting():
                    COALESCE(
                        NULLIF(TRIM(CONCAT(COALESCE(ub.name, ''), ' ', COALESCE(ub.surname, ''))), ''),
                        ub.username
-                   ) as blocked_by_name
+                   ) as blocked_by_name,
+                   e.reportdate,
+                   e.flags,
+                   e.tag_ids,
+                   e.othersdetails
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -1357,15 +1312,17 @@ def get_examinations_for_reporting():
             LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
             LEFT JOIN nextris.tbuser ub ON e.blockby::text = ub.guid
-            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
-            AND (
+            LEFT JOIN nextris.tbuser ua ON e.assignto::text = ua.guid
+            WHERE (
                 COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
                 OR e.IsExecuted = 1
             )
             {reported_filter}
         """
         
-        params = list(user_locations)
+        # La instalación utiliza una única ubicación. La ubicación se
+        # conserva para mostrarla, pero no restringe los resultados.
+        params = []
         
         # Aplicar filtro de estado si se proporciona
         if status_filter:
@@ -1376,6 +1333,63 @@ def get_examinations_for_reporting():
         if assigned_to_me:
             base_query += " AND e.assignto = %s"
             params.append(user_id)
+
+        # Búsqueda libre por paciente, DNI, admisión, accession o estudio.
+        if search:
+            search_pattern = f"%{search.lower()}%"
+            base_query += """
+                AND (
+                    LOWER(COALESCE(CONCAT(dp.Name, ' ', dp.Surname), '')) LIKE %s
+                    OR LOWER(COALESCE(dp.nationalcode, '')) LIKE %s
+                    OR LOWER(COALESCE(e.LocalAcc, '')) LIKE %s
+                    OR LOWER(COALESCE(e.AdmisionNumber, '')) LIKE %s
+                    OR LOWER(COALESCE(st.Description, '')) LIKE %s
+                )
+            """
+            params.extend([search_pattern] * 5)
+
+        # Por defecto se muestran solo estudios con imagen. Al activar
+        # "Ver sin imágenes" se incluyen ambos grupos (con y sin imagen).
+        if not show_no_image:
+            base_query += " AND COALESCE(e.isimage, 0) = 1"
+
+        # Por defecto se muestran estudios con orden CP. Al activar
+        # "Incluir sin orden CP" se incluyen ambos grupos.
+        if not show_without_order:
+            base_query += ' AND COALESCE(e."w-order", 0) = 1'
+
+        if show_only_with_notes:
+            base_query += """
+                AND (
+                    NULLIF(BTRIM(COALESCE(e.history, '') || ' ' ||
+                        COALESCE(e.clinicalquestion, '') || ' ' ||
+                        COALESCE(e.othersdetails, '')), '') IS NOT NULL
+                )
+            """
+
+        if flag_filter:
+            valid_flags = {'red', 'green', 'blue', 'yellow'}
+            flag_filter = [flag for flag in flag_filter if flag in valid_flags]
+            if flag_filter:
+                base_query += " AND COALESCE(e.flags, ARRAY[]::text[]) && %s::text[]"
+                params.append(flag_filter)
+
+        # Los rangos representan el período reciente: desde ahora menos el
+        # intervalo hasta el momento actual. Esto evita que "1d" incluya todo
+        # el histórico anterior a hace un día.
+        date_intervals = {
+            '1d': '1 day',
+            '3d': '3 days',
+            '7d': '7 days',
+            '14d': '14 days',
+            '1m': '1 month',
+            '2m': '2 months',
+            '3m': '3 months',
+            '1y': '1 year',
+        }
+        if date_range in date_intervals:
+            date_column = 'e.reportdate' if date_field == 'reporte' else 'e.createdon'
+            base_query += f" AND {date_column} BETWEEN CURRENT_TIMESTAMP - INTERVAL '{date_intervals[date_range]}' AND CURRENT_TIMESTAMP"
         
         # Aplicar filtro de modalidad por GUID
         if modality_id:
@@ -1395,18 +1409,27 @@ def get_examinations_for_reporting():
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
 
-        if facility_id:
-            base_query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
         cursor.execute(count_query, params)
         total = cursor.fetchone()[0]
         
         # Query con paginación
-        query = base_query + """
-            ORDER BY e.CreatedOn DESC
+        sort_columns = {
+            'patient_name': 'patient_name',
+            'patient_dni': 'dp.nationalcode',
+            'study_type': 'st.Description',
+            'status': 'e.Status',
+            'admission_number': 'e.AdmisionNumber',
+            'accession_number': 'e.LocalAcc',
+            'created_on': 'e.CreatedOn',
+            'is_reported': 'e.IsReported',
+            'report_date': 'e.reportdate',
+        }
+        sort_expression = sort_columns.get(sort_column, 'e.CreatedOn')
+        direction = 'ASC' if sort_direction == 'asc' else 'DESC'
+        query = base_query + f"""
+            ORDER BY {sort_expression} {direction}, e.CreatedOn DESC
             LIMIT %s OFFSET %s
         """
         
@@ -1431,15 +1454,20 @@ def get_examinations_for_reporting():
                 'equipment': row[12] or '',
                 'location': row[13] or '',
                 'assigned_to': str(row[14]) if row[14] else None,
-                'pdf_path': row[15] or None,
-                'modality_id': str(row[16]) if row[16] else None,
-                'modality_description': row[17] or '',
-                'study_group_id': str(row[18]) if row[18] else None,
-                'study_group_description': row[19] or '',
-                'bodypart_id': str(row[20]) if row[20] else None,
-                'bodypart_description': row[21] or '',
-                'blocked_by': str(row[22]) if row[22] else None,
-                'blocked_by_name': row[23] or ''
+                'assignto_name': row[15] or '',
+                'pdf_path': row[16] or None,
+                'modality_id': str(row[17]) if row[17] else None,
+                'modality_description': row[18] or '',
+                'study_group_id': str(row[19]) if row[19] else None,
+                'study_group_description': row[20] or '',
+                'bodypart_id': str(row[21]) if row[21] else None,
+                'bodypart_description': row[22] or '',
+                'blocked_by': str(row[23]) if row[23] else None,
+                'blocked_by_name': row[24] or '',
+                'report_date': row[25].isoformat() if row[25] else None,
+                'flags': row[26] or [],
+                'tag_ids': [str(value) for value in (row[27] or [])],
+                'general_notes': row[28] or None,
             })
         
         cursor.close()
@@ -1523,11 +1551,14 @@ def get_examination_report(exam_id):
                    e.StudyInstanceUID,
                    e.location_id,
                    loc.facility_id,
-                   st.default_predef_id
+                   st.default_predef_id,
+                   st.description as study_type_description,
+                   mod.description as modality_description
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
-            LEFT JOIN nextris.tblocation loc ON e.location_id = loc.guid
-            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
+           LEFT JOIN nextris.tblocation loc ON e.location_id = loc.guid
+           LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
+           LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             WHERE e.Guid = %s
             """,
             (exam_id,),
@@ -1561,6 +1592,8 @@ def get_examination_report(exam_id):
         location_id = exam[16]
         facility_id = exam[17]
         default_predef_id = exam[18]
+        study_type_description = exam[19]
+        modality_description = exam[20]
 
         cursor.execute(
             """
@@ -1675,6 +1708,8 @@ def get_examination_report(exam_id):
                 'patient_id': str(patient_id) if patient_id else None,
                 'admission_number': admission_number or '',
                 'study_type_id': str(study_type_id) if study_type_id else None,
+                'study_type_description': study_type_description or '',
+                'modality_description': modality_description or '',
                 'location_id': str(location_id) if location_id else None,
                 'facility_id': str(facility_id) if facility_id else None,
                 'structured_reports_enabled': bool(structured_enabled),
@@ -1772,7 +1807,6 @@ def update_examination_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         ensure_location_report_execution_column(connection)
-        ensure_plan_management_schema(connection)
         
         # Verificar que el examen existe
         cursor.execute("""
@@ -1780,12 +1814,10 @@ def update_examination_report(exam_id):
                    e.AdmisionNumber,
                    COALESCE(e.IsExecuted, 0) AS is_executed,
                      COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
-                     COALESCE(e.IsReported, 0) AS is_reported,
-                     l.facility_id
+                     COALESCE(e.IsReported, 0) AS is_reported
             FROM nextris.tbexamination e
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
               LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-                  LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -1803,7 +1835,6 @@ def update_examination_report(exam_id):
         is_executed = bool(exam[2])
         require_execution_before_reporting = bool(exam[3])
         already_reported = bool(exam[4])
-        facility_id = exam[5]
 
         if not can_edit_or_sign_report(is_executed, require_execution_before_reporting):
             cursor.close()
@@ -1868,26 +1899,12 @@ def update_examination_report(exam_id):
         
         # Marcar examen como reportado si se solicita
         if mark_as_reported:
-            if not already_reported and facility_id:
-                is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'read')
-                if not is_allowed:
-                    cursor.close()
-                    connection.close()
-                    return jsonify({
-                        'success': False,
-                        'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
-                        'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
-                        'data': limit_payload,
-                    }), 403
-
             cursor.execute("""
                 UPDATE nextris.tbexamination
                 SET IsReported = 1
                 WHERE Guid = %s
             """, (exam_id,))
 
-            if not already_reported and facility_id:
-                increment_usage_counter(connection, facility_id, 'read', 1)
         
         connection.commit()
         cursor.close()
@@ -2636,13 +2653,28 @@ def get_next_exam():
         data = request.get_json(force=True, silent=True) or {}
         
         current_exam_id = data.get('current_exam_id')
-        show_ready = data.get('show_ready', True)
-        show_reported = data.get('show_reported', False)
-        assigned_to_me = data.get('assigned_to_me', False)
+        if not current_exam_id:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere current_exam_id para obtener el siguiente examen'
+            }), 400
+
+        def as_bool(value, default=False):
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in {'true', '1', 'on', 'yes'}
+
+        show_ready = as_bool(data.get('show_ready'), True)
+        show_reported = as_bool(data.get('show_reported'), False)
+        assigned_to_me = as_bool(data.get('assigned_to_me'), False)
+        show_no_image = as_bool(data.get('show_no_image'), False)
+        show_without_order = as_bool(data.get('show_without_order'), False)
+        sort_direction = 'desc' if str(data.get('sort_direction', 'asc')).lower() == 'desc' else 'asc'
         modality_id = data.get('modality_id')
         body_part_id = data.get('body_part_id')
         study_group_id = data.get('study_group_id')
-        facility_id = data.get('facility_id')
         
         config = get_db_config()
         if not config:
@@ -2652,15 +2684,6 @@ def get_next_exam():
             }), 500
         
         connection = psycopg2.connect(**config)
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': None
-            }), 200
-        
         cursor = connection.cursor()
         
         # Obtener la fecha de creación del examen actual para buscar el siguiente
@@ -2669,8 +2692,6 @@ def get_next_exam():
         """, (current_exam_id,))
         current_exam = cursor.fetchone()
         current_created_on = current_exam[0] if current_exam else None
-        
-        location_placeholders = ','.join(['%s'] * len(user_locations))
         
         # Aplicar el mismo filtro de reportado que en la lista
         if show_reported and show_ready:
@@ -2696,17 +2717,22 @@ def get_next_exam():
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
-            AND (
+            WHERE (
                 COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
                 OR e.IsExecuted = 1
             )
             AND e.Guid != %s
+            AND (e.blockby IS NULL OR e.blockby::text = %s)
             {reported_filter}
         """
         
-        params = list(user_locations)
-        params.append(current_exam_id)
+        params = [current_exam_id, str(user_id)]
+
+        if not show_no_image:
+            query += ' AND COALESCE(e.isimage, 0) = 1'
+
+        if not show_without_order:
+            query += ' AND COALESCE(e."w-order", 0) = 1'
         
         # Aplicar filtro de asignación
         if assigned_to_me:
@@ -2726,16 +2752,17 @@ def get_next_exam():
             query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
 
-        if facility_id:
-            query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
-        # Ordenar y limitar a 1
+        # Seguir la misma dirección que la lista de Redacción. La lista por
+        # defecto es ascendente; en ese caso el siguiente es posterior al
+        # examen actual. Con descendente se busca el anterior.
         if current_created_on:
-            query += " AND e.CreatedOn <= %s"
-            params.append(current_created_on)
+            if sort_direction == 'desc':
+                query += " AND (e.CreatedOn < %s OR (e.CreatedOn = %s AND e.Guid::text < %s))"
+            else:
+                query += " AND (e.CreatedOn > %s OR (e.CreatedOn = %s AND e.Guid::text > %s))"
+            params.extend([current_created_on, current_created_on, str(current_exam_id)])
         
-        query += " ORDER BY e.CreatedOn DESC LIMIT 1"
+        query += f" ORDER BY e.CreatedOn {sort_direction.upper()}, e.Guid {sort_direction.upper()} LIMIT 1"
         
         cursor.execute(query, params)
         next_exam = cursor.fetchone()
@@ -2806,7 +2833,6 @@ def sign_report(exam_id):
     """
     try:
         data = request.get_json(force=True, silent=True) or {}
-        requested_facility_id = data.get('facility_id')
         
         # Obtener ID del médico que firma
         reporter_physician_id = data.get('reporter_physician_id')
@@ -2824,7 +2850,6 @@ def sign_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         ensure_location_report_execution_column(connection)
-        ensure_plan_management_schema(connection)
         
         # Obtener datos del examen para el nombre del PDF
         cursor.execute("""
@@ -2835,13 +2860,11 @@ def sign_report(exam_id):
                    e.IdPatient,
                    COALESCE(e.IsExecuted, 0) AS is_executed,
                    COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
-                   COALESCE(e.IsReported, 0) AS is_reported,
-                   l.facility_id
+                   COALESCE(e.IsReported, 0) AS is_reported
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-            LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -2854,14 +2877,8 @@ def sign_report(exam_id):
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
         
-        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_executed, require_execution_before_reporting, is_reported, facility_id = exam_data
+        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_executed, require_execution_before_reporting, is_reported = exam_data
         already_reported = bool(is_reported)
-        usage_facility_id = resolve_facility_id_for_usage(
-            connection,
-            facility_id,
-            requested_facility_id,
-            reporter_physician_id,
-        )
 
         if not can_edit_or_sign_report(bool(is_executed), bool(require_execution_before_reporting)):
             cursor.close()
@@ -2941,18 +2958,6 @@ def sign_report(exam_id):
             SET IsReported=1, assignto=%s, reportdate=CURRENT_TIMESTAMP
             WHERE Guid=%s
         """
-        if not already_reported and usage_facility_id:
-            is_allowed, limit_payload = check_limit_before_action(connection, usage_facility_id, 'read')
-            if not is_allowed:
-                cursor.close()
-                connection.close()
-                return jsonify({
-                    'success': False,
-                    'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
-                    'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
-                    'data': limit_payload,
-                }), 403
-
         cursor.execute(query, (reporter_physician_id, exam_id))
 
         if cursor.rowcount == 0:
@@ -2970,8 +2975,6 @@ def sign_report(exam_id):
             WHERE idexamination = %s
         """, (pdf_relative_path, reporter_physician_id, exam_id))
 
-        if not already_reported and usage_facility_id:
-            increment_usage_counter(connection, usage_facility_id, 'read', 1)
 
         connection.commit()
 
@@ -3063,10 +3066,6 @@ def sign_report(exam_id):
                         query += " AND st.studygroup_id = %s"
                         params.append(study_group_id)
 
-                    if requested_facility_id:
-                        query += " AND loc.facility_id = %s"
-                        params.append(requested_facility_id)
-                    
                     # Ordenar y limitar a 1
                     if current_created_on:
                         query += " AND e.CreatedOn <= %s"
@@ -3096,15 +3095,22 @@ def sign_report(exam_id):
         # Cerrar conexión
         cursor.close()
         connection.close()
-        
+
+        try:
+            from apps.api.clinicaparque import _send_report_to_external
+            send_result = _send_report_to_external(exam_id)
+            print(f"[SIGN] Reporte enviado a externo: success={send_result['success']}, status={send_result['external_status']}")
+        except Exception as send_err:
+            print(f"[SIGN] Error al enviar reporte a externo: {send_err}")
+
         response_data = {
             'success': True,
             'message': 'Reporte firmado exitosamente'
         }
-        
+
         if next_exam:
             response_data['next_exam'] = next_exam
-        
+
         return jsonify(response_data), 200
         
     except psycopg2.Error as db_error:
@@ -3130,21 +3136,21 @@ def verify_credentials():
     """
     Verifica las credenciales del usuario actual
     Útil para acciones críticas como firmar reportes
-    
+
     Headers:
     - Authorization: Bearer <token>
-    
+
     Body JSON:
     {
-        "password": "string" (required)
+        "password": "string" (required if global require_signature_password setting is true)
     }
-    
+
     Returns:
     {
         "success": true,
-        "message": "Credenciales válidas"
+        "message": "Credenciales válidas" (or "Verificación omitida" if require_signature_password is false)
     }
-    
+
     Error Response:
     {
         "success": false,
@@ -3152,49 +3158,70 @@ def verify_credentials():
     }
     """
     try:
-        data = request.get_json(force=True, silent=True)
-        
-        if not data or 'password' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'La contraseña es requerida'
-            }), 400
-        
+        data = request.get_json(force=True, silent=True) or {}
         password = data.get('password')
-        user_id = get_jwt_identity()
-        
+
         config = get_db_config()
         if not config:
             return jsonify({
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        
-        # Obtener hash de contraseña del usuario
+
+        require_signature_password = True
+
+        user_id = normalize_user_id(get_jwt_identity())
         cursor.execute("""
-            SELECT password FROM nextris.tbuser 
+            SELECT COALESCE(l.require_signature_password, TRUE) as require_signature_password
+            FROM nextris.tblocation l
+            INNER JOIN nextris.rel_user_location rul ON l.guid = rul.location_id
+            WHERE rul.user_id = %s
+            ORDER BY rul.is_default DESC, l.name
+            LIMIT 1
+        """, (user_id,))
+        result = cursor.fetchone()
+        if result:
+            require_signature_password = bool(result[0])
+
+        if not require_signature_password:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': True,
+                'message': 'Verificación de contraseña omitida'
+            }), 200
+
+        if not password:
+            return jsonify({
+                'success': False,
+                'message': 'La contraseña es requerida'
+            }), 400
+
+        user_id = get_jwt_identity()
+
+        cursor.execute("""
+            SELECT password FROM nextris.tbuser
             WHERE guid = %s
         """, (user_id,))
-        
+
         result = cursor.fetchone()
         cursor.close()
         connection.close()
-        
+
         if not result:
             return jsonify({
                 'success': False,
                 'message': 'Usuario no encontrado'
             }), 404
-        
+
         stored_password = result[0]
-        
-        # Verificar contraseña (asumiendo que está hasheada con bcrypt o similar)
+
         try:
             from werkzeug.security import check_password_hash
-            
+
             if check_password_hash(stored_password, password):
                 return jsonify({
                     'success': True,
@@ -3206,7 +3233,6 @@ def verify_credentials():
                     'message': 'Credenciales inválidas'
                 }), 401
         except:
-            # Si no está hasheada, comparar directamente (no recomendado en producción)
             if stored_password == password:
                 return jsonify({
                     'success': True,
@@ -3217,7 +3243,7 @@ def verify_credentials():
                     'success': False,
                     'message': 'Credenciales inválidas'
                 }), 401
-        
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -3577,5 +3603,63 @@ def get_study_groups_filter():
         cursor.close()
         connection.close()
         return jsonify({'success': True, 'data': results}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/reports/<exam_id>/assign', methods=['POST'])
+@jwt_required()
+@require_permission('reports.assign')
+def assign_exam_to_user(exam_id):
+    """
+    Asigna un examen a un usuario (radiólogo).
+
+    Body:
+        user_id: GUID del usuario radiólogo
+
+    Returns:
+        {"success": true, "message": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get('user_id'):
+            return jsonify({'success': False, 'message': 'user_id es requerido'}), 400
+
+        user_id = data['user_id']
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbexamination WHERE guid = %s", (exam_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid = %s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'}), 404
+
+        cursor.execute(
+            """
+            UPDATE nextris.tbexamination
+            SET assignto = %s
+            WHERE guid = %s
+            """,
+            (user_id, exam_id)
+        )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Estudio asignado correctamente'}), 200
+
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500

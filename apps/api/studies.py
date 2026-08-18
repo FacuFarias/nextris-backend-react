@@ -13,7 +13,7 @@ from apps.api import api_blueprint
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
     check_limit_before_action,
-    increment_usage_counter,
+
 )
 
 
@@ -476,7 +476,7 @@ def create_worklist():
                     facility_id = facility_row[0] if facility_row else None
 
                 if facility_id:
-                    is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'receive')
+                    is_allowed, limit_payload = check_limit_before_action(connection, 'receive')
                     if not is_allowed:
                         errors.append(limit_payload.get('message', 'Límite de plan alcanzado para recibir estudios'))
                         continue
@@ -531,8 +531,6 @@ def create_worklist():
                     )
                 """, (exam_guid, patient_id, adm_number))
 
-                if facility_id:
-                    increment_usage_counter(connection, facility_id, 'received', 1)
                 
                 created_exams.append(exam_guid)
                 
@@ -1740,4 +1738,3 @@ def update_examination_demograficos(guid):
     except Exception as e:
         print(f"[API UPDATE DEMOGRAFICOS] Error: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
-

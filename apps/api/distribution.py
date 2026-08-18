@@ -4,7 +4,7 @@ API REST para Distribución de Informes
 Endpoints para gestión y envío de informes médicos finalizados
 """
 
-from flask import request, jsonify, send_file
+from flask import request, jsonify, send_file, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
@@ -13,11 +13,11 @@ import uuid
 import os
 import smtplib
 import requests
+from urllib.parse import urlparse, urlunparse
 import html
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
     check_limit_before_action,
-    increment_usage_counter,
 )
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -33,6 +33,17 @@ def get_db_config():
         return config
     except:
         return None
+
+
+def _build_viewer_url(study_uid):
+    """Construye URL absoluta del visor DICOM usando config."""
+    viewer_url_cfg = current_app.config.get(
+        'DICOM_VIEWER_URL',
+        'https://clinicacp.ddns.net:3000/viewer'
+    )
+    parsed = urlparse(viewer_url_cfg)
+    viewer_base = f"{parsed.scheme}://{parsed.netloc}"
+    return f"{viewer_base}/viewer?StudyInstanceUIDs={study_uid}"
 
 
 def get_user_locations(user_id, connection):
@@ -123,52 +134,42 @@ def get_examinations_for_distribution():
     """
     try:
         user_id = get_jwt_identity()
-        
+
         config = get_db_config()
         if not config:
             return jsonify({
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         # Parámetros
         all_reported = request.args.get('all_reported', 'false').lower() == 'true'
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
-        facility_id = request.args.get('facility_id')
+        date_range = request.args.get('date_range', 'all').strip().lower()
+        date_field = request.args.get('date_field', 'admision').strip().lower()
         per_page = min(per_page, 100)
         offset = (page - 1) * per_page
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         ensure_plan_management_schema(connection)
         
-        # Obtener ubicaciones del usuario
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'data': [],
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0
-                }
-            }), 200
-        
         # Query base
         query = """
-            SELECT 
+            SELECT
                 e.guid,
                 TO_CHAR(e.createdon, 'DD/MM/YYYY HH24:MI') as fecha,
                 st.description as examen,
                 CONCAT(dp.name, ' ', dp.surname) as paciente,
                 COALESCE(dp.email, '') as mail,
-                CASE 
-                    WHEN COALESCE(e.ispublicated, 0) = 1 THEN 'E'
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM nextris.communication_logs cl
+                        WHERE cl.accession_number = e.localacc
+                        AND cl.api_endpoint = '/clinicaparque/reports/send'
+                        AND cl.success = TRUE
+                    ) THEN 'E'
                     ELSE 'R'
                 END as estado,
                 COALESCE(u.name || ' ' || COALESCE(u.surname, ''), u.username, '') as medico_autor,
@@ -179,7 +180,16 @@ def get_examinations_for_distribution():
                 COALESCE(e.isexecuted, 0) as isexecuted,
                 COALESCE(e.ispublicated, 0) as ispublicated,
                 e.localacc as accession_number,
-                COALESCE(dp.phone, '') as phone
+                COALESCE(dp.phone, '') as phone,
+                CASE
+                    WHEN cl_sent.success = TRUE THEN
+                        TO_CHAR(cl_sent.received_at, 'DD/MM/YYYY HH24:MI')
+                    ELSE NULL
+                END as sent_at,
+                CASE
+                    WHEN cl_sent.success = FALSE THEN cl_sent.error_message
+                    ELSE NULL
+                END as send_error
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
@@ -188,20 +198,47 @@ def get_examinations_for_distribution():
             LEFT JOIN nextris.isrequestingphysician rp ON e.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = e.guid
             LEFT JOIN nextris.tbuser u ON r.iduser = u.guid
-            WHERE COALESCE(e.location_id, eq.location_id) = ANY(%s)
-            AND e.isreported = 1
+            LEFT JOIN LATERAL (
+                SELECT cl2.success, cl2.received_at, cl2.error_message
+                FROM nextris.communication_logs cl2
+                WHERE cl2.accession_number = e.localacc
+                AND cl2.api_endpoint = '/clinicaparque/reports/send'
+                ORDER BY cl2.received_at DESC
+                LIMIT 1
+            ) cl_sent ON TRUE
+            WHERE e.isreported = 1
         """
-        
-        params = [user_locations]
-        
+
+        params = []
+
         # Si no se quieren los ya enviados, filtrar
         if not all_reported:
-            query += " AND (e.ispublicated IS NULL OR e.ispublicated = 0)"
+            query += " AND NOT EXISTS ("
+            query += " SELECT 1 FROM nextris.communication_logs cl"
+            query += " WHERE cl.accession_number = e.localacc"
+            query += " AND cl.api_endpoint = '/clinicaparque/reports/send'"
+            query += " AND cl.success = TRUE)"
 
-        if facility_id:
-            query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
+        # Filtro de fechas
+        date_intervals = {
+            '1d': '1 day',
+            '3d': '3 days',
+            '7d': '7 days',
+            '14d': '14 days',
+            '1m': '1 month',
+            '2m': '2 months',
+            '3m': '3 months',
+            '1y': '1 year'
+        }
+        if date_range in date_intervals:
+            if date_field == 'estudio':
+                date_column = 'e.reportdate'
+            elif date_field == 'enviado':
+                date_column = 'cl_sent.received_at'
+            else:  # admision
+                date_column = 'e.createdon'
+            query += f" AND {date_column} BETWEEN CURRENT_TIMESTAMP - INTERVAL '{date_intervals[date_range]}' AND CURRENT_TIMESTAMP"
+
         query += " ORDER BY e.createdon DESC"
         
         # Contar total
@@ -235,7 +272,9 @@ def get_examinations_for_distribution():
                 'isexecuted': bool(row[11]),
                 'ispublicated': bool(row[12]),
                 'accession_number': row[13] or '',
-                'phone': row[14] or ''
+                'phone': row[14] or '',
+                'sent_at': row[15] or None,
+                'send_error': row[16] or None
             })
         
         return jsonify({
@@ -435,7 +474,7 @@ def send_report_email(exam_id):
         viewer_text_block = ""
         viewer_html_block = ""
         if has_images and study_uid:
-            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_url = _build_viewer_url(study_uid)
             viewer_text_block = (
                 "\n\nPuede visualizar las imágenes médicas en el siguiente enlace:\n"
                 f"{viewer_url}\n"
@@ -611,8 +650,6 @@ def send_report_email(exam_id):
         """
         cursor.execute(update_query, (exam_id,))
 
-        if facility_id and not already_publicated:
-            increment_usage_counter(connection, facility_id, 'distributed', 1)
 
         connection.commit()
         
@@ -856,7 +893,10 @@ def get_dicom_viewer_info(exam_id):
             }), 404
 
         # Construir URL del visor
-        viewer_url = f"/viewer?studyUID={study_uid}"
+        viewer_url_cfg = current_app.config.get('DICOM_VIEWER_URL', 'https://clinicacp.ddns.net:3000/viewer')
+        parsed = urlparse(viewer_url_cfg)
+        viewer_base = f"{parsed.scheme}://{parsed.netloc}"
+        viewer_url = f"{viewer_base}/viewer?StudyInstanceUIDs={study_uid}"
 
         # Verificar si existen imágenes (opcional, basado en la existencia de archivos)
         has_images = True  # Por defecto asumimos que sí hay imágenes si tiene study_uid
@@ -1163,7 +1203,7 @@ def send_report_whatsapp(exam_id):
 
         # Si hay imágenes DICOM, enviar link del visor en un segundo mensaje
         if has_images and study_uid:
-            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_url = _build_viewer_url(study_uid)
             viewer_text = (
                 f"Para visualizar las imágenes médicas de su estudio ({study_type}), "
                 f"acceda al siguiente enlace:\n\n{viewer_url}"
@@ -1181,8 +1221,6 @@ def send_report_whatsapp(exam_id):
         """
         cursor.execute(update_query, (exam_id,))
 
-        if facility_id and not already_publicated:
-            increment_usage_counter(connection, facility_id, 'distributed', 1)
 
         connection.commit()
 

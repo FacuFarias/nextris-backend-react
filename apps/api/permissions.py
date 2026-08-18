@@ -25,8 +25,10 @@ PERMISSION_CATALOG = [
     {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
     {'code': 'tabs.gestion.view', 'module': 'gestion', 'action': 'view', 'description': 'Ver pestaña Gestión'},
     {'code': 'tabs.images.view', 'module': 'images', 'action': 'view', 'description': 'Ver pestaña Imágenes'},
-    {'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'},
-    {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'},
+    # structured_reports — deshabilitado temporalmente
+    # {'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'},
+    # nexi — deshabilitado temporalmente
+    # {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'},
     # Permisos de acciones
     {'code': 'reports.sign', 'module': 'reports', 'action': 'sign', 'description': 'Firmar informe'},
     {'code': 'reports.unsign', 'module': 'reports', 'action': 'unsign', 'description': 'Desfirmar informe'},
@@ -58,6 +60,7 @@ PERMISSION_CATALOG = [
 
     {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
     {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
+    {'code': 'reports.assign', 'module': 'reports', 'action': 'assign', 'description': 'Asignar estudio a un usuario'},
 ]
 
 
@@ -97,25 +100,43 @@ ROLE_BASED_PERMISSIONS = {
         'tabs.appointments.view',
         'tabs.admissions.view',
         'tabs.distribution.view',
+        'tabs.reports.view',
+        'reports.view_writing',
+        'reports.view_reports',
     },
     'tecnico': {
         'tabs.patients.view',
+        'patients.view',
         'tabs.execution.view',
+        'execution.view_pending',
+        'tabs.images.view',
+        'images.view',
+        'tabs.reports.view',
+        'reports.view_writing',
+        'reports.view_reports',
     },
     'medico': {
         'tabs.patients.view',
+        'patients.view',
         'patients.manage',
         'tabs.admissions.view',
         'admissions.view',
         'admissions.create_spontaneous',
+        'tabs.execution.view',
+        'execution.view_pending',
         'tabs.reports.view',
+        'reports.view_writing',
+        'reports.view_reports',
+        'reports.sign',
+        'reports.assign',
+        'tabs.images.view',
+        'images.view',
         'tabs.distribution.view',
         'distribution.view',
         'distribution.perform',
         'distribution.send_report',
         'distribution.send_report_whatsapp',
         'distribution.update_email',
-        'reports.sign',
     },
 }
 

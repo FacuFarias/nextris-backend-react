@@ -7,6 +7,7 @@ from flask import jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 import psycopg2.extras
+import uuid
 from datetime import datetime
 from apps.api import api_blueprint
 
@@ -145,11 +146,12 @@ def create_filter_preset():
         cursor.execute(deactivate_query, [user_id, *scope_params])
 
         # Crear el nuevo preset como activo
+        new_guid = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO nextris.tb_filter_preset (user_id, name, filters, sort_order, is_active)
-            VALUES (%s, %s, %s::jsonb, %s, true)
+            INSERT INTO nextris.tb_filter_preset (guid, user_id, name, filters, sort_order, is_active)
+            VALUES (%s, %s, %s, %s::jsonb, %s, true)
             RETURNING guid, name, filters, sort_order, is_active, created_on, updated_on
-        """, (user_id, name, psycopg2.extras.Json(filters), next_order))
+        """, (new_guid, user_id, name, psycopg2.extras.Json(filters), next_order))
 
         new_preset = cursor.fetchone()
         connection.commit()

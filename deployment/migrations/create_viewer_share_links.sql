@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS nextris.tbviewer_share_link (
     guid VARCHAR(100) PRIMARY KEY,
     token_hash VARCHAR(128) NOT NULL UNIQUE,
     study_iuid VARCHAR(255) NOT NULL,
-    location_id VARCHAR(100) NOT NULL,
+    location_id VARCHAR(100) NULL,
     created_by_user_id VARCHAR(100) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMP NOT NULL,

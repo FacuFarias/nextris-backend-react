@@ -21,6 +21,7 @@ from apps.home.services.config_service import ConfigService
 
 # Importar funciones para firmas digitales
 from apps.home.controllers.config_controller import get_user_signature_data
+from apps.api.viewer_share_service import create_for_exam as create_share_for_exam
 
 # Crear blueprint para reportes
 report_bp = Blueprint('report', __name__, url_prefix='/api')
@@ -178,9 +179,45 @@ def _normalize_report_text_for_pdf(content):
     text = re.sub(r'<[^>]+>', '', text)
     text = html.unescape(text)
 
+    # Los corchetes se usan en el editor para marcar variables/campos
+    # pendientes, pero nunca deben llegar al informe PDF final.
+    text = text.replace('[', '').replace(']', '')
+
     # Normalizar espacios sin romper saltos de línea.
     lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
     return '\n'.join(lines).strip()
+
+
+def _draw_share_qr_page(c, share_url, width, height):
+    """Dibuja un QR y enlaces PDF clickeables para el acceso a imágenes."""
+    from reportlab.graphics.barcode import qr
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderPDF
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    qr_size = 180
+    qr_x = (width - qr_size) / 2
+    qr_y = height - 300
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(width / 2, height - 80, "Acceso a las imágenes del estudio")
+
+    qr_widget = qr.QrCodeWidget(share_url)
+    qr_widget.barWidth = qr_size
+    qr_widget.barHeight = qr_size
+    qr_drawing = Drawing(qr_size, qr_size)
+    qr_drawing.add(qr_widget)
+    renderPDF.draw(qr_drawing, c, qr_x, qr_y)
+    # El QR también se puede abrir con un clic desde un lector PDF.
+    c.linkURL(share_url, (qr_x, qr_y, qr_x + qr_size, qr_y + qr_size), thickness=0)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(width / 2, height - 325, "Escanee este código para ver las imágenes")
+    c.setFont("Helvetica", 8)
+    url_width = stringWidth(share_url, "Helvetica", 8)
+    url_x = max(50, (width - url_width) / 2)
+    c.drawString(url_x, height - 350, share_url)
+    c.linkURL(share_url, (url_x, height - 352, url_x + url_width, height - 340), thickness=0)
 
 def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_filename=None):
     """
@@ -239,13 +276,13 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
                 LIMIT 1
             )
                  SELECT p.Surname, p.Name, st.Description, rep.Date,
-                     COALESCE(NULLIF(u_ref.username, ''), rep.idreferringphysician::text) AS referring_physician_name,
+                     COALESCE(NULLIF(u_ref.username, ''), tbex.idreferringphysician::text) AS referring_physician_name,
                    rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
             FROM selected_report rep
             LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
             LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.Guid
             LEFT JOIN nextris.datapatient p ON p.guid = COALESCE(rep.IdPatient, tbex.IdPatient)
-                 LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = rep.idreferringphysician
+                 LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = tbex.idreferringphysician
         """
         
         print(f"[PDF_GEN] Ejecutando query para obtener datos del reporte...")
@@ -260,6 +297,18 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
             return None
 
         surname, name, examen, fecha, refmed, findings, techniques, impressions, conclusions, userid = data
+
+        # El QR se crea en la misma transacción/conexión que genera el PDF. El
+        # token plano vive únicamente en memoria durante esta operación; la BD
+        # conserva exclusivamente su hash.
+        share_data = None
+        try:
+            share_data = create_share_for_exam(report_id, created_by=userid, connection=connection)
+            # El enlace del QR debe quedar persistido aunque una consulta
+            # opcional posterior del encabezado falle para este estudio.
+            connection.commit()
+        except Exception as share_error:
+            print(f"[PDF_GEN] No se pudo crear enlace QR de imágenes: {share_error}")
 
         findings = _normalize_report_text_for_pdf(findings)
         techniques = _normalize_report_text_for_pdf(techniques)
@@ -280,7 +329,9 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         width, height = letter
 
         # Obtener datos institucionales (prioridad: ubicación del examen).
-        nombre_inst = 'NEXTRIS'
+        # Se dejan vacíos inicialmente para que los datos de ubicación,
+        # facility o institución general puedan completar cada campo.
+        nombre_inst = ''
         direccion_inst = ''
         telefono_inst = ''
         mail_inst = ''
@@ -298,9 +349,30 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         inst_fallback = None
         facility_fallback = None
 
+        institution_savepoint = f"pdf_institution_{uuid.uuid4().hex[:8]}"
+        cursor.execute(f"SAVEPOINT {institution_savepoint}")
         try:
             cursor.execute(inst_by_location_query, (report_id,))
             inst_location = cursor.fetchone()
+
+            # Algunos estudios antiguos no tienen location_id ni equipo
+            # asociado. Si existe una única ubicación activa configurada, se
+            # usa como identidad institucional (actualmente Clínica Parque).
+            if not inst_location or not any(inst_location[:5]):
+                cursor.execute(
+                    """
+                    SELECT name, address, phone, mail, logo_path, facility_id
+                    FROM nextris.tblocation
+                    WHERE LOWER(COALESCE(status, 'active')) = 'active'
+                      AND (
+                          SELECT COUNT(*)
+                          FROM nextris.tblocation
+                          WHERE LOWER(COALESCE(status, 'active')) = 'active'
+                      ) = 1
+                    LIMIT 1
+                    """
+                )
+                inst_location = cursor.fetchone()
 
             if inst_location:
                 nombre_inst = inst_location[0] or nombre_inst
@@ -318,27 +390,45 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
                         )
                         facility_fallback = cursor.fetchone()
                     except Exception as facility_error:
+                        # La tabla es opcional y no existe en algunas
+                        # instalaciones. Limpiar solo este fallo evita dejar
+                        # abortada la transacción que contiene el enlace QR.
+                        cursor.execute(f"ROLLBACK TO SAVEPOINT {institution_savepoint}")
                         print(f"[WARNING] No se pudieron cargar datos de facility fallback: {facility_error}")
         except Exception as inst_error:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {institution_savepoint}")
             print(f"[WARNING] No se pudieron cargar datos de location para encabezado PDF: {inst_error}")
+        finally:
+            cursor.execute(f"RELEASE SAVEPOINT {institution_savepoint}")
 
         # Fallback legacy opcional: en algunos entornos esta tabla no existe.
+        facility_savepoint = f"pdf_facility_{uuid.uuid4().hex[:8]}"
+        cursor.execute(f"SAVEPOINT {facility_savepoint}")
         try:
             cursor.execute("SELECT name, address, phone, mail, logo_path FROM nextris.isbasicinformation ORDER BY guid ASC LIMIT 1")
             inst_fallback = cursor.fetchone()
         except Exception:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {facility_savepoint}")
             inst_fallback = None
+        finally:
+            cursor.execute(f"RELEASE SAVEPOINT {facility_savepoint}")
 
         if facility_fallback:
-            nombre_inst = nombre_inst or facility_fallback[0] or 'NEXTRIS'
+            nombre_inst = nombre_inst or facility_fallback[0] or ''
             mail_inst = mail_inst or facility_fallback[1] or ''
 
         if inst_fallback:
-            nombre_inst = nombre_inst or inst_fallback[0] or 'NEXTRIS'
-            direccion_inst = direccion_inst or inst_fallback[1] or ''
-            telefono_inst = telefono_inst or inst_fallback[2] or ''
-            mail_inst = mail_inst or inst_fallback[3] or ''
-            logo_path_db = logo_path_db or inst_fallback[4]
+            # La configuración institucional global es la identidad oficial
+            # del informe (por ejemplo, Clínica Parque). La ubicación solo
+            # completa campos que no estén configurados globalmente.
+            nombre_inst = inst_fallback[0] or nombre_inst
+            direccion_inst = inst_fallback[1] or direccion_inst
+            telefono_inst = inst_fallback[2] or telefono_inst
+            mail_inst = inst_fallback[3] or mail_inst
+            logo_path_db = inst_fallback[4] or logo_path_db
+
+        if not nombre_inst:
+            print("[WARNING] No hay datos en nextris.isbasicinformation para el encabezado institucional")
 
         # Añadir logo si existe
         logo_to_use = _resolve_pdf_asset_path(logo_path_db, app_root)
@@ -408,6 +498,22 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         # ===== AGREGAR FIRMA DIGITAL =====
         if userid:
             signature_data = get_user_signature_data(userid)
+            if not signature_data:
+                signer = DatabaseService.execute_query(
+                    "SELECT name, surname FROM nextris.tbuser WHERE guid=%s",
+                    (userid,),
+                    fetch_one=True,
+                )
+                if signer:
+                    signature_data = {
+                        'aclaracion_firma': ' '.join(
+                            part for part in (signer[0], signer[1]) if part
+                        ).strip(),
+                        'matricula_nacional': None,
+                        'firma_digital': None,
+                        'firma_habilitada': False,
+                        'firma_path': None,
+                    }
             if signature_data and signature_data['firma_digital']:
                 print(f"[INFO] Agregando firma del médico: {signature_data['aclaracion_firma']}")
                 
@@ -455,8 +561,34 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
                     c.drawString(50, y_position - 45, f"M.N.: {signature_data['matricula_nacional']}")
             else:
                 print(f"[INFO] No se encontró firma habilitada para el usuario: {userid}")
+                if signature_data and signature_data.get('aclaracion_firma'):
+                    if y_position < 110:
+                        c.showPage()
+                        y_position = height - 50
+                    c.line(50, y_position - 20, width - 50, y_position - 20)
+                    c.setFont("Helvetica-Bold", 10)
+                    c.drawString(50, y_position - 40, "Médico firmante:")
+                    c.setFont("Helvetica", 10)
+                    c.drawString(50, y_position - 58, f"Dr. {signature_data['aclaracion_firma']}")
+                    if signature_data.get('matricula_nacional'):
+                        c.drawString(50, y_position - 73, f"M.N.: {signature_data['matricula_nacional']}")
+                    c.setFont("Helvetica-Oblique", 9)
+                    c.drawString(50, y_position - 88, "Firma digital no configurada")
+
+        # El QR debe quedar siempre al final del informe, después del contenido
+        # y de la firma. Se usa una página final dedicada para que nunca quede
+        # mezclado con el encabezado ni se solape con texto variable.
+        if share_data and share_data.get('share_url'):
+            try:
+                c.showPage()
+                _draw_share_qr_page(c, share_data['share_url'], width, height)
+            except Exception as qr_error:
+                print(f"[PDF_GEN] No se pudo dibujar el QR: {qr_error}")
 
         c.save()
+
+        # Persistir el enlace que corresponde al QR generado en este PDF.
+        connection.commit()
         
         # Cerrar conexión
         cursor.close()
@@ -877,6 +1009,21 @@ def firmar_reporte():
                 fecha = datetime.now().strftime('%d/%m/%Y')
                 refmed = "No proporcionado"
                 findings = techniques = impressions = conclusions = ""
+
+            # El endpoint legado también debe generar el mismo enlace corto
+            # que usa el generador principal, para que sus PDFs incluyan QR.
+            share_data = None
+            try:
+                share_connection = psycopg2.connect(**ConfigService.get_db_config())
+                share_data = create_share_for_exam(
+                    exam_id,
+                    created_by=reporter_physician_id,
+                    connection=share_connection,
+                )
+                share_connection.commit()
+                share_connection.close()
+            except Exception as share_error:
+                print(f"[WARNING] No se pudo crear enlace QR para PDF legado: {share_error}")
             
             # Crear el PDF
             c = canvas.Canvas(absolute_pdf_path, pagesize=letter)
@@ -887,20 +1034,59 @@ def firmar_reporte():
             institucion = DatabaseService.execute_query(inst_query, fetch_one=True)
             
             if institucion:
-                nombre_inst = institucion[0] or 'NEXTRIS'
+                nombre_inst = institucion[0] or ''
                 direccion_inst = institucion[1] or ''
                 telefono_inst = institucion[2] or ''
                 mail_inst = institucion[3] or ''
                 logo_path_db = institucion[4]
             else:
-                nombre_inst = 'NEXTRIS'
+                nombre_inst = ''
                 direccion_inst = ''
                 telefono_inst = ''
                 mail_inst = ''
                 logo_path_db = None
+
+            # Si el informe pertenece a una ubicación configurada, sus datos
+            # tienen prioridad; los campos vacíos conservan el fallback general.
+            location_query = """
+                SELECT loc.name, loc.address, loc.phone, loc.mail, loc.logo_path
+                FROM nextris.tbexamination ex
+                LEFT JOIN nextris.isequipment eq ON eq.guid = ex.idequipment
+                LEFT JOIN nextris.tblocation loc ON loc.guid = COALESCE(ex.location_id, eq.location_id)
+                WHERE ex.guid = %s
+                LIMIT 1
+            """
+            location_data = DatabaseService.execute_query(location_query, (exam_id,), fetch_one=True)
+            if not location_data or not any(location_data):
+                location_data = DatabaseService.execute_query(
+                    """
+                    SELECT name, address, phone, mail, logo_path
+                    FROM nextris.tblocation
+                    WHERE LOWER(COALESCE(status, 'active')) = 'active'
+                      AND (
+                          SELECT COUNT(*)
+                          FROM nextris.tblocation
+                          WHERE LOWER(COALESCE(status, 'active')) = 'active'
+                      ) = 1
+                    LIMIT 1
+                    """,
+                    fetch_one=True
+                )
+            if location_data:
+                nombre_inst = nombre_inst or location_data[0] or ''
+                direccion_inst = direccion_inst or location_data[1] or ''
+                telefono_inst = telefono_inst or location_data[2] or ''
+                mail_inst = mail_inst or location_data[3] or ''
+                logo_path_db = logo_path_db or location_data[4]
             
             # Añadir el logo institucional si existe
-            logo_to_use = logo_path_db if logo_path_db else 'apps/static/assets/img/icono.jpg'
+            legacy_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+            logo_to_use = _resolve_pdf_asset_path(logo_path_db, legacy_app_root)
+            if not logo_to_use:
+                logo_to_use = _resolve_pdf_asset_path(
+                    'apps/static/assets/img/icono.jpg',
+                    legacy_app_root
+                )
             print(f"[DEBUG] Using logo: {logo_to_use}")
             try:
                 c.drawImage(logo_to_use, 50, height - 125, width=2*inch, preserveAspectRatio=True, mask='auto')
@@ -964,11 +1150,13 @@ def firmar_reporte():
                 y_position = height - 50
             
             # Obtener datos de firma del usuario actual usando Flask-Login
-            current_user_id = None
-            if current_user and current_user.is_authenticated:
+            # Usar como firmante el médico recibido al firmar el reporte. La
+            # sesión puede corresponder a otro usuario en la UI legado.
+            current_user_id = reporter_physician_id
+            if not current_user_id and current_user and current_user.is_authenticated:
                 current_user_id = current_user.id
                 print(f"[INFO] Usuario autenticado: {current_user.username} (ID: {current_user_id})")
-            else:
+            elif not current_user_id:
                 print(f"[WARNING] No hay usuario autenticado")
                 # Fallback: intentar obtener de session si existe
                 current_user_id = session.get('_user_id') or session.get('user_guid')
@@ -980,6 +1168,24 @@ def firmar_reporte():
                 print(f"[INFO] Buscando firma para usuario: {current_user_id}")
                 try:
                     signature_data = get_user_signature_data(current_user_id)
+                    if not signature_data:
+                        # Aunque no exista una firma gráfica habilitada, el
+                        # PDF debe identificar al médico que realizó la firma.
+                        signer = DatabaseService.execute_query(
+                            "SELECT name, surname FROM nextris.tbuser WHERE guid=%s",
+                            (current_user_id,),
+                            fetch_one=True,
+                        )
+                        if signer:
+                            signature_data = {
+                                'aclaracion_firma': ' '.join(
+                                    part for part in (signer[0], signer[1]) if part
+                                ).strip(),
+                                'matricula_nacional': None,
+                                'firma_digital': None,
+                                'firma_habilitada': False,
+                                'firma_path': None,
+                            }
                     print(f"[DEBUG] Datos de firma obtenidos: {signature_data}")
                     
                     if signature_data and signature_data.get('firma_digital'):
@@ -1091,6 +1297,14 @@ def firmar_reporte():
                 c.drawString(50, y_position, "Usuario no identificado")
                 c.setFont("Helvetica", 9)
                 c.drawString(50, y_position - 15, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+            # Mantener el QR al final también en este generador legado.
+            if share_data and share_data.get('share_url'):
+                try:
+                    c.showPage()
+                    _draw_share_qr_page(c, share_data['share_url'], width, height)
+                except Exception as qr_error:
+                    print(f"[WARNING] No se pudo dibujar el QR en PDF legado: {qr_error}")
             
             c.save()
             print(f"[SUCCESS] PDF generado con formato profesional y firma: {absolute_pdf_path}")

@@ -6,6 +6,7 @@ Migrado desde patient_controller.py con autenticación JWT
 
 from flask import jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
+import json
 import psycopg2
 import uuid
 from datetime import datetime
@@ -28,66 +29,6 @@ def normalize_user_id(identity):
     return identity
 
 
-def get_user_patientdomain_ids(cursor, user_id):
-    """Resolve domains from user locations/facilities, then legacy relation, then all domains."""
-    cursor.execute(
-        """
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'nextris'
-          AND table_name = 'tbfacility'
-          AND column_name = 'id_patientdomain'
-        LIMIT 1
-        """
-    )
-    has_facility_domain_column = cursor.fetchone() is not None
-
-    if has_facility_domain_column:
-        cursor.execute(
-            """
-            SELECT DISTINCT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
-            FROM nextris.rel_user_location rul
-            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
-            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
-            WHERE rul.user_id = %s
-              AND COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, '')) IS NOT NULL
-            """,
-            (user_id,),
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT DISTINCT NULLIF(l.id_patientdomain, '')
-            FROM nextris.rel_user_location rul
-            INNER JOIN nextris.tblocation l ON l.guid = rul.location_id
-            WHERE rul.user_id = %s
-              AND NULLIF(l.id_patientdomain, '') IS NOT NULL
-            """,
-            (user_id,),
-        )
-
-    location_domains = [row[0] for row in cursor.fetchall()]
-    if location_domains:
-        return location_domains
-
-    # Legacy fallback while rel_user_patientdomain still exists.
-    cursor.execute(
-        """
-        SELECT patientdomain_id
-        FROM nextris.rel_user_patientdomain
-        WHERE user_id = %s
-        """,
-        (user_id,)
-    )
-
-    legacy_domains = [row[0] for row in cursor.fetchall()]
-    if legacy_domains:
-        return legacy_domains
-
-    cursor.execute("SELECT guid FROM nextris.ispatientdomain")
-    return [row[0] for row in cursor.fetchall()]
-
-
 # ===========================
 # ENDPOINTS DE BÚSQUEDA Y LISTADO
 # ===========================
@@ -97,69 +38,99 @@ def get_user_patientdomain_ids(cursor, user_id):
 def get_patients():
     """
     Listar pacientes con paginación, búsqueda y conteo de estudios
-    Filtra pacientes según los dominios a los que el usuario tiene acceso
     
     Query params:
     - page: número de página (default: 1)
     - per_page: resultados por página (default: 1000)
     - search: término de búsqueda (opcional)
+    - column_filters: filtros por columna en JSON (opcional), ej: {"name":"Juan","patient_type":"F"}
     """
     try:
-        user_id = normalize_user_id(get_jwt_identity())
-        
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 1000, type=int)
         search = request.args.get('search', '')
         hide_without_studies = request.args.get('hide_without_studies', 'false').lower() == 'true'
+        column_filters_raw = request.args.get('column_filters', '{}')
+
+        # Parse column filters JSON
+        try:
+            column_filters = json.loads(column_filters_raw) if column_filters_raw else {}
+        except (json.JSONDecodeError, TypeError):
+            column_filters = {}
 
         if page < 1:
             page = 1
         if per_page < 1 or per_page > 1000:
             per_page = 1000
         
+        # Map column keys to database columns
+        column_map = {
+            'name': 'dp.name',
+            'surname': 'dp.surname',
+            'patient_type': 'dp.patient_type',
+            'patientid': 'dp.patientid',
+            'username': 'tup.username',
+            'user_status': 'tup.status',
+            'gender': 'dp.sexcode',
+            'birthdate': 'dp.birthdate',
+            'nationalcode': 'dp.nationalcode',
+        }
+        
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener los dominios del usuario (fallback: todos si no tiene asignados)
-        user_domains = get_user_patientdomain_ids(cursor, user_id)
-        
-        if not user_domains:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'data': [],
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0
-                }
-            }), 200
-        
         search_pattern = f'%{search}%'
         offset = (page - 1) * per_page
         
-        # Cláusula HAVING para filtrar pacientes sin estudios terminados
-        having_clause = "HAVING COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) > 0" if hide_without_studies else ""
+        having_clause = "HAVING COUNT(DISTINCT tbex.guid) > 0" if hide_without_studies else ""
+        
+        # Build column filter WHERE clauses
+        column_filter_clauses = []
+        column_filter_params = []
+        column_filter_having = []
+        column_filter_having_params = []
+        
+        for col_key, filter_value in column_filters.items():
+            if not filter_value or not filter_value.strip():
+                continue
+            pattern = f'%{filter_value.strip()}%'
+            if col_key == 'study_count':
+                column_filter_having.append("COUNT(DISTINCT tbex.guid)::text ILIKE %s")
+                column_filter_having_params.append(pattern)
+            elif col_key in column_map:
+                column_filter_clauses.append(f"{column_map[col_key]} ILIKE %s")
+                column_filter_params.append(pattern)
+        
+        # Combine HAVING clauses
+        if column_filter_having:
+            if having_clause:
+                having_clause += " AND " + " AND ".join(column_filter_having)
+            else:
+                having_clause = "HAVING " + " AND ".join(column_filter_having)
 
-        # Contar total de resultados
+        # Build base WHERE
+        base_where = "(dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)"
+        if column_filter_clauses:
+            base_where += " AND " + " AND ".join(column_filter_clauses)
+        
+        all_params = [search_pattern, search_pattern, search_pattern, search_pattern]
+        
         count_query = f"""
             SELECT COUNT(*) FROM (
                 SELECT dp.guid
                 FROM nextris.datapatient dp
                 LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
-                LEFT JOIN nextris.tbreport rep ON rep.idexamination = tbex.guid
-                WHERE dp.id_patientdomain = ANY(%s)
-                AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
+                LEFT JOIN nextris.tbuser_patient tup ON tup.datapatient_id = dp.guid
+                WHERE {base_where}
                 GROUP BY dp.guid
                 {having_clause}
             ) sub
         """
-        cursor.execute(count_query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern))
+        count_params = all_params + column_filter_params
+        cursor.execute(count_query, count_params + column_filter_having_params)
         total = cursor.fetchone()[0]
 
-        # Obtener pacientes con conteo de estudios terminados
         query = f"""
             SELECT
                 dp.guid,
@@ -171,23 +142,24 @@ def get_patients():
                 dp.phone,
                 dp.email,
                 dp.patientid,
-                COUNT(CASE WHEN tbex.isreported = 1 AND rep.pdfpath IS NOT NULL THEN tbex.guid END) as study_count,
+                COUNT(DISTINCT tbex.guid) as study_count,
                 tup.username,
-                tup.status as user_status
+                tup.status as user_status,
+                dp.patient_type
             FROM nextris.datapatient dp
             LEFT JOIN nextris.tbexamination tbex ON tbex.idpatient = dp.guid
-            LEFT JOIN nextris.tbreport rep ON rep.idexamination = tbex.guid
             LEFT JOIN nextris.tbuser_patient tup ON tup.datapatient_id = dp.guid
-            WHERE dp.id_patientdomain = ANY(%s)
-            AND (dp.name ILIKE %s OR dp.surname ILIKE %s OR dp.nationalcode ILIKE %s OR dp.patientid ILIKE %s)
+            WHERE {base_where}
             GROUP BY dp.guid, dp.name, dp.surname, dp.nationalcode, dp.sexcode,
-                     dp.birthdate, dp.phone, dp.email, dp.patientid, tup.username, tup.status
+                     dp.birthdate, dp.phone, dp.email, dp.patientid, tup.username, tup.status,
+                     dp.patient_type
             {having_clause}
             ORDER BY dp.surname, dp.name
             LIMIT %s OFFSET %s
         """
 
-        cursor.execute(query, (user_domains, search_pattern, search_pattern, search_pattern, search_pattern, per_page, offset))
+        exec_params = all_params + column_filter_params + [per_page, offset] + column_filter_having_params
+        cursor.execute(query, exec_params)
 
         patients = []
         for row in cursor.fetchall():
@@ -203,7 +175,8 @@ def get_patients():
                 'patientid': row[8],
                 'study_count': row[9],
                 'username': row[10],
-                'user_status': row[11]
+                'user_status': row[11],
+                'patient_type': row[12]
             })
         
         cursor.close()
@@ -234,8 +207,6 @@ def get_patients_minimal():
     Obtener información mínima de pacientes (para autocompletes)
     """
     try:
-        user_id = normalize_user_id(get_jwt_identity())
-        
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
@@ -245,14 +216,11 @@ def get_patients_minimal():
                    TO_CHAR(dp.birthdate, 'DD/MM/YYYY') as birthdate, 
                    dp.nationalcode
             FROM nextris.datapatient dp
-            INNER JOIN nextris.rel_user_patientdomain rup 
-                ON dp.id_patientdomain = rup.patientdomain_id
-            WHERE rup.user_id = %s
             ORDER BY dp.surname, dp.name
             LIMIT 500
         """
         
-        cursor.execute(query, (user_id,))
+        cursor.execute(query)
         
         patients = []
         for row in cursor.fetchall():
@@ -293,7 +261,6 @@ def search_patients():
     }
     """
     try:
-        user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         search_term = data.get('search_term', '')
         
@@ -304,10 +271,7 @@ def search_patients():
         query = """
             SELECT dp.guid, dp.patientid, dp.surname, dp.name, dp.nationalcode, dp.sexcode, dp.birthdate
             FROM nextris.datapatient dp
-            INNER JOIN nextris.rel_user_patientdomain rup 
-                ON dp.id_patientdomain = rup.patientdomain_id
-            WHERE rup.user_id = %s
-              AND (LOWER(dp.name) LIKE LOWER(%s) 
+            WHERE (LOWER(dp.name) LIKE LOWER(%s) 
                OR LOWER(dp.surname) LIKE LOWER(%s) 
                OR dp.nationalcode LIKE %s
                OR dp.patientid LIKE %s)
@@ -316,7 +280,7 @@ def search_patients():
         """
         
         search_pattern = f"%{search_term}%"
-        cursor.execute(query, (user_id, search_pattern, search_pattern, search_pattern, search_pattern))
+        cursor.execute(query, (search_pattern, search_pattern, search_pattern, search_pattern))
         
         patients = []
         for row in cursor.fetchall():
@@ -363,7 +327,6 @@ def search_patients_advanced():
     }
     """
     try:
-        user_id = normalize_user_id(get_jwt_identity())
         data = request.get_json()
         criteria = data.get('criteria', {})
         
@@ -371,8 +334,8 @@ def search_patients_advanced():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        conditions = ["rup.user_id = %s"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if criteria.get('name'):
             conditions.append("LOWER(dp.name) LIKE LOWER(%s)")
@@ -390,13 +353,11 @@ def search_patients_advanced():
             conditions.append("dp.patientid = %s")
             params.append(criteria['patient_id'])
         
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
         
         query = f"""
             SELECT dp.guid, dp.patientid, dp.surname, dp.name, dp.nationalcode, dp.sexcode, dp.birthdate
             FROM nextris.datapatient dp
-            INNER JOIN nextris.rel_user_patientdomain rup 
-                ON dp.id_patientdomain = rup.patientdomain_id
             WHERE {where_clause}
             ORDER BY dp.surname, dp.name
             LIMIT 50
@@ -436,7 +397,7 @@ def search_patients_advanced():
 @jwt_required()
 def get_patients_by_location():
     """
-    Obtener pacientes filtrados por ubicación
+    Obtener todos los pacientes
     
     Body JSON:
     {
@@ -444,68 +405,18 @@ def get_patients_by_location():
     }
     """
     try:
-        data = request.get_json()
-        location_id = data.get('location_id')
-        
-        if not location_id:
-            return jsonify({
-                'success': False,
-                'message': 'location_id requerido'
-            }), 400
-        
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener dominio heredado desde facility cuando la columna existe.
-        cursor.execute(
-            """
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'nextris'
-              AND table_name = 'tbfacility'
-              AND column_name = 'id_patientdomain'
-            LIMIT 1
-            """
-        )
-        has_facility_domain_column = cursor.fetchone() is not None
-
-        if has_facility_domain_column:
-            cursor.execute("""
-                SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
-                FROM nextris.tblocation l
-                LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
-                WHERE l.guid = %s
-            """, (location_id,))
-        else:
-            cursor.execute("""
-                SELECT NULLIF(l.id_patientdomain, '')
-                FROM nextris.tblocation l
-                WHERE l.guid = %s
-            """, (location_id,))
-        
-        result = cursor.fetchone()
-        
-        if not result or not result[0]:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': []
-            }), 200
-        
-        patientdomain_id = result[0]
-        
-        # Traer pacientes de ese dominio
         cursor.execute("""
             SELECT dp.guid, dp.name, dp.surname, dp.sexcode, 
                    TO_CHAR(dp.birthdate, 'DD/MM/YYYY') as birthdate, 
                    dp.nationalcode
             FROM nextris.datapatient dp
-            WHERE dp.id_patientdomain = %s
             ORDER BY dp.surname, dp.name
             LIMIT 500
-        """, (patientdomain_id,))
+        """)
         
         patients = []
         for row in cursor.fetchall():
@@ -543,32 +454,18 @@ def get_patients_by_location():
 def get_patient(guid):
     """
     Obtener detalles completos de un paciente
-    Verifica que el usuario tenga acceso al dominio del paciente
     """
     try:
-        user_id = normalize_user_id(get_jwt_identity())
-        
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Obtener los dominios del usuario (fallback: todos si no tiene asignados)
-        user_domains = get_user_patientdomain_ids(cursor, user_id)
-        
-        if not user_domains:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Usuario sin acceso a dominios de pacientes'
-            }), 403
-        
         cursor.execute("""
             SELECT guid, name, surname, email, phone, nationalcode, birthdate, 
-                   sexcode, patientid, healthcard, trial190, id_patientdomain, ismerged, isanonymous
+                   sexcode, patientid, healthcard, trial190, ismerged, isanonymous
             FROM nextris.datapatient
-            WHERE guid = %s AND id_patientdomain = ANY(%s)
-        """, (guid, user_domains))
+            WHERE guid = %s
+        """, (guid,))
         
         row = cursor.fetchone()
         
@@ -577,7 +474,7 @@ def get_patient(guid):
             connection.close()
             return jsonify({
                 'success': False,
-                'message': 'Paciente no encontrado o sin acceso'
+                'message': 'Paciente no encontrado'
             }), 404
         
         patient = {
@@ -592,9 +489,8 @@ def get_patient(guid):
             'patientid': row[8],
             'healthcard': row[9],
             'trial190': row[10],
-            'id_patientdomain': row[11],
-            'ismerged': row[12],
-            'isanonymous': row[13]
+            'ismerged': row[11],
+            'isanonymous': row[12]
         }
         
         cursor.close()
@@ -629,7 +525,6 @@ def create_patient():
     {
         "name": "...",
         "surname": "...",
-        "patientdomain_id": "uuid",
         "nationalcode": "...",
         "email": "...",
         "phone": "...",
@@ -648,8 +543,7 @@ def create_patient():
                 'message': 'Se requiere un cuerpo JSON'
             }), 400
         
-        # Validar campos requeridos
-        required_fields = ['name', 'surname', 'patientdomain_id']
+        required_fields = ['name', 'surname']
         for field in required_fields:
             if field not in data or not data[field]:
                 return jsonify({
@@ -661,10 +555,8 @@ def create_patient():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Generar nuevo GUID
         patient_guid = str(uuid.uuid4())
         
-        # Generar PatientID autoincremental con formato NR00000001
         cursor.execute("""
             SELECT patientid 
             FROM nextris.datapatient 
@@ -676,25 +568,22 @@ def create_patient():
         result = cursor.fetchone()
         
         if result and result[0]:
-            # Extraer el número del último PatientID (NR00000005 -> 5)
             last_id = result[0]
             try:
-                last_number = int(last_id[2:])  # Quitar "NR" y convertir a int
+                last_number = int(last_id[2:])
                 new_number = last_number + 1
             except (ValueError, IndexError):
                 new_number = 1
         else:
             new_number = 1
         
-        # Formatear con 8 dígitos: NR00000001
         patient_id = f"NR{new_number:08d}"
         
-        # Insertar paciente
         cursor.execute("""
             INSERT INTO nextris.datapatient 
             (guid, name, surname, patientid, nationalcode, email, phone, birthdate, sexcode, 
-             healthcard, trial190, isanonymous, ismerged, id_patientdomain)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::bit, %s::bit, %s)
+             healthcard, trial190, isanonymous, ismerged)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::bit, %s::bit)
             RETURNING guid
         """, (
             patient_guid,
@@ -710,21 +599,17 @@ def create_patient():
             data.get('trial190'),
             1 if data.get('isanonymous', False) else 0,
             1 if data.get('ismerged', False) else 0,
-            data.get('patientdomain_id')
         ))
         
         new_guid = cursor.fetchone()[0]
         
-        # Crear usuario para el paciente si se solicita
         if data.get('create_user') and data.get('name') and data.get('surname'):
             try:
                 nombre = data.get('name').strip()
                 apellido = data.get('surname').strip()
                 
-                # Generar username
                 base_username = (nombre[0] + apellido).lower().replace(' ', '')
                 
-                # Verificar si existe
                 cursor.execute("""
                     SELECT username FROM nextris.tbuser_patient 
                     WHERE username LIKE %s 
@@ -743,7 +628,6 @@ def create_patient():
                             break
                         counter += 1
                 
-                # Crear usuario
                 hashed_password = hash_pass('next')
                 cursor.execute("""
                     INSERT INTO nextris.tbuser_patient (
@@ -752,8 +636,6 @@ def create_patient():
                         uuid_generate_v4(), %s, %s, %s, 'Active', 1
                     )
                 """, (username, hashed_password, new_guid))
-                
-                print(f"[DEBUG] Usuario '{username}' creado para paciente {new_guid}")
                 
             except Exception as user_error:
                 print(f"[ERROR] Error al crear usuario: {str(user_error)}")
@@ -797,75 +679,47 @@ def create_patient_quick():
     try:
         data = request.get_json()
         
-        user_id = normalize_user_id(get_jwt_identity())
-
         nombre = data.get('nombre', '')
         apellido = data.get('apellido', '')
         dni = data.get('dni', '')
         fecha_nac = data.get('fecha_nac', None)
         sexo = data.get('sexo', 'I')
-        location_id = data.get('location_id')
+        custom_patient_id = data.get('patient_id', '').strip()
         
-        # Generar PatientId
-        patient_id = dni if dni else str(uuid.uuid4())[:8]
+        patient_id = custom_patient_id if custom_patient_id else (dni if dni else str(uuid.uuid4())[:8])
         
         db_config = get_db_config()
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
-
-        patientdomain_id = None
-
-        if location_id:
+        
+        if dni:
             cursor.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = 'nextris'
-                  AND table_name = 'tbfacility'
-                  AND column_name = 'id_patientdomain'
-                LIMIT 1
-                """
+                "SELECT guid, patientid, surname, name FROM nextris.datapatient WHERE nationalcode = %s",
+                (dni,)
             )
-            has_facility_domain_column = cursor.fetchone() is not None
-
-            if has_facility_domain_column:
-                cursor.execute(
-                    """
-                    SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
-                    FROM nextris.tblocation l
-                    LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
-                    WHERE l.guid = %s
-                    LIMIT 1
-                    """,
-                    (location_id,),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT NULLIF(l.id_patientdomain, '')
-                    FROM nextris.tblocation l
-                    WHERE l.guid = %s
-                    LIMIT 1
-                    """,
-                    (location_id,),
-                )
-
-            domain_row = cursor.fetchone()
-            patientdomain_id = (domain_row[0] if domain_row else None) or None
-
-        if not patientdomain_id and user_id:
-            domains = get_user_patientdomain_ids(cursor, user_id)
-            patientdomain_id = domains[0] if domains else None
+            existing = cursor.fetchone()
+            if existing:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'error': f'Ya existe un paciente con DNI {dni}',
+                    'existing_patient': {
+                        'guid': str(existing[0]),
+                        'patientid': existing[1],
+                        'surname': existing[2],
+                        'name': existing[3],
+                    }
+                }), 409
         
         cursor.execute("""
-            INSERT INTO nextris.datapatient (guid, patientid, surname, name, nationalcode, sexcode, birthdate, id_patientdomain)
-            VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO nextris.datapatient (guid, patientid, surname, name, nationalcode, sexcode, birthdate)
+            VALUES (uuid_generate_v4(), %s, %s, %s, %s, %s, %s)
             RETURNING guid
-        """, (patient_id, apellido, nombre, dni, sexo, fecha_nac, patientdomain_id))
+        """, (patient_id, apellido, nombre, dni, sexo, fecha_nac))
         
         guid = cursor.fetchone()[0]
         
-        # Crear usuario automáticamente
         if guid and nombre and apellido:
             try:
                 base_username = (nombre[0] + apellido).lower().strip()
@@ -897,8 +751,6 @@ def create_patient_quick():
                         uuid_generate_v4(), %s, %s, %s, 'Active', 1
                     )
                 """, (username, hashed_password, str(guid)))
-                
-                print(f"[DEBUG] Usuario '{username}' creado para paciente rápido {guid}")
                 
             except Exception as user_error:
                 print(f"[ERROR] Error al crear usuario: {str(user_error)}")
@@ -1061,9 +913,19 @@ def update_patient(guid):
         query = f"UPDATE nextris.datapatient SET {', '.join(update_fields)} WHERE guid = %s"
         
         cursor.execute(query, values)
+        rows_affected = cursor.rowcount
         connection.commit()
         
-        if cursor.rowcount == 0:
+        # Si se cambio el patientid, actualizar tambien el username del usuario portal
+        if 'patientid' in data:
+            new_patientid = data['patientid']
+            cursor.execute(
+                "UPDATE nextris.tbuser_patient SET username = %s WHERE datapatient_id = %s",
+                (new_patientid, guid)
+            )
+            connection.commit()
+        
+        if rows_affected == 0:
             cursor.close()
             connection.close()
             return jsonify({
@@ -1318,19 +1180,19 @@ def get_patient_history(guid):
                 mod.externalcode as modality,
                 CONCAT(us_referring.name,' ',us_referring.surname) as medico_referente,
                 rep.pdfpath,
-                loc.name as ubicacion
+                loc.name as ubicacion,
+                COALESCE(ex.hidden_in_portal, 0) as hidden_in_portal,
+                ex.studyinstanceuid
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.datapatient data on data.guid=ex.idpatient
             LEFT JOIN nextris.tbreport rep on rep.idexamination=ex.guid
-            LEFT JOIN nextris.tbuser us_reporter on us_reporter.guid=rep.idreporterphysician
-            LEFT JOIN nextris.tbuser us_referring on us_referring.guid=rep.idreferringphysician
+            LEFT JOIN nextris.tbuser us_reporter on us_reporter.guid=rep.iduser
+            LEFT JOIN nextris.tbuser us_referring on us_referring.guid=ex.idreferringphysician
             LEFT JOIN nextris.ismodality mod on mod.guid=st.modality_id
             LEFT JOIN nextris.isequipment eq ON ex.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON eq.location_id = loc.guid
             WHERE data.guid = %s
-              AND ex.isreported = 1
-              AND rep.pdfpath IS NOT NULL
             ORDER BY ex.createdon DESC
         """
         
@@ -1341,14 +1203,16 @@ def get_patient_history(guid):
             history.append({
                 'guid': row[0],
                 'estudio': row[1] or 'Sin descripción',
-                'medico_autor': row[5] or 'No asignado',
-                'medico_referente': row[8] or 'No asignado',
+                'medico_autor': (row[5] or '').strip() or 'No asignado',
+                'medico_referente': (row[8] or '').strip() or 'No asignado',
                 'fecha': row[2].strftime('%d/%m/%Y %H:%M') if row[2] else 'Sin fecha',
                 'modalidad': row[7] or 'N/A',
                 'con_imagen': 'Sí' if row[6] == 1 else 'No',
                 'isreported': row[4],
                 'pdf_path': row[9] or None,
-                'ubicacion': row[10] or 'Sin ubicación'
+                'ubicacion': row[10] or 'Sin ubicación',
+                'hidden_in_portal': row[11],
+                'studyinstanceuid': row[12] or None
             })
         
         cursor.close()
@@ -1361,6 +1225,53 @@ def get_patient_history(guid):
         
     except Exception as e:
         print(f"[API PATIENT HISTORY] Error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@api_blueprint.route('/patients/examination/<exam_guid>/toggle-visibility', methods=['PUT'])
+@jwt_required()
+def toggle_exam_visibility(exam_guid):
+    """
+    Alternar visibilidad del examen en el portal de pacientes
+    """
+    try:
+        db_config = get_db_config()
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            UPDATE nextris.tbexamination
+            SET hidden_in_portal = CASE
+                WHEN COALESCE(hidden_in_portal, 0) = 0 THEN 1
+                ELSE 0
+            END
+            WHERE guid = %s
+            RETURNING hidden_in_portal
+        """, (exam_guid,))
+
+        result = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        if not result:
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'hidden_in_portal': result[0]
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"[TOGGLE VISIBILITY] Error: {str(e)}")
         return jsonify({
             'success': False,
             'message': str(e)
@@ -1662,7 +1573,6 @@ def get_user_locations():
                 loc.guid,
                 loc.name,
                 loc.code,
-                loc.facility_id,
                 rul.is_default
             FROM nextris.tblocation loc
             INNER JOIN nextris.rel_user_location rul 
@@ -1678,8 +1588,7 @@ def get_user_locations():
                 'guid': row[0],
                 'name': row[1],
                 'code': row[2],
-                'facility_id': row[3],
-                'is_default': row[4]
+                'is_default': row[3]
             })
         
         cursor.close()

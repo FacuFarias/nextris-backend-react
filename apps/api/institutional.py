@@ -65,7 +65,7 @@ def get_institutional_info(location_id=None):
 
         if location_id:
             query = """
-                SELECT guid, name, mail, address, phone, logo_path
+                SELECT guid, name, mail, address, phone, logo_path, COALESCE(require_signature_password, TRUE) as require_signature_password
                 FROM nextris.tblocation
                 WHERE guid = %s
             """
@@ -74,7 +74,7 @@ def get_institutional_info(location_id=None):
             from flask_jwt_extended import get_jwt_identity
             user_id = normalize_user_id(get_jwt_identity())
             query = """
-                SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path
+                SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path, COALESCE(l.require_signature_password, TRUE) as require_signature_password
                 FROM nextris.tblocation l
                 INNER JOIN nextris.rel_user_location rul ON l.guid = rul.location_id
                 WHERE rul.user_id = %s
@@ -97,7 +97,8 @@ def get_institutional_info(location_id=None):
                     'mail': result[2],
                     'address': result[3],
                     'phone': result[4],
-                    'logo_path': result[5]
+                    'logo_path': result[5],
+                    'require_signature_password': result[6]
                 }
             }), 200
         else:
@@ -158,6 +159,7 @@ def update_institutional_info(location_id):
         mail = request.form.get('mail')
         address = request.form.get('address')
         phone = request.form.get('phone')
+        require_signature_password = request.form.get('require_signature_password')
         logo_file = request.files.get('logo')
         logo_path = None
 
@@ -187,6 +189,9 @@ def update_institutional_info(location_id):
         if phone is not None:
             update_fields.append("phone = %s")
             values.append(phone)
+        if require_signature_password is not None:
+            update_fields.append("require_signature_password = %s")
+            values.append(require_signature_password.lower() == 'true' if require_signature_password else True)
         if logo_path:
             update_fields.append("logo_path = %s")
             values.append(logo_path)
@@ -344,7 +349,7 @@ def get_institutional_locations():
                 COALESCE(rul.is_default, false) as is_default
             FROM nextris.tblocation l
             LEFT JOIN nextris.rel_user_location rul ON l.guid = rul.location_id AND rul.user_id = %s
-            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.app_config f ON f.id::varchar = l.facility_id
             WHERE rul.user_id = %s
             ORDER BY COALESCE(rul.is_default, false) DESC, l.name
         """

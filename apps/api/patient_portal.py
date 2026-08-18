@@ -4,7 +4,7 @@ API del Portal de Pacientes - Endpoints para pacientes autenticados
 Permite a los pacientes gestionar su perfil y acceder a su información
 """
 
-from flask import jsonify, request, send_file
+from flask import jsonify, request, send_file, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from datetime import datetime
@@ -14,6 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from urllib.parse import urlparse
 from apps.api import api_blueprint
 
 
@@ -469,9 +470,9 @@ def get_my_studies():
             SELECT 
                 ex.guid as examination_id,
                 ex.localacc as accession_number,
-                st.description as study_type,
-                m.description as modality,
-                ex.createdon as study_datetime,
+                COALESCE(st.description, ps.study_desc) as study_type,
+                COALESCE(m.description, first_series.modality) as modality,
+                ex.createdon as created_datetime,
                 CASE 
                     WHEN ex.isreported = 1 THEN 'Reportado'
                     ELSE 'Pendiente'
@@ -481,30 +482,33 @@ def get_my_studies():
                     WHEN ex.studyinstanceuid IS NOT NULL AND ex.studyinstanceuid != '' THEN true
                     ELSE false
                 END as has_images,
-                rp.description as referring_physician,
+                CONCAT(COALESCE(u_ref.name, ''), ' ', COALESCE(u_ref.surname, '')) as referring_physician,
+                rp.description as requesting_physician,
+                CONCAT(COALESCE(u_auth.name, ''), ' ', COALESCE(u_auth.surname, '')) as author_physician,
                 CASE
                     WHEN CAST(ex.stat AS TEXT) = 'S' THEN 'Urgente'
                     ELSE 'Normal'
                 END as urgency,
                 r.date as report_date,
-                ex.studyinstanceuid
+                ex.studyinstanceuid,
+                ps.study_date,
+                ps.study_time
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.ismodality m ON st.modality_id = m.guid
+            LEFT JOIN public.study ps ON ex.studyinstanceuid = ps.study_iuid
+            LEFT JOIN LATERAL (
+                SELECT psr.modality
+                FROM public.series psr
+                WHERE psr.study_fk = ps.pk
+                LIMIT 1
+            ) first_series ON true
+            LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = ex.idreferringphysician
             LEFT JOIN nextris.isrequestingphysician rp ON ex.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
-                        LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+            LEFT JOIN nextris.tbuser u_auth ON u_auth.guid = r.iduser
             WHERE ex.idpatient = %s
-                            AND EXISTS (
-                                        SELECT 1
-                                        FROM nextris.rel_facility_module rel
-                                        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
-                                        WHERE rel.facility_id = l.facility_id
-                                            AND rel.is_active = TRUE
-                                            AND mod.is_active = TRUE
-                                            AND mod.code = 'patient_portal'
-                                )
+                AND (ex.hidden_in_portal = 0 OR ex.hidden_in_portal IS NULL)
         """
         
         params = [patient_data_id]
@@ -515,7 +519,38 @@ def get_my_studies():
         elif status_filter == 'pending':
             base_query += " AND (ex.isreported = 0 OR ex.isreported IS NULL)"
         
-        base_query += " ORDER BY ex.createdon DESC"
+        # Aplicar filtro de fecha
+        date_from = request.args.get('date_from', None)
+        date_to = request.args.get('date_to', None)
+        if date_from:
+            base_query += " AND (ps.study_date >= %s OR (ps.study_date IS NULL AND ex.createdon::date >= %s))"
+            params.append(date_from.replace('-', ''))
+            params.append(date_from)
+        if date_to:
+            base_query += " AND (ps.study_date <= %s OR (ps.study_date IS NULL AND ex.createdon::date <= %s))"
+            params.append(date_to.replace('-', ''))
+            params.append(date_to)
+        
+        # Aplicar búsqueda por texto (busca en múltiples campos)
+        search = request.args.get('search', None)
+        if search:
+            search_param = f"%{search}%"
+            base_query += """ AND (
+                ex.localacc ILIKE %s
+                OR st.description ILIKE %s
+                OR m.description ILIKE %s
+                OR ps.study_desc ILIKE %s
+                OR u_ref.name ILIKE %s
+                OR u_ref.surname ILIKE %s
+                OR rp.description ILIKE %s
+                OR u_auth.name ILIKE %s
+                OR u_auth.surname ILIKE %s
+                OR CASE WHEN CAST(ex.stat AS TEXT) = 'S' THEN 'Urgente' ELSE 'Normal' END ILIKE %s
+                OR CASE WHEN ex.isreported = 1 THEN 'Reportado' ELSE 'Pendiente' END ILIKE %s
+            )"""
+            params.extend([search_param] * 11)
+        
+        base_query += " ORDER BY COALESCE(ps.study_date, TO_CHAR(ex.createdon, 'YYYYMMDD')) DESC NULLS LAST, COALESCE(ps.study_time, TO_CHAR(ex.createdon, 'HH24MISS')) DESC NULLS LAST"
         
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) as count_table"
@@ -533,10 +568,32 @@ def get_my_studies():
         
         studies = []
         for row in results:
-            study_datetime = row[4]
-            study_date = study_datetime.strftime('%Y-%m-%d') if study_datetime else None
-            study_time = study_datetime.strftime('%H:%M:%S') if study_datetime else None
-            
+            created_datetime = row[4]
+            pacs_study_date = row[14]
+            pacs_study_time = row[15]
+
+            if pacs_study_date:
+                date_str = str(pacs_study_date)
+                if len(date_str) == 8:
+                    study_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                else:
+                    study_date = date_str
+
+                if pacs_study_time:
+                    time_str = str(pacs_study_time)
+                    hh = time_str[0:2] if len(time_str) >= 2 else '00'
+                    mm = time_str[2:4] if len(time_str) >= 4 else '00'
+                    ss = time_str[4:6] if len(time_str) >= 6 else '00'
+                    study_time = f"{hh}:{mm}:{ss}"
+                else:
+                    study_time = None
+            elif created_datetime:
+                study_date = created_datetime.strftime('%Y-%m-%d')
+                study_time = created_datetime.strftime('%H:%M:%S')
+            else:
+                study_date = None
+                study_time = None
+
             studies.append({
                 'examination_id': row[0],
                 'accession_number': row[1],
@@ -547,10 +604,12 @@ def get_my_studies():
                 'status': row[5],
                 'has_report': bool(row[6]),
                 'has_images': row[7],
-                'referring_physician': row[8],
-                'urgency': row[9],
-                'report_date': row[10].isoformat() if row[10] else None,
-                'study_uid': row[11]
+                'referring_physician': row[8].strip() if row[8] else None,
+                'requesting_physician': row[9],
+                'author_physician': row[10].strip() if row[10] else None,
+                'urgency': row[11],
+                'report_date': row[12].isoformat() if row[12] else None,
+                'study_uid': row[13]
             })
         
         return jsonify({
@@ -611,20 +670,9 @@ def get_patient_report(exam_id):
             SELECT r.pdfpath, ex.localacc
             FROM nextris.tbexamination ex
             INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
-                        LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
-                        WHERE ex.guid = %s
-                            AND ex.idpatient = %s
-                            AND ex.isreported = 1
-                            AND EXISTS (
-                                        SELECT 1
-                                        FROM nextris.rel_facility_module rel
-                                        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
-                                        WHERE rel.facility_id = l.facility_id
-                                            AND rel.is_active = TRUE
-                                            AND mod.is_active = TRUE
-                                            AND mod.code = 'patient_portal'
-                                )
+            WHERE ex.guid = %s
+                AND ex.idpatient = %s
+                AND ex.isreported = 1
         """, (exam_id, patient_data_id))
         result = cursor.fetchone()
 
@@ -785,7 +833,10 @@ def share_examination(exam_id):
 
         viewer_link = ""
         if has_images and study_uid:
-            viewer_link = f"\n\nPara visualizar las imágenes médicas acceda al siguiente enlace:\nhttps://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}\n"
+            viewer_url_cfg = current_app.config.get('DICOM_VIEWER_URL', 'https://clinicacp.ddns.net:3000/viewer')
+            parsed = urlparse(viewer_url_cfg)
+            viewer_base = f"{parsed.scheme}://{parsed.netloc}"
+            viewer_link = f"\n\nPara visualizar las imágenes médicas acceda al siguiente enlace:\n{viewer_base}/viewer?StudyInstanceUIDs={study_uid}\n"
 
         body = f"""
 Estimado/a {recipient_label},

@@ -5,6 +5,7 @@ Copyright (c) 2019 - present AppSeed.us
 
 bind = '0.0.0.0:5001'
 workers = 2
+threads = 2
 accesslog = '-'
 loglevel = 'debug'
 capture_output = True
