@@ -55,6 +55,43 @@ def ensure_report_type_schema(conn):
                 """
             )
 
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbinfpredef'
+                  AND column_name = 'isdefault'
+            )
+            """
+        )
+        if not cur.fetchone()[0]:
+            cur.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN isdefault SMALLINT NOT NULL DEFAULT 0
+                """
+            )
+
+        for column_name in ('structured_variables', 'criteria'):
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'nextris'
+                      AND table_name = 'tbinfpredef'
+                      AND column_name = %s
+                )
+                """,
+                (column_name,)
+            )
+            if not cur.fetchone()[0]:
+                cur.execute(
+                    f"ALTER TABLE nextris.tbinfpredef ADD COLUMN {column_name} TEXT NOT NULL DEFAULT ''"
+                )
+
         # Backfill y saneamiento para plantillas existentes.
         cur.execute(
             """
@@ -347,8 +384,10 @@ def get_templates():
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default,
-                ist.code AS study_type_code
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                ist.code AS study_type_code,
+                ip.structured_variables,
+                ip.criteria
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -407,6 +446,8 @@ def get_templates():
                     'can_delete': can_delete,
                     'is_user_default': is_user_default,
                     'is_system_default': is_system_default,
+                    'structured_variables': row[18] or '',
+                    'criteria': row[19] or '',
                 })
             else:
                 templates.append({
@@ -430,6 +471,8 @@ def get_templates():
                     'can_delete': can_delete,
                     'is_user_default': is_user_default,
                     'is_system_default': is_system_default,
+                    'structured_variables': row[18] or '',
+                    'criteria': row[19] or '',
                 })
         
         return jsonify({
@@ -522,8 +565,10 @@ def get_template(template_id):
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default,
-                ist.code AS study_type_code
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                ist.code AS study_type_code,
+                ip.structured_variables,
+                ip.criteria
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -568,6 +613,8 @@ def get_template(template_id):
                 'can_delete': can_delete,
                 'is_user_default': is_user_default,
                 'is_system_default': is_system_default,
+                'structured_variables': result[18] or '',
+                'criteria': result[19] or '',
             }
             
             return jsonify({
@@ -650,6 +697,8 @@ def create_template():
         conclusion = data.get('conclusion', '').strip()
         report_type = normalize_report_type(data.get('report_type'))
         is_default = data.get('is_default', False)
+        structured_variables = data.get('structured_variables', '').strip()
+        criteria = data.get('criteria', '').strip()
 
         try:
             location_ids = normalize_location_ids(data.get('location_ids', []))
@@ -682,8 +731,9 @@ def create_template():
         # Insertar plantilla
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id, report_type, owner_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (guid, tittle, findings, impression, technique, conclusion, studytype_id,
+             report_type, owner_id, isdefault, structured_variables, criteria)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cur.execute(insert_query, (
@@ -695,7 +745,10 @@ def create_template():
             conclusion,
             study_type_id,
             report_type,
-            owner_id
+            owner_id,
+            1 if is_default and is_admin else 0,
+            structured_variables,
+            criteria
         ))
 
         sync_template_locations(
@@ -828,6 +881,9 @@ def edit_template(template_id):
         conclusion = data.get('conclusion', '').strip()
         report_type_raw = data.get('report_type')
         report_type = normalize_report_type(report_type_raw) if report_type_raw is not None else None
+        is_default = data.get('is_default')
+        structured_variables = data.get('structured_variables', '').strip()
+        criteria = data.get('criteria', '').strip()
 
         try:
             location_ids = normalize_location_ids(data.get('location_ids', []))
@@ -850,9 +906,11 @@ def edit_template(template_id):
                 findings = %s,
                 impression = %s,
                 technique = %s,
-                conclusion = %s,
-                studytype_id = %s,
-                report_type = COALESCE(%s, report_type)
+                 conclusion = %s,
+                 studytype_id = %s,
+                 report_type = COALESCE(%s, report_type),
+                 structured_variables = %s,
+                 criteria = %s
             WHERE guid = %s
         """
         
@@ -864,8 +922,46 @@ def edit_template(template_id):
             conclusion,
             study_type_id,
             report_type,
+            structured_variables,
+            criteria,
             template_id
         ))
+
+        if is_default is not None:
+            if is_admin:
+                cur.execute(
+                    "UPDATE nextris.tbinfpredef SET isdefault = %s WHERE guid = %s",
+                    (1 if is_default else 0, template_id)
+                )
+                if is_default:
+                    cur.execute(
+                        "UPDATE nextris.isstudytype SET default_predef_id = %s WHERE guid = %s",
+                        (template_id, study_type_id)
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE nextris.isstudytype SET default_predef_id = NULL WHERE default_predef_id = %s",
+                        (template_id,)
+                    )
+            elif is_default:
+                cur.execute(
+                    """
+                    INSERT INTO nextris.tbinfpredef_user_default (user_id, template_id, study_type_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, study_type_id) DO UPDATE
+                        SET template_id = EXCLUDED.template_id,
+                            created_on = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, template_id, study_type_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    DELETE FROM nextris.tbinfpredef_user_default
+                    WHERE user_id = %s AND template_id = %s
+                    """,
+                    (user_id, template_id)
+                )
 
         effective_report_type = report_type
         if effective_report_type is None:

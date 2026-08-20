@@ -99,7 +99,13 @@ def _request_viewer_keycloak_token():
 
 
 def _create_viewer_handoff(user_id, study_iuid, user_type='staff'):
-    """Crea el handoff de un solo uso; legacy queda disponible para rollback."""
+    """Crea el handoff de un solo uso para personal o pacientes.
+
+    ``user_id`` es un identificador polimórfico: el personal pertenece a
+    ``tbuser`` y los pacientes a ``tbuser_patient``. La tabla de handoff no
+    puede imponer una FK a una sola de esas tablas; ``user_type`` conserva el
+    espacio de nombres que debe usarse al intercambiar la sesión.
+    """
     if os.environ.get('VIEWER_HANDOFF_MODE', 'exchange').lower() == 'legacy':
         token_data = _request_viewer_keycloak_token()
         params = urlencode({'access_token': token_data['access_token'], 'study_uid': study_iuid})

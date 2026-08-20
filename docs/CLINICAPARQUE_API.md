@@ -378,6 +378,7 @@ Crea un paciente (si no existe), un examen con `isexecuted=0` e `isreported=0`, 
 
 #### Estructura del JSON
 
+Body para paciente Final (F):
 ```json
 {
   "patient": {
@@ -385,7 +386,9 @@ Crea un paciente (si no existe), un examen con `isexecuted=0` e `isreported=0`, 
     "dni": "12345678",
     "name": "NOMBRE_DEL_PACIENTE",
     "birthdate": "1993-09-20",
-    "sex": "M"
+    "sex": "M",
+    "patient_type": "F",
+    "healthcard_type": "Particular"
   },
   "order": {
     "orderId": "ORD-1001",
@@ -396,20 +399,42 @@ Crea un paciente (si no existe), un examen con `isexecuted=0` e `isreported=0`, 
     "AET": "PACS_SERVER",
     "scheduledTime": "2026-05-14T10:30:00Z",
     "rad_id": "ID_MEDICO",
-    "priority_id": 1
+    "priority_id": 1,
+    "study_reason": "Dolor torácico",
+    "req_doctor": "Dr. Juan García"
   }
 }
 ```
 
-#### Campos del objeto `patient`
+Body para paciente Temporal (T) o Neonatal (N):
+```json
+{
+  "patient": {
+    "id": "ID_INTERNO_123",
+    "patient_type": "T"
+  },
+  "order": { ... }
+}
+```
+
+#### Campos del objeto `patient` (tipo F)
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
 | `id` | String | Sí | Identificador único del paciente en el sistema origen |
+| `patient_type` | String | Sí | Tipo de paciente: `T` (Temporal), `F` (Final), `N` (Neonatal) |
 | `dni` | String | Sí | Documento Nacional de Identidad |
 | `name` | String | Sí | Nombre completo del paciente |
 | `birthdate` | String | Sí | Fecha de nacimiento (`YYYY-MM-DD`) |
 | `sex` | String | Sí | Sexo: `M`, `F`, `O` |
+| `healthcard_type` | String | Sí | Tipo de cobertura: `Particular`, `Obra Social`, `Prepaga` |
+
+#### Campos del objeto `patient` (tipo T o N)
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `id` | String | Sí | Identificador único del paciente en el sistema origen |
+| `patient_type` | String | Sí | Tipo de paciente: `T` (Temporal), `N` (Neonatal) |
 
 #### Campos del objeto `order`
 
@@ -424,6 +449,8 @@ Crea un paciente (si no existe), un examen con `isexecuted=0` e `isreported=0`, 
 | `scheduledTime` | String | Sí | Fecha/hora programada (ISO 8601) |
 | `rad_id` | String | Sí | Identificador del radiólogo |
 | `priority_id` | Int | Sí | Prioridad: `0` (Rutina), `1` (Urgente) |
+| `study_reason` | String | No | Razón o motivo del estudio |
+| `req_doctor` | String | No | Nombre del médico referente (se guarda en `requestingphysician_name`) |
 
 #### Comportamiento
 
@@ -432,6 +459,8 @@ Crea un paciente (si no existe), un examen con `isexecuted=0` e `isreported=0`, 
    - `isexecuted = 0`
    - `isreported = 0`
    - `status = 'Scheduled'`
+   - `requestingphysician_name`: valor de `req_doctor`
+   - `history`: incluye razón del estudio si se provee
 3. **Reporte**: Crea entrada vacía en `tbreport`
 4. **Worklist**: Envía orden HL7 al worklist DICOM
 
@@ -463,7 +492,9 @@ curl -X POST http://<SERVER>:<PORT>/api/clinicaparque/orders_to_execute_and_read
       "dni": "12345678",
       "name": "NOMBRE_DEL_PACIENTE",
       "birthdate": "1993-09-20",
-      "sex": "M"
+      "sex": "M",
+      "patient_type": "F",
+      "healthcard_type": "Particular"
     },
     "order": {
       "orderId": "ORD-1001",
@@ -1014,8 +1045,8 @@ curl -X POST http://192.168.0.76:5001/api/clinicaparque/orders_to_execute_and_re
   -H "Authorization: Bearer Xr9rB5e7GqL2nq8hFJv0W8E9y7Hq3zTjYzP2n8oKp1s=" \
   -H "Content-Type: application/json" \
   -d '{
-    "patient": {"id": "PAC-001", "dni": "12345678", "name": "JUAN PEREZ", "birthdate": "1985-05-14", "sex": "M"},
-    "order": {"orderId": "ORD-001", "accessionNumber": "ACC-001", "procedure_code": "RX-01", "procedure_name": "Radiografía de Tórax", "modality": "CR", "AET": "PACS_SERVER", "scheduledTime": "2026-05-22T10:00:00Z", "rad_id": "RAD-005", "priority_id": 0}
+    "patient": {"id": "PAC-001", "dni": "12345678", "name": "JUAN PEREZ", "birthdate": "1985-05-14", "sex": "M", "patient_type": "F", "healthcard_type": "Particular"},
+    "order": {"orderId": "ORD-001", "accessionNumber": "ACC-001", "procedure_code": "RX-01", "procedure_name": "Radiografía de Tórax", "modality": "CR", "AET": "PACS_SERVER", "scheduledTime": "2026-05-22T10:00:00Z", "rad_id": "RAD-005", "priority_id": 0, "study_reason": "Dolor torácico", "req_doctor": "Dr. García"}
   }'
 ```
 

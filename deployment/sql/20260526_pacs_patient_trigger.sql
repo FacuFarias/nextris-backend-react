@@ -248,7 +248,7 @@ BEGIN
 END $$;
 
 -- 6. Helper: clean PACS study description for matching
---    Strips prefixes like "ECO 1:  ", "MAMO:  ", "END: ", "ECO: "
+--    Strips prefixes like "ECO 1:  ", "MAMO:  ", "END: ", "RES: "
 CREATE OR REPLACE FUNCTION public._clean_study_desc(p_desc varchar)
 RETURNS varchar AS $$
 DECLARE
@@ -271,6 +271,9 @@ BEGIN
         v_cleaned := trim(substring(v_cleaned from ':\s*(.+)$'));
     -- Strip "END: " prefix
     ELSIF v_cleaned ~* '^END\s*:\s*' THEN
+        v_cleaned := trim(substring(v_cleaned from ':\s*(.+)$'));
+    -- Strip "RES: " prefix used by MR studies
+    ELSIF v_cleaned ~* '^RES\s*:\s*' THEN
         v_cleaned := trim(substring(v_cleaned from ':\s*(.+)$'));
     END IF;
 

@@ -24,7 +24,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_hanging_protocol_user_name
 
 CREATE TABLE IF NOT EXISTS nextris.tb_viewer_handoff (
     code_hash CHAR(64) PRIMARY KEY,
-    user_id VARCHAR(50) NOT NULL REFERENCES nextris.tbuser(guid) ON DELETE CASCADE,
+    -- Polymorphic identity: staff lives in tbuser, patients in tbuser_patient.
+    user_id VARCHAR(50) NOT NULL,
     study_iuid VARCHAR(64) NOT NULL,
     user_type VARCHAR(40) NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,

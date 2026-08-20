@@ -61,6 +61,7 @@ PERMISSION_CATALOG = [
     {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
     {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
     {'code': 'reports.assign', 'module': 'reports', 'action': 'assign', 'description': 'Asignar estudio a un usuario'},
+    {'code': 'reports.notes.delete', 'module': 'reports', 'action': 'delete_notes', 'description': 'Eliminar notas de estudios'},
 ]
 
 

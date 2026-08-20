@@ -197,11 +197,11 @@ def _format_dicom_date(dicom_date):
 
 
 def _clean_study_desc(study_desc):
-    """Clean PACS study description by stripping prefixes like 'ECO 1:  ', 'MAMO:  ', 'END: '."""
+    """Clean PACS study descriptions, including the RES prefix used by MR studies."""
     if not study_desc or study_desc == '*':
         return None
     import re
-    cleaned = re.sub(r'^(ECO\s+\d+\s*:\s*|ECO\s*:\s*|MAMO\s*:\s*|END\s*:\s*)', '', study_desc, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'^(ECO\s+\d+\s*:\s*|ECO\s*:\s*|MAMO\s*:\s*|END\s*:\s*|RES\s*:\s*)', '', study_desc, flags=re.IGNORECASE).strip()
     return cleaned if cleaned and cleaned != '*' else None
 
 
@@ -1841,14 +1841,16 @@ def clinicaparque_orders_to_execute_and_read():
     Authorization: Bearer <token>
     Content-Type: application/json
 
-    Body:
+    Body para paciente Final (F):
     {
         "patient": {
             "id": "ID_INTERNO_123",
             "dni": "12345678",
             "name": "NOMBRE_DEL_PACIENTE",
             "birthdate": "1993-09-20",
-            "sex": "M"
+            "sex": "M",
+            "patient_type": "F",
+            "healthcard_type": "Particular"
         },
         "order": {
             "orderId": "ORD-1001",
@@ -1863,12 +1865,27 @@ def clinicaparque_orders_to_execute_and_read():
         }
     }
 
-    Campos patient:
-      - id           (requerido) - Identificador único del paciente en el sistema origen
-      - dni          (requerido) - Documento Nacional de Identidad
-      - name         (requerido) - Nombre completo del paciente
-      - birthdate    (requerido) - Fecha de nacimiento (YYYY-MM-DD)
-      - sex          (requerido) - Sexo (M, F, O)
+    Body para paciente Temporal (T) o Neonatal (N):
+    {
+        "patient": {
+            "id": "ID_INTERNO_123",
+            "patient_type": "T"
+        },
+        "order": { ... }
+    }
+
+    Campos patient (tipo F):
+      - id              (requerido) - Identificador único del paciente en el sistema origen
+      - patient_type    (requerido) - Tipo de paciente (T=Temporal, F=Final, N=Neonatal)
+      - dni             (requerido) - Documento Nacional de Identidad
+      - name            (requerido) - Nombre completo del paciente
+      - birthdate       (requerido) - Fecha de nacimiento (YYYY-MM-DD)
+      - sex             (requerido) - Sexo (M, F, O)
+      - healthcard_type (requerido) - Tipo de cobertura (Particular, Obra Social, Prepaga)
+
+    Campos patient (tipo T o N):
+      - id              (requerido) - Identificador único del paciente en el sistema origen
+      - patient_type    (requerido) - Tipo de paciente (T=Temporal, N=Neonatal)
 
     Campos order:
       - orderId              (requerido) - Número de orden o solicitud
@@ -1880,6 +1897,8 @@ def clinicaparque_orders_to_execute_and_read():
       - scheduledTime        (requerido) - Fecha/hora programada (ISO 8601)
       - rad_id               (requerido) - Identificador del radiólogo
       - priority_id          (requerido) - Prioridad: 0=Rutina, 1=Urgente
+      - study_reason         (opcional) - Razón o motivo del estudio
+      - req_doctor           (opcional) - Nombre del médico referente
     """
     try:
         start_time = datetime.now()
@@ -1904,7 +1923,18 @@ def clinicaparque_orders_to_execute_and_read():
                 'message': 'Se requieren los nodos: patient, order'
             }), 400
 
-        patient_required = ['id', 'dni', 'name', 'birthdate', 'sex']
+        patient_required_base = ['id', 'patient_type']
+        ptype = patient_data.get('patient_type', '').strip()
+        if ptype not in ('T', 'F', 'N'):
+            return jsonify({'success': False, 'message': 'patient_type debe ser T, F o N'}), 400
+
+        is_temporal_or_neonatal = ptype in ('T', 'N')
+        complex_fields = ['dni', 'name', 'birthdate', 'sex', 'healthcard_type']
+        if is_temporal_or_neonatal:
+            patient_required = patient_required_base
+        else:
+            patient_required = patient_required_base + complex_fields
+
         order_required = ['orderId', 'accessionNumber', 'procedure_code', 'procedure_name',
                          'modality', 'AET', 'scheduledTime', 'rad_id', 'priority_id']
 
@@ -1922,8 +1952,14 @@ def clinicaparque_orders_to_execute_and_read():
                 'message': f'Campos faltantes: {", ".join(missing)}'
             }), 400
 
-        if patient_data['sex'] not in ('M', 'F', 'O'):
+        if patient_data.get('sex') and patient_data['sex'] not in ('M', 'F', 'O'):
             return jsonify({'success': False, 'message': 'sex debe ser M, F u O'}), 400
+
+        if patient_data.get('birthdate'):
+            try:
+                datetime.strptime(patient_data['birthdate'], '%Y-%m-%d')
+            except ValueError:
+                return jsonify({'success': False, 'message': 'birthdate debe tener formato YYYY-MM-DD'}), 400
 
         db_config = get_db_config()
         if not db_config:
@@ -1945,28 +1981,31 @@ def clinicaparque_orders_to_execute_and_read():
         if row:
             patient_guid = row[0]
         else:
-            full_name = patient_data['name'].strip()
+            full_name = patient_data.get('name', '').strip()
             parts = full_name.split(',', 1)
             surname = parts[0].strip() if parts else ''
             name = parts[1].strip() if len(parts) > 1 else ''
             patient_guid = str(uuid.uuid4())
 
-            birthdate = patient_data['birthdate']
+            birthdate = patient_data.get('birthdate')
             if birthdate is not None and str(birthdate).strip() == '':
                 birthdate = None
             cursor.execute(
                 """
                 INSERT INTO nextris.datapatient
-                    (guid, patientid, nationalcode, name, surname, birthdate, sexcode)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (guid, patientid, nationalcode, name, surname, birthdate, sexcode,
+                     patient_type, healthcard_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (patient_guid, external_id, patient_data['dni'].strip(),
-                 name, surname, birthdate, patient_data['sex']),
+                (patient_guid, external_id, patient_data.get('dni', '').strip(),
+                 name, surname, birthdate, patient_data.get('sex'),
+                 patient_data.get('patient_type', '').strip(),
+                 patient_data.get('healthcard_type', '')),
             )
 
             username = external_id
-            dni = patient_data['dni'].strip()
-            password_raw = dni[-3:] if len(dni) >= 3 else dni
+            dni = patient_data.get('dni', '').strip()
+            password_raw = dni[-3:] if len(dni) >= 3 else external_id[-3:] if len(external_id) >= 3 else external_id
             hashed_password = hash_pass(password_raw)
 
             cursor.execute(
@@ -2006,6 +2045,17 @@ def clinicaparque_orders_to_execute_and_read():
         rad_row = cursor.fetchone()
         rad_guid = rad_row[0] if rad_row else None
 
+        # === EXTRAER RAZON DEL ESTUDIO Y DOCTOR REFERENTE ===
+        study_reason = (order_data.get('study_reason') or '').strip()
+        req_doctor = (order_data.get('req_doctor') or '').strip()
+
+        exam_history_parts = []
+        if study_reason:
+            exam_history_parts.append(f"Razón del estudio: {study_reason}")
+        if req_doctor:
+            exam_history_parts.append(f"Doctor Referente: {req_doctor}")
+        exam_history = ' | '.join(exam_history_parts) if exam_history_parts else None
+
         # === GENERAR NUMERO DE ADMISION ===
         accession = order_data['accessionNumber'].strip()
 
@@ -2016,18 +2066,35 @@ def clinicaparque_orders_to_execute_and_read():
         existing_exam_row = cursor.fetchone()
         if existing_exam_row:
             existing_exam_guid = existing_exam_row[0]
-            cursor.execute(
-                """
-                UPDATE nextris.tbexamination
-                SET "w-order" = 1,
-                    studytype_id = COALESCE(%s, studytype_id),
-                    idequipment = COALESCE(%s, idequipment),
-                    location_id = COALESCE(location_id, %s),
-                    idreferringphysician = COALESCE(%s, idreferringphysician)
-                WHERE guid = %s
-                """,
-                (studytype_id, equipment_guid, location_id, rad_guid, existing_exam_guid),
-            )
+            if exam_history:
+                cursor.execute(
+                    """
+                    UPDATE nextris.tbexamination
+                    SET "w-order" = 1,
+                        studytype_id = COALESCE(%s, studytype_id),
+                        idequipment = COALESCE(%s, idequipment),
+                        location_id = COALESCE(location_id, %s),
+                        idreferringphysician = COALESCE(%s, idreferringphysician),
+                        requestingphysician_name = COALESCE(%s, requestingphysician_name),
+                        history = COALESCE(history, '') || E'\n' || %s
+                    WHERE guid = %s
+                    """,
+                    (studytype_id, equipment_guid, location_id, rad_guid, req_doctor or None, exam_history, existing_exam_guid),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE nextris.tbexamination
+                    SET "w-order" = 1,
+                        studytype_id = COALESCE(%s, studytype_id),
+                        idequipment = COALESCE(%s, idequipment),
+                        location_id = COALESCE(location_id, %s),
+                        idreferringphysician = COALESCE(%s, idreferringphysician),
+                        requestingphysician_name = COALESCE(%s, requestingphysician_name)
+                    WHERE guid = %s
+                    """,
+                    (studytype_id, equipment_guid, location_id, rad_guid, req_doctor or None, existing_exam_guid),
+                )
             cursor.execute(
                 "SELECT guid FROM nextris.tbreport WHERE idexamination = %s LIMIT 1",
                 (existing_exam_guid,),
@@ -2080,13 +2147,13 @@ def clinicaparque_orders_to_execute_and_read():
                 admisionnumber, localacc, studyinstanceuid,
                 idreferringphysician,
                 status, isexecuted, isreported, createdon,
-                location_id, "w-order"
+                location_id, "w-order", history, requestingphysician_name
             ) VALUES (
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s,
                 'Scheduled', 0, 0, NOW(),
-                %s, 1
+                %s, 1, %s, %s
             )
             """,
             (
@@ -2094,6 +2161,8 @@ def clinicaparque_orders_to_execute_and_read():
                 adm_number, accession, None,
                 rad_guid,
                 location_id,
+                exam_history,
+                req_doctor or None,
             ),
         )
 
