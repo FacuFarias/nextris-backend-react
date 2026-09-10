@@ -7,6 +7,7 @@ from flask import jsonify, request
 from apps.home import blueprint
 from apps.home.services import DatabaseService, HL7Service
 from apps.home.controllers.admin_controller import updatestatus
+from apps.services.report_fields import canonical_fields_from_row, legacy_aliases
 import pytz
 from datetime import datetime, timedelta
 
@@ -1002,14 +1003,28 @@ def get_data_report():
 
         # Obtener los datos del reporte asociado a la tbexamination
         query_report = """
-            SELECT guid, idpatient, admnumber, idreferringphysician, 
-                   findings, impressions, techniques, conclusions, wassaved 
+            SELECT guid, idpatient, admnumber, idreferringphysician,
+                   study_reason, content, conclusion,
+                   findings, impressions, techniques, conclusions, wassaved
             FROM nextris.tbreport 
             WHERE idexamination = %s
         """
         report_results = DatabaseService.execute_query(query_report, (guid,))
-        report = report_results[0] if report_results else None
-        wassaved = report[8] if report else None
+        raw_report = report_results[0] if report_results else None
+        report_fields = canonical_fields_from_row(
+            raw_report[4] if raw_report else None,
+            raw_report[5] if raw_report else None,
+            raw_report[6] if raw_report else None,
+            legacy_findings=raw_report[7] if raw_report else None,
+            legacy_impressions=raw_report[8] if raw_report else None,
+            legacy_technique=raw_report[9] if raw_report else None,
+            legacy_conclusion=raw_report[10] if raw_report else None,
+            reason_fallback=history or clinical_question,
+        )
+        report = ([raw_report[0], raw_report[1], raw_report[2], raw_report[3],
+                   report_fields['content'], '', '', report_fields['conclusion'], raw_report[11]]
+                  if raw_report else None)
+        wassaved = raw_report[11] if raw_report else None
 
         # Buscar default_predef_id si existe para el studytype
         predef_data = None
@@ -1029,7 +1044,8 @@ def get_data_report():
                 
                 if default_predef_id:
                     query_infpredef = """
-                        SELECT findings, impression, technique, conclusion, tittle 
+                        SELECT study_reason, content, conclusion,
+                               findings, impression, technique, tittle
                         FROM nextris.tbinfpredef 
                         WHERE guid = %s
                     """
@@ -1038,16 +1054,23 @@ def get_data_report():
                     if infpredef_results:
                         infpredef = infpredef_results[0]
                         predef_data = {
-                            'findings': infpredef[0],
-                            'impressions': infpredef[1],
-                            'techniques': infpredef[2],
-                            'conclusions': infpredef[3],
-                            'tittle': infpredef[4]
+                            'study_reason': infpredef[0] or '',
+                            'content': infpredef[1] or '',
+                            'conclusion': infpredef[2] or '',
+                            'findings': infpredef[1] or '',
+                            'impressions': '',
+                            'techniques': '',
+                            'conclusions': infpredef[2] or '',
+                            'tittle': infpredef[6]
                         }
 
         # Crear una respuesta combinada
         response = {
             'report': report,
+            'study_reason': report_fields['study_reason'],
+            'content': report_fields['content'],
+            'conclusion': report_fields['conclusion'],
+            **legacy_aliases(report_fields),
             'isreported': isreported,
             'isimage': isimage,
             'study_instance_uid': study_instance_uid,

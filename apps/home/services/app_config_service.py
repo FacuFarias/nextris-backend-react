@@ -78,10 +78,21 @@ def ensure_app_config_table(connection):
                 whatsapp_webhook_verify_token VARCHAR(255),
                 whatsapp_is_active          BOOLEAN DEFAULT FALSE,
                 plan_id                 VARCHAR(50),
+                report_send_delay_minutes INTEGER NOT NULL DEFAULT 15,
                 created_at              TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
                 updated_at              TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
                 CONSTRAINT single_row CHECK (id = 1)
             )
+            """
+        )
+
+        # The column is also added for installations created before workflow
+        # settings were introduced.
+        cursor.execute(
+            """
+            ALTER TABLE nextris.app_config
+            ADD COLUMN IF NOT EXISTS report_send_delay_minutes INTEGER
+                NOT NULL DEFAULT 15
             """
         )
 
@@ -90,22 +101,12 @@ def ensure_app_config_table(connection):
             cursor.execute(
                 """
                 INSERT INTO nextris.app_config (
-                    id, name, code, email, contact_person, description,
-                    address, city, country, phone,
-                    smtp_server, smtp_port, smtp_user, smtp_password,
-                    smtp_from, smtp_from_name, use_tls,
-                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                    whatsapp_business_account_id, whatsapp_webhook_verify_token,
-                    whatsapp_is_active, plan_id, created_at, updated_at
+                    id, name, code, email, address, phone, plan_id,
+                    created_at, updated_at
                 )
                 SELECT
-                    1, name, code, email, contact_person, description,
-                    address, city, country, phone,
-                    smtp_server, smtp_port, smtp_user, smtp_password,
-                    smtp_from, smtp_from_name, use_tls,
-                    whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                    whatsapp_business_account_id, whatsapp_webhook_verify_token,
-                    whatsapp_is_active, plan_id, created_at, updated_at
+                    1, name, code, email, address, phone, plan_id,
+                    created_at, updated_at
                 FROM nextris.tbfacility
                 LIMIT 1
                 ON CONFLICT (id) DO NOTHING
@@ -142,7 +143,7 @@ def get_app_config():
                 smtp_server, smtp_port, smtp_user, smtp_from, smtp_from_name, use_tls,
                 whatsapp_api_url, whatsapp_phone_number_id,
                 whatsapp_business_account_id, whatsapp_is_active,
-                plan_id, created_at, updated_at
+                plan_id, report_send_delay_minutes, created_at, updated_at
             FROM nextris.app_config
             WHERE id = 1
             """
@@ -173,8 +174,9 @@ def get_app_config():
             'whatsapp_business_account_id': row[18],
             'whatsapp_is_active': row[19],
             'plan_id': row[20],
-            'created_at': row[21].isoformat() if row[21] else None,
-            'updated_at': row[22].isoformat() if row[22] else None,
+            'report_send_delay_minutes': row[21],
+            'created_at': row[22].isoformat() if row[22] else None,
+            'updated_at': row[23].isoformat() if row[23] else None,
         }
     finally:
         cursor.close()
@@ -197,6 +199,7 @@ def update_app_config(data):
             'whatsapp_api_url', 'whatsapp_api_token', 'whatsapp_phone_number_id',
             'whatsapp_business_account_id', 'whatsapp_webhook_verify_token',
             'whatsapp_is_active', 'plan_id',
+            'report_send_delay_minutes',
         ]
 
         updates = []

@@ -98,13 +98,15 @@ def get_institutional_info(location_id=None):
                     'address': result[3],
                     'phone': result[4],
                     'logo_path': result[5],
-                    'require_signature_password': result[6]
+                    'require_signature_password': False
                 }
             }), 200
         else:
             return jsonify({
                 'success': True,
-                'data': None
+                'data': {
+                    'require_signature_password': False
+                }
             }), 200
 
     except Exception as e:
@@ -383,4 +385,3 @@ def get_institutional_locations():
             'success': False,
             'message': f'Error al obtener ubicaciones: {str(e)}'
         }), 500
-

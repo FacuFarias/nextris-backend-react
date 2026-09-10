@@ -5,6 +5,7 @@ Endpoints:
   - POST /api/clinicaparque/patients           → Crear paciente
   - POST /api/clinicaparque/patients/update    → Actualizar paciente
   - POST /api/clinicaparque/orders             → Crear exámenes
+  - POST /api/clinicaparque/orders/<order_id>/confirm-study → Confirmar estudio
   - POST /api/clinicaparque/reports            → Recibir reportes
   - POST /api/clinicaparque/reports/send       → Enviar reportes a externo
 Autenticación: Bearer Token estático en header Authorization
@@ -16,12 +17,15 @@ import requests
 from datetime import datetime
 from functools import wraps
 from flask import jsonify, request
+from flask_jwt_extended import jwt_required
 import psycopg2
 from psycopg2 import OperationalError
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 from apps.authentication.util import hash_pass
 from apps.home.services.hl7_service import HL7Service
 from apps.api.viewer_share_service import create_for_exam
+from apps.services.report_fields import canonical_fields_from_row, normalize_report_payload
 
 
 CLINICAPARQUE_TOKEN = os.environ.get(
@@ -64,6 +68,185 @@ def _ensure_patient_type_columns(cursor):
 
 def _generate_guid():
     return str(uuid.uuid4())
+
+
+def _ensure_clinicaparque_order_links(cursor):
+    """Ensure the external Clínica Parque order mapping exists.
+
+    GUIDs remain database-only.  The integration identifies an order with the
+    source orderId and the mapping resolves it to the internal examination and
+    report rows.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS nextris.clinicaparque_order_links (
+            guid                    VARCHAR(50) PRIMARY KEY,
+            source                  VARCHAR(50) NOT NULL DEFAULT 'clinicaparque',
+            external_order_id       VARCHAR(100) NOT NULL,
+            external_patient_id     VARCHAR(50),
+            examination_guid        VARCHAR(50) NOT NULL,
+            report_guid             VARCHAR(50),
+            accession_number        VARCHAR(50),
+            created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_clinicaparque_order_links_order
+        ON nextris.clinicaparque_order_links (source, external_order_id)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_clinicaparque_order_links_accession
+        ON nextris.clinicaparque_order_links (source, accession_number)
+        WHERE accession_number IS NOT NULL AND accession_number <> ''
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_clinicaparque_order_links_exam
+        ON nextris.clinicaparque_order_links (examination_guid)
+        """
+    )
+
+
+def _upsert_clinicaparque_order_link(
+    cursor, external_order_id, external_patient_id, examination_guid,
+    report_guid=None, accession_number=None,
+):
+    """Create/update an external order mapping without exposing its internals."""
+    if not external_order_id:
+        return
+    cursor.execute(
+        """
+        SELECT examination_guid
+        FROM nextris.clinicaparque_order_links
+        WHERE source = 'clinicaparque' AND external_order_id = %s
+        LIMIT 1
+        """,
+        (external_order_id,),
+    )
+    existing = cursor.fetchone()
+    if existing and str(existing[0]) != str(examination_guid):
+        raise ValueError('orderId ya está asociado a otra orden')
+    cursor.execute(
+        """
+        INSERT INTO nextris.clinicaparque_order_links (
+            guid, source, external_order_id, external_patient_id,
+            examination_guid, report_guid, accession_number, updated_at
+        ) VALUES (%s, 'clinicaparque', %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (source, external_order_id) DO UPDATE SET
+            external_patient_id = EXCLUDED.external_patient_id,
+            examination_guid = EXCLUDED.examination_guid,
+            report_guid = COALESCE(EXCLUDED.report_guid,
+                                   nextris.clinicaparque_order_links.report_guid),
+            accession_number = COALESCE(EXCLUDED.accession_number,
+                                        nextris.clinicaparque_order_links.accession_number),
+            updated_at = NOW()
+        """,
+        (
+            _generate_guid(), external_order_id, external_patient_id,
+            examination_guid, report_guid, accession_number,
+        ),
+    )
+
+
+def _find_clinicaparque_order(cursor, order_id=None, accession=None, study_uid=None):
+    """Resolve an external order to internal rows.
+
+    The returned GUIDs are intentionally only used by server-side SQL; they
+    must never be returned to the integration or accepted from it.
+    """
+    if order_id:
+        cursor.execute(
+            """
+            SELECT examination_guid, report_guid, accession_number
+            FROM nextris.clinicaparque_order_links
+            WHERE source = 'clinicaparque' AND external_order_id = %s
+            LIMIT 1
+            """,
+            (order_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row
+
+    if accession:
+        cursor.execute(
+            """
+            SELECT e.guid, r.guid, e.localacc
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.tbreport r ON r.idexamination = e.guid
+            WHERE e.localacc = %s
+            ORDER BY e.createdon DESC NULLS LAST
+            LIMIT 1
+            """,
+            (accession,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row
+
+    if study_uid:
+        cursor.execute(
+            """
+            SELECT e.guid, r.guid, e.localacc
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.tbreport r ON r.idexamination = e.guid
+            WHERE e.studyinstanceuid = %s
+            ORDER BY e.createdon DESC NULLS LAST
+            LIMIT 1
+            """,
+            (study_uid,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row
+
+    return None
+
+
+def _resolve_external_laterality(cursor, value):
+    """Resolve a description/code supplied by the external system."""
+    if value is None or str(value).strip() == '':
+        return None
+    value = str(value).strip()
+    cursor.execute(
+        """
+        SELECT guid
+        FROM nextris.islaterality
+        WHERE LOWER(TRIM(description)) = LOWER(TRIM(%s))
+        LIMIT 1
+        """,
+        (value,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise ValueError(
+            'laterality debe ser una descripción existente, por ejemplo IZQUIERDA, DERECHA o BILATERAL'
+        )
+    return row[0]
+
+
+def _resolve_external_physician(cursor, value):
+    """Resolve an external username/national number, never a GUID input."""
+    if value is None or str(value).strip() == '':
+        return None
+    value = str(value).strip()
+    cursor.execute(
+        """
+        SELECT guid
+        FROM nextris.tbuser
+        WHERE username = %s OR nationalnumber = %s
+        LIMIT 1
+        """,
+        (value, value),
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
 
 
 def _log_communication(endpoint, patient_id=None, patient_name=None,
@@ -111,12 +294,385 @@ def _log_communication(endpoint, patient_id=None, patient_name=None,
         print(f"[LOG] Error logging communication: {str(e)}")
 
 
+def _communication_direction(endpoint):
+    """Clasifica el sentido del mensaje para la vista de monitoreo."""
+    return 'Enviado' if endpoint in (
+        '/clinicaparque/reports/send',
+        '/clinicaparque/reports/send-test',
+    ) else 'Recibido'
+
+
+def _serialize_communication_log(row, include_body=False):
+    data = {
+        'guid': row[0],
+        'received_at': row[1].isoformat() if row[1] else None,
+        'api_endpoint': row[2],
+        'http_method': row[3],
+        'patient_id': row[4],
+        'patient_name': row[5],
+        'accession_number': row[6],
+        'order_id': row[7],
+        'response_status': row[8],
+        'success': row[9],
+        'error_message': row[10],
+        'source_ip': row[11],
+        'duration_ms': row[12],
+        'direction': _communication_direction(row[2]),
+    }
+    if include_body:
+        data['request_body'] = row[13]
+        data['response_body'] = row[14]
+    return data
+
+
+@api_blueprint.route('/clinicaparque/logs', methods=['GET'])
+@jwt_required()
+@require_permission('tabs.gestion.view', include_role_permissions=True)
+def clinicaparque_communication_logs():
+    """Consulta el historial de mensajes de la integración Clínica Parque."""
+    page = max(request.args.get('page', 1, type=int), 1)
+    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(max(per_page, 1), 100)
+    search = request.args.get('search', '').strip()
+    endpoint_filter = request.args.get('api_endpoint', '').strip()
+    success_filter = request.args.get('success', '').strip().lower()
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+
+    if success_filter not in ('', 'true', 'false'):
+        return jsonify({'success': False, 'message': 'El filtro success debe ser true o false'}), 400
+
+    conditions = []
+    params = []
+    if search:
+        conditions.append("""(
+            api_endpoint ILIKE %s OR patient_id ILIKE %s OR patient_name ILIKE %s
+            OR accession_number ILIKE %s OR order_id ILIKE %s
+        )""")
+        search_value = f'%{search}%'
+        params.extend([search_value] * 5)
+    if endpoint_filter:
+        conditions.append('api_endpoint = %s')
+        params.append(endpoint_filter)
+    if success_filter:
+        conditions.append('success = %s')
+        params.append(success_filter == 'true')
+    if date_from:
+        conditions.append('received_at >= %s::date')
+        params.append(date_from)
+    if date_to:
+        conditions.append("received_at < %s::date + interval '1 day'")
+        params.append(date_to)
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+    offset = (page - 1) * per_page
+
+    connection = None
+    cursor = None
+    try:
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT DISTINCT api_endpoint
+            FROM nextris.communication_logs
+            WHERE api_endpoint IS NOT NULL
+            ORDER BY api_endpoint
+            """
+        )
+        available_endpoints = [row[0] for row in cursor.fetchall()]
+        cursor.execute(f"SELECT COUNT(*) FROM nextris.communication_logs {where_clause}", params)
+        total = cursor.fetchone()[0]
+
+        cursor.execute(
+            f"""
+            SELECT guid, received_at, api_endpoint, http_method,
+                   patient_id, patient_name, accession_number, order_id,
+                   response_status, success, error_message, source_ip,
+                   duration_ms, NULL, NULL
+            FROM nextris.communication_logs
+            {where_clause}
+            ORDER BY received_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [per_page, offset],
+        )
+        logs = [_serialize_communication_log(row) for row in cursor.fetchall()]
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': logs,
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'pages': (total + per_page - 1) // per_page if total else 0,
+                'available_endpoints': available_endpoints,
+            },
+        }), 200
+    except Exception as e:
+        print(f"[LOG] Error consultando communication_logs: {str(e)}")
+        return jsonify({'success': False, 'message': 'No se pudo consultar el log de Clínica Parque'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/clinicaparque/logs/<log_guid>', methods=['GET'])
+@jwt_required()
+@require_permission('tabs.gestion.view', include_role_permissions=True)
+def clinicaparque_communication_log_detail(log_guid):
+    """Obtiene el contenido de un mensaje recibido/enviado."""
+    connection = None
+    cursor = None
+    try:
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT guid, received_at, api_endpoint, http_method,
+                   patient_id, patient_name, accession_number, order_id,
+                   response_status, success, error_message, source_ip,
+                   duration_ms, request_body, response_body
+            FROM nextris.communication_logs
+            WHERE guid = %s
+            LIMIT 1
+            """,
+            (log_guid,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Registro no encontrado'}), 404
+        return jsonify({'success': True, 'data': _serialize_communication_log(row, include_body=True)}), 200
+    except Exception as e:
+        print(f"[LOG] Error consultando detalle de communication_logs: {str(e)}")
+        return jsonify({'success': False, 'message': 'No se pudo consultar el detalle del registro'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 def _sanitize_error(e, endpoint_name):
     """Devuelve un mensaje genérico para el cliente, sin filtrar detalles internos."""
     print(f"[API CLINICAPARQUE {endpoint_name}] Error: {str(e)}")
     if isinstance(e, OperationalError):
         return 'Error de conexión a la base de datos. Intente nuevamente en unos segundos.'
     return 'Error interno del servidor. Contacte al administrador.'
+
+
+@api_blueprint.route('/clinicaparque/confirm-study', methods=['POST'])
+@api_blueprint.route('/clinicaparque/orders/<order_id>/confirm-study', methods=['POST'])
+@require_clinicaparque_token
+def clinicaparque_confirm_study(order_id=None):
+    """Confirma los datos clínicos de un estudio desde Clínica Parque.
+
+    El cuerpo usa identificadores externos de la orden y del procedimiento.
+    Los GUID de NextRIS no forman parte de este contrato.
+    """
+    connection = None
+    cursor = None
+    start_time = datetime.now()
+    payload = request.get_json(silent=True)
+    endpoint = '/clinicaparque/orders/<order_id>/confirm-study'
+
+    try:
+        if not isinstance(payload, dict):
+            _log_communication(
+                endpoint,
+                request_body=str(payload),
+                response_status=400,
+                success=False,
+                error_message='JSON inválido o vacío',
+                start_time=start_time,
+            )
+            return jsonify({'success': False, 'message': 'JSON inválido o vacío'}), 400
+
+        # La variante plana recibe el identificador externo dentro del JSON.
+        order_id = str(order_id or payload.get('orderId') or '').strip()
+        accession = str(payload.get('accessionNumber') or '').strip() or None
+        if not order_id and not accession:
+            return jsonify({'success': False, 'message': 'orderId o accessionNumber es requerido'}), 400
+
+        procedure_code = str(payload.get('procedure_code') or '').strip()
+        if not procedure_code:
+            return jsonify({'success': False, 'message': 'procedure_code es requerido'}), 400
+
+        forbidden_fields = (
+            'guid', 'exam_id', 'examination_guid', 'report_guid', 'patient_guid',
+            'studytype_id', 'laterality_id', 'referring_physician_id',
+            'requesting_physician_id',
+        )
+        received_forbidden = [field for field in forbidden_fields if field in payload]
+        if received_forbidden:
+            return jsonify({
+                'success': False,
+                'message': (
+                    'Los identificadores internos no forman parte del contrato externo: '
+                    + ', '.join(received_forbidden)
+                ),
+            }), 400
+
+        referring_physician = str(
+            payload.get('referring_physician')
+            or payload.get('rad_id')
+            or ''
+        ).strip() or None
+        requesting_physician_name = str(payload.get('requesting_physician_name') or '').strip() or None
+        clinical_question = str(payload.get('clinical_question') or '').strip() or None
+        other_details = str(payload.get('other_details') or '').strip() or None
+
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        _ensure_clinicaparque_order_links(cursor)
+
+        order_row = _find_clinicaparque_order(cursor, order_id=order_id, accession=accession)
+        if not order_row:
+            return jsonify({'success': False, 'message': 'No se encontró la orden'}), 404
+        exam_id = order_row[0]
+        if accession and order_row[2] != accession:
+            cursor.execute(
+                "UPDATE nextris.tbexamination SET localacc = %s WHERE guid = %s",
+                (accession, exam_id),
+            )
+
+        cursor.execute(
+            """
+            SELECT e.localacc, dp.patientid,
+                   CONCAT(COALESCE(dp.name, ''), ' ', COALESCE(dp.surname, '')),
+                   e.laterality_id
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.datapatient dp ON dp.guid = e.idpatient
+            WHERE e.guid = %s
+            LIMIT 1
+            """,
+            (exam_id,),
+        )
+        exam_row = cursor.fetchone()
+        if not exam_row:
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        cursor.execute(
+            "SELECT guid, description FROM nextris.isstudytype WHERE code = %s LIMIT 1",
+            (procedure_code,),
+        )
+        studytype_row = cursor.fetchone()
+        if not studytype_row:
+            return jsonify({'success': False, 'message': 'procedure_code no existe'}), 400
+        studytype_id = studytype_row[0]
+
+        referring_physician_provided = 'referring_physician' in payload or 'rad_id' in payload
+        referring_physician_id = _resolve_external_physician(cursor, referring_physician)
+        requesting_physician_provided = any(
+            key in payload for key in ('requesting_physician', 'req_doctor')
+        )
+        requesting_physician_id = _resolve_external_physician(
+            cursor,
+            payload.get('requesting_physician') or payload.get('req_doctor'),
+        )
+        laterality_provided = any(key in payload for key in ('laterality', 'lateralidad'))
+        laterality_value = payload.get('laterality', payload.get('lateralidad'))
+        laterality_id = _resolve_external_laterality(cursor, laterality_value) if laterality_provided else None
+
+        update_parts = [
+            '"w-order" = 1',
+            'isexecuted = 1',
+            'studytype_id = %s',
+        ]
+        update_values = [studytype_id]
+        if referring_physician_provided:
+            update_parts.append('idreferringphysician = %s')
+            update_values.append(referring_physician_id)
+        if requesting_physician_provided:
+            update_parts.append('idrequestingphysician = %s')
+            update_values.append(requesting_physician_id)
+        if 'requesting_physician_name' in payload:
+            update_parts.append('requestingphysician_name = %s')
+            update_values.append(requesting_physician_name)
+        if 'clinical_question' in payload:
+            update_parts.append('clinicalquestion = %s')
+            update_values.append(clinical_question)
+        if 'other_details' in payload:
+            update_parts.append('othersdetails = %s')
+            update_values.append(other_details)
+        if laterality_provided:
+            update_parts.append('laterality_id = %s')
+            update_values.append(laterality_id)
+
+        update_values.append(exam_id)
+        cursor.execute(
+            f"UPDATE nextris.tbexamination SET {', '.join(update_parts)} WHERE guid = %s",
+            update_values,
+        )
+        response = {
+            'success': True,
+            'message': 'Estudio confirmado correctamente',
+            'orderId': order_id,
+            'accessionNumber': accession or exam_row[0],
+            'procedure_code': procedure_code,
+            'lateralidad': laterality_value if laterality_provided else None,
+        }
+        _upsert_clinicaparque_order_link(
+            cursor, order_id, None, exam_id, order_row[1], accession or exam_row[0]
+        )
+        connection.commit()
+        _log_communication(
+            endpoint,
+            patient_id=exam_row[1],
+            patient_name=(exam_row[2] or '').strip(),
+            accession_number=exam_row[0],
+            request_body=str(payload),
+            response_status=200,
+            response_body=str(response),
+            success=True,
+            start_time=start_time,
+        )
+        return jsonify(response), 200
+
+    except ValueError as error:
+        if connection:
+            connection.rollback()
+        _log_communication(
+            endpoint,
+            request_body=str(payload),
+            response_status=400,
+            success=False,
+            error_message=str(error),
+            start_time=start_time,
+        )
+        return jsonify({'success': False, 'message': str(error)}), 400
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        user_message = _sanitize_error(error, 'CONFIRM STUDY')
+        _log_communication(
+            endpoint,
+            request_body=str(payload),
+            response_status=500,
+            success=False,
+            error_message=str(error),
+            start_time=start_time,
+        )
+        return jsonify({'success': False, 'message': user_message}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 
 def _split_patient_name(full_name):
@@ -231,6 +787,35 @@ def _match_studytype(cursor, study_desc):
     return row[0] if row else None
 
 
+def _resolve_external_studytype(cursor, procedure_code, study_description=None):
+    """Resolve an external procedure by code, falling back to its description.
+
+    Procedure codes are the preferred identifier. The description fallback is
+    needed for orders whose code was added in the external system after the
+    local procedure catalog was synchronized.
+    """
+    if procedure_code:
+        cursor.execute(
+            "SELECT guid FROM nextris.isstudytype WHERE code = %s LIMIT 1",
+            (procedure_code,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+
+    return _match_studytype(cursor, study_description)
+
+
+def _get_external_study_description(order_data):
+    """Read the study description using the supported external field names."""
+    for field in ('study_description', 'StudyDescription', 'studyDescription',
+                  'procedure_description', 'procedure_name'):
+        value = order_data.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 def _link_existing_pacs_studies(cursor, patient_guid, dicom_patient_id):
     """
     Search PACS for existing studies belonging to this patient and create
@@ -295,12 +880,12 @@ def _link_existing_pacs_studies(cursor, patient_guid, dicom_patient_id):
                 guid, idpatient, studytype_id,
                 admisionnumber, localacc, studyinstanceuid,
                 status, isexecuted, isreported, isimage,
-                createdon, executedon
+                createdon, executedon, "w-order"
             ) VALUES (
                 %s, %s, %s,
                 %s, %s, %s,
-                'Executed', 1, 0, 1,
-                NOW(), NOW()
+                %s, %s, 0, 1,
+                NOW(), %s, %s
             )
             """,
             (
@@ -308,6 +893,10 @@ def _link_existing_pacs_studies(cursor, patient_guid, dicom_patient_id):
                 adm_number,
                 accession_no if accession_no and accession_no != '*' else None,
                 study_iuid if study_iuid and study_iuid != '*' else None,
+                'Scheduled',
+                0,
+                None,
+                0,
             ),
         )
 
@@ -328,7 +917,6 @@ def _link_existing_pacs_studies(cursor, patient_guid, dicom_patient_id):
             'accession_number': accession_no,
             'study_uid': study_iuid,
             'admision_number': adm_number,
-            'examination_guid': exam_guid,
         })
 
     return created
@@ -470,6 +1058,7 @@ def clinicaparque_create_patient():
         cursor = connection.cursor()
 
         _ensure_patient_type_columns(cursor)
+        _ensure_clinicaparque_order_links(cursor)
 
         external_id = patient['id'].strip()
         cursor.execute(
@@ -547,7 +1136,6 @@ def clinicaparque_create_patient():
             response = {
                 'success': True,
                 'message': 'Paciente actualizado y usuario portal creado',
-                'guid': existing_guid,
                 'patientid': external_id,
                 'username': external_id,
             }
@@ -615,7 +1203,6 @@ def clinicaparque_create_patient():
         response = {
             'success': True,
             'message': 'Paciente creado exitosamente',
-            'guid': patient_guid,
             'patientid': external_id,
             'username': external_id,
         }
@@ -816,7 +1403,6 @@ def clinicaparque_update_patient():
         response = {
             'success': True,
             'message': 'Paciente actualizado exitosamente',
-            'guid': patient_guid,
             'patientid': new_id,
         }
         _log_communication('/clinicaparque/patients/update', patient_id=patient.get('old_id'),
@@ -852,13 +1438,13 @@ def receive_clinicaparque_orders():
         "patient_name": "Juan Pérez",
         "accession_number": "ACC-001",
         "machine": "CT-01"
-        "procedure_id": "uuid-del-tipo-de-estudio"
+        "procedure_code": "RX-01"
     }
 
     Body (múltiples órdenes):
     [
-        { "patient_id": "...", "patient_name": "...", "accession_number": "...", "machine": "...", "procedure_id": "..." },
-        { "patient_id": "...", "patient_name": "...", "accession_number": "...", "machine": "...", "procedure_id": "..." }
+        { "orderId": "...", "patient_id": "...", "patient_name": "...", "accession_number": "...", "machine": "...", "procedure_code": "..." },
+        { "orderId": "...", "patient_id": "...", "patient_name": "...", "accession_number": "...", "machine": "...", "procedure_code": "..." }
     ]
 
     Campos:
@@ -866,9 +1452,7 @@ def receive_clinicaparque_orders():
       - patient_name        (requerido) - Nombre completo del paciente
       - accession_number    (requerido) - Número de acceso / estudio
       - machine             (opcional) - AE Title o descripción del equipo
-      - location_id         (opcional) - Ubicación; si se omite, se usa la primera de la instalación
-      - procedure_id        (requerido) - GUID o código del tipo de estudio (isstudytype)
-      - procedure_code      (alternativo) - Código del tipo de estudio, por ejemplo `3153`
+      - procedure_code      (requerido) - Código externo del tipo de estudio, por ejemplo `3153`
 
     Response 200:
     {
@@ -876,8 +1460,8 @@ def receive_clinicaparque_orders():
         "created": 2,
         "failed": 0,
         "results": [
-            { "accession_number": "ACC-001", "examination_guid": "...", "report_guid": "...", "status": "created" },
-            { "accession_number": "ACC-002", "examination_guid": "...", "report_guid": "...", "status": "created" }
+            { "orderId": "ORD-001", "accession_number": "ACC-001", "admision_number": "ADM000001", "status": "created" },
+            { "orderId": "ORD-002", "accession_number": "ACC-002", "admision_number": "ADM000002", "status": "created" }
         ],
         "errors": []
     }
@@ -898,24 +1482,35 @@ def receive_clinicaparque_orders():
 
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
+        _ensure_clinicaparque_order_links(cursor)
 
         created = []
         errors = []
 
         for idx, order in enumerate(orders):
+            forbidden_fields = [
+                field for field in (
+                    'guid', 'exam_id', 'examination_guid', 'report_guid',
+                    'patient_guid', 'procedure_id', 'studytype_id',
+                    'location_id', 'equipment_id',
+                ) if field in order
+            ]
+            if forbidden_fields:
+                errors.append({
+                    'index': idx,
+                    'accession_number': order.get('accession_number'),
+                    'error': (
+                        'Los identificadores internos no forman parte del contrato externo: '
+                        + ', '.join(forbidden_fields)
+                    ),
+                })
+                continue
+
             accession = (order.get('accession_number') or '').strip()
             patient_id = (order.get('patient_id') or '').strip()
             patient_name = (order.get('patient_name') or '').strip()
             machine = (order.get('machine') or '').strip()
-            requested_location_id = (order.get('location_id') or '').strip()
-            procedure_id = (order.get('procedure_id') or '').strip()
             procedure_code = (order.get('procedure_code') or '').strip()
-
-            # Aceptar el código que envían los sistemas externos. Si Mirth
-            # dejó un placeholder sin resolver (${...}), utilizar el código.
-            if procedure_id.startswith('${') and procedure_id.endswith('}'):
-                procedure_id = ''
-            procedure_ref = procedure_id or procedure_code
 
             missing = []
             if not patient_id:
@@ -924,8 +1519,8 @@ def receive_clinicaparque_orders():
                 missing.append('patient_name')
             if not accession:
                 missing.append('accession_number')
-            if not procedure_ref:
-                missing.append('procedure_id')
+            if not procedure_code:
+                missing.append('procedure_code')
 
             if missing:
                 errors.append({
@@ -959,17 +1554,17 @@ def receive_clinicaparque_orders():
                 cursor.execute(
                     """
                     SELECT guid FROM nextris.isstudytype
-                    WHERE guid = %s OR code = %s
+                    WHERE code = %s
                     LIMIT 1
                     """,
-                    (procedure_ref, procedure_ref),
+                    (procedure_code,),
                 )
                 study_type_row = cursor.fetchone()
                 if not study_type_row:
                     errors.append({
                         'index': idx,
                         'accession_number': accession,
-                        'error': f'Tipo de estudio no encontrado: {procedure_ref}',
+                        'error': f'Tipo de estudio no encontrado: {procedure_code}',
                     })
                     continue
                 procedure_id = study_type_row[0]
@@ -982,27 +1577,16 @@ def receive_clinicaparque_orders():
                     loc_row = cursor.fetchone()
                     location_id = loc_row[0] if loc_row else None
                 else:
-                    # Sin equipo, permitir una ubicación explícita o usar la
-                    # primera ubicación configurada para la instalación.
-                    location_id = requested_location_id or None
-                    if location_id:
-                        cursor.execute(
-                            "SELECT guid FROM nextris.tblocation WHERE guid = %s LIMIT 1",
-                            (location_id,),
-                        )
-                        if not cursor.fetchone():
-                            location_id = None
-                    if not location_id:
-                        cursor.execute(
-                            """
-                            SELECT guid FROM nextris.tblocation
-                            WHERE facility_id = '1'
-                            ORDER BY name
-                            LIMIT 1
-                            """
-                        )
-                        loc_row = cursor.fetchone()
-                        location_id = loc_row[0] if loc_row else None
+                    cursor.execute(
+                        """
+                        SELECT guid FROM nextris.tblocation
+                        WHERE facility_id = '1'
+                        ORDER BY name
+                        LIMIT 1
+                        """
+                    )
+                    loc_row = cursor.fetchone()
+                    location_id = loc_row[0] if loc_row else None
 
                 if existing_exam_guid:
                     # La imagen pudo haber creado primero el examen. La
@@ -1026,11 +1610,15 @@ def receive_clinicaparque_orders():
                         (existing_exam_guid,),
                     )
                     existing_report_row = cursor.fetchone()
+                    order_ref = (order.get('orderId') or order.get('order_id') or accession).strip()
+                    _upsert_clinicaparque_order_link(
+                        cursor, order_ref, patient_id, existing_exam_guid,
+                        existing_report_row[0] if existing_report_row else None, accession,
+                    )
                     created.append({
                         'index': idx,
                         'accession_number': accession,
-                        'examination_guid': existing_exam_guid,
-                        'report_guid': existing_report_row[0] if existing_report_row else None,
+                        'orderId': order_ref,
                         'status': 'updated',
                     })
                     continue
@@ -1073,11 +1661,15 @@ def receive_clinicaparque_orders():
                     (report_guid, exam_guid, patient_guid, adm_number),
                 )
 
+                order_ref = (order.get('orderId') or order.get('order_id') or accession).strip()
+                _upsert_clinicaparque_order_link(
+                    cursor, order_ref, patient_id, exam_guid, report_guid, accession,
+                )
+
                 created.append({
                     'index': idx,
                     'accession_number': accession,
-                    'examination_guid': exam_guid,
-                    'report_guid': report_guid,
+                    'orderId': order_ref,
                     'admision_number': adm_number,
                     'status': 'created',
                 })
@@ -1217,6 +1809,7 @@ def clinicaparque_receive_report():
         cursor = connection.cursor()
 
         _ensure_patient_type_columns(cursor)
+        _ensure_clinicaparque_order_links(cursor)
 
         external_id = patient_data['id'].strip()
         cursor.execute(
@@ -1246,6 +1839,7 @@ def clinicaparque_receive_report():
             )
 
         accession = order_data['accessionNumber'].strip()
+        order_id = order_data['orderId'].strip()
         procedure_code = order_data['procedure_code'].strip()
 
         cursor.execute(
@@ -1258,14 +1852,18 @@ def clinicaparque_receive_report():
         else:
             studytype_id = None
 
-        cursor.execute(
-            "SELECT guid FROM nextris.tbexamination WHERE localacc = %s LIMIT 1",
-            (accession,),
+        mapped_order = _find_clinicaparque_order(
+            cursor, order_id=order_id, accession=accession,
         )
-        exam_row = cursor.fetchone()
+        exam_row = (mapped_order[0],) if mapped_order else None
 
         if exam_row:
             exam_guid = exam_row[0]
+            if mapped_order[2] != accession:
+                cursor.execute(
+                    "UPDATE nextris.tbexamination SET localacc = %s WHERE guid = %s",
+                    (accession, exam_guid),
+                )
         else:
             exam_guid = _generate_guid()
             next_adm = _next_sequence(cursor, 'ADM', 'admisionnumber')
@@ -1299,12 +1897,7 @@ def clinicaparque_receive_report():
 
         rad_id = order_data.get('rad_id', '').strip() or None
         if rad_id:
-            cursor.execute(
-                "SELECT guid FROM nextris.tbuser WHERE guid = %s OR username = %s OR nationalnumber = %s LIMIT 1",
-                (rad_id, rad_id, rad_id),
-            )
-            rad_row = cursor.fetchone()
-            rad_guid = rad_row[0] if rad_row else None
+            rad_guid = _resolve_external_physician(cursor, rad_id)
         else:
             rad_guid = None
 
@@ -1317,6 +1910,11 @@ def clinicaparque_receive_report():
                 report_date = None
 
         if report_type in ('NR', 'NV'):
+            report_fields = normalize_report_payload(
+                report_data,
+                reason_fallback=report_data.get('study_reason')
+                    or order_data.get('clinicalquestion') or order_data.get('history')
+            )
             cursor.execute(
                 "SELECT guid FROM nextris.tbreport WHERE idexamination = %s LIMIT 1",
                 (exam_guid,),
@@ -1328,20 +1926,18 @@ def clinicaparque_receive_report():
                 cursor.execute(
                     """
                     UPDATE nextris.tbreport SET
-                        findings = %s,
-                        impressions = %s,
-                        techniques = %s,
-                        conclusions = %s,
+                        study_reason = %s,
+                        content = %s,
+                        conclusion = %s,
                         iduser = %s,
                         date = %s,
                         wassaved = TRUE
                     WHERE guid = %s
                     """,
                     (
-                        report_data.get('findings', ''),
-                        report_data.get('impressions', ''),
-                        report_data.get('technique', ''),
-                        report_data.get('conclusions', ''),
+                        report_fields.get('study_reason', ''),
+                        report_fields.get('content', ''),
+                        report_fields.get('conclusion', ''),
                         rad_guid,
                         report_date,
                         report_guid,
@@ -1349,25 +1945,24 @@ def clinicaparque_receive_report():
                 )
             else:
                 report_guid = _generate_guid()
-                adm_number = order_data.get('orderId', '').strip() or accession
+                adm_number = accession
                 cursor.execute(
                     """
                     INSERT INTO nextris.tbreport (
                         guid, idexamination, idpatient, admnumber,
-                        findings, impressions, techniques, conclusions,
+                        study_reason, content, conclusion,
                         iduser, date, createdon, wassaved
                     ) VALUES (
-                        %s, %s, %s, %s,
+                        %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, NOW(), TRUE
                     )
                     """,
                     (
                         report_guid, exam_guid, patient_guid, adm_number,
-                        report_data.get('findings', ''),
-                        report_data.get('impressions', ''),
-                        report_data.get('technique', ''),
-                        report_data.get('conclusions', ''),
+                        report_fields.get('study_reason', ''),
+                        report_fields.get('content', ''),
+                        report_fields.get('conclusion', ''),
                         rad_guid,
                         report_date,
                     ),
@@ -1387,7 +1982,9 @@ def clinicaparque_receive_report():
 
         elif report_type == 'A':
             cursor.execute(
-                "SELECT guid, findings, impressions, conclusions FROM nextris.tbreport WHERE idexamination = %s LIMIT 1",
+                """SELECT guid, study_reason, content, conclusion,
+                          findings, techniques, impressions, conclusions
+                   FROM nextris.tbreport WHERE idexamination = %s LIMIT 1""",
                 (exam_guid,),
             )
             existing_report = cursor.fetchone()
@@ -1402,44 +1999,47 @@ def clinicaparque_receive_report():
                 }), 400
 
             report_guid = existing_report[0]
-            old_findings = existing_report[1] or ''
-            old_impressions = existing_report[2] or ''
-            old_conclusions = existing_report[3] or ''
-
-            new_findings = report_data.get('findings', '')
-            new_impressions = report_data.get('impressions', '')
-            new_conclusions = report_data.get('conclusions', '')
+            fields = canonical_fields_from_row(
+                existing_report[1], existing_report[2], existing_report[3],
+                legacy_findings=existing_report[4], legacy_technique=existing_report[5],
+                legacy_impressions=existing_report[6], legacy_conclusion=existing_report[7],
+            )
+            new_fields = normalize_report_payload(report_data)
 
             addenda_date = datetime.now().strftime('%d/%m/%Y')
             addenda_tag = f'[ADDENDA {addenda_date}]'
 
-            combined_findings = f"{old_findings}\n{addenda_tag} {new_findings}".strip() if new_findings else old_findings
-            combined_impressions = f"{old_impressions}\n{addenda_tag} {new_impressions}".strip() if new_impressions else old_impressions
-            combined_conclusions = f"{old_conclusions}\n{addenda_tag} {new_conclusions}".strip() if new_conclusions else old_conclusions
+            new_content = new_fields.get('content', '')
+            new_conclusion = new_fields.get('conclusion', '')
+            combined_content = (
+                f"{fields['content']}<p><strong>{addenda_tag} Contenido:</strong></p>{new_content}"
+            ).strip() if new_content else fields['content']
+            combined_conclusion = (
+                f"{fields['conclusion']}<p><strong>{addenda_tag} Conclusión:</strong></p>{new_conclusion}"
+            ).strip() if new_conclusion else fields['conclusion']
 
             cursor.execute(
                 """
                 UPDATE nextris.tbreport SET
-                    findings = %s,
-                    impressions = %s,
-                    conclusions = %s,
-                    techniques = COALESCE(%s, techniques),
+                    content = %s,
+                    conclusion = %s,
                     iduser = COALESCE(%s, iduser),
                     date = %s,
                     wassaved = TRUE
                 WHERE guid = %s
                 """,
                 (
-                    combined_findings,
-                    combined_impressions,
-                    combined_conclusions,
-                    report_data.get('technique'),
+                    combined_content,
+                    combined_conclusion,
                     rad_guid,
                     report_date,
                     report_guid,
                 ),
             )
 
+        _upsert_clinicaparque_order_link(
+            cursor, order_id, external_id, exam_guid, report_guid, accession,
+        )
         connection.commit()
         cursor.close()
         connection.close()
@@ -1447,8 +2047,7 @@ def clinicaparque_receive_report():
         response = {
             'success': True,
             'message': f'Reporte ({report_type}) procesado exitosamente',
-            'examination_guid': exam_guid,
-            'report_guid': report_guid,
+            'orderId': order_id,
             'accession_number': accession,
             'report_type': report_type,
         }
@@ -1539,6 +2138,7 @@ def clinicaparque_study_open():
             }), 400
 
         accession = order_data.get('accessionNumber', '').strip()
+        order_id = order_data.get('orderId', '').strip()
         study_uid = study_data.get('study_uid', '').strip()
         patient_id = patient_data.get('id', '').strip()
 
@@ -1559,25 +2159,17 @@ def clinicaparque_study_open():
 
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
+        _ensure_clinicaparque_order_links(cursor)
 
-        exam_guid = None
-        if accession:
-            cursor.execute(
-                "SELECT guid FROM nextris.tbexamination WHERE localacc = %s LIMIT 1",
-                (accession,),
+        order_row = _find_clinicaparque_order(
+            cursor, order_id=order_id, accession=accession, study_uid=study_uid,
+        )
+        exam_guid = order_row[0] if order_row else None
+        if order_id and order_row:
+            _upsert_clinicaparque_order_link(
+                cursor, order_id, patient_id, exam_guid,
+                order_row[1], accession or order_row[2],
             )
-            row = cursor.fetchone()
-            if row:
-                exam_guid = row[0]
-
-        if not exam_guid and study_uid:
-            cursor.execute(
-                "SELECT guid FROM nextris.tbexamination WHERE studyinstanceuid = %s LIMIT 1",
-                (study_uid,),
-            )
-            row = cursor.fetchone()
-            if row:
-                exam_guid = row[0]
 
         timestamp = event_data.get('timestamp', '')
         event_log = f"[PATIENT_VIEW {timestamp}] Patient: {patient_id}, Accession: {accession}, StudyUID: {study_uid}"
@@ -1707,18 +2299,25 @@ def clinicaparque_addenda():
 
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
+        _ensure_clinicaparque_order_links(cursor)
 
-        cursor.execute(
-            """
-            SELECT e.guid, r.guid, r.findings, r.impressions, r.conclusions
-            FROM nextris.tbexamination e
-            INNER JOIN nextris.tbreport r ON r.idexamination = e.guid
-            WHERE e.localacc = %s AND e.studyinstanceuid = %s
-            LIMIT 1
-            """,
-            (accession, study_uid),
+        row = _find_clinicaparque_order(
+            cursor, order_id=order_id, accession=accession, study_uid=study_uid,
         )
-        row = cursor.fetchone()
+        if row:
+            cursor.execute(
+                """
+                SELECT e.guid, r.guid, r.study_reason, r.content, r.conclusion,
+                       r.findings, r.techniques, r.impressions, r.conclusions,
+                       e.clinicalquestion, e.history
+                FROM nextris.tbexamination e
+                INNER JOIN nextris.tbreport r ON r.idexamination = e.guid
+                WHERE e.guid = %s
+                LIMIT 1
+                """,
+                (row[0],),
+            )
+            row = cursor.fetchone()
 
         if not row:
             cursor.close()
@@ -1730,18 +2329,15 @@ def clinicaparque_addenda():
 
         exam_guid = row[0]
         report_guid = row[1]
-        old_findings = row[2] or ''
-        old_impressions = row[3] or ''
-        old_conclusions = row[4] or ''
+        fields = canonical_fields_from_row(
+            row[2], row[3], row[4], legacy_findings=row[5], legacy_technique=row[6],
+            legacy_impressions=row[7], legacy_conclusion=row[8],
+            reason_fallback=row[9] or row[10],
+        )
 
         rad_id = order_data.get('rad_id', '').strip() or None
         if rad_id:
-            cursor.execute(
-                "SELECT guid FROM nextris.tbuser WHERE guid = %s OR username = %s OR nationalnumber = %s LIMIT 1",
-                (rad_id, rad_id, rad_id),
-            )
-            rad_row = cursor.fetchone()
-            rad_guid = rad_row[0] if rad_row else None
+            rad_guid = _resolve_external_physician(cursor, rad_id)
         else:
             rad_guid = None
 
@@ -1756,37 +2352,40 @@ def clinicaparque_addenda():
         addenda_date = datetime.now().strftime('%d/%m/%Y')
         addenda_tag = f'[ADDENDA {addenda_date}]'
 
-        new_findings = report_data.get('findings', '')
-        new_impressions = report_data.get('impressions', '')
-        new_conclusions = report_data.get('conclusions', '')
+        new_fields = normalize_report_payload(report_data)
 
-        combined_findings = f"{old_findings}\n{addenda_tag} {new_findings}".strip() if new_findings else old_findings
-        combined_impressions = f"{old_impressions}\n{addenda_tag} {new_impressions}".strip() if new_impressions else old_impressions
-        combined_conclusions = f"{old_conclusions}\n{addenda_tag} {new_conclusions}".strip() if new_conclusions else old_conclusions
+        new_content = new_fields.get('content', '')
+        new_conclusion = new_fields.get('conclusion', '')
+        combined_content = (
+            f"{fields['content']}<p><strong>{addenda_tag} Contenido:</strong></p>{new_content}"
+        ).strip() if new_content else fields['content']
+        combined_conclusion = (
+            f"{fields['conclusion']}<p><strong>{addenda_tag} Conclusión:</strong></p>{new_conclusion}"
+        ).strip() if new_conclusion else fields['conclusion']
 
         cursor.execute(
             """
             UPDATE nextris.tbreport SET
-                findings = %s,
-                impressions = %s,
-                conclusions = %s,
-                techniques = COALESCE(%s, techniques),
+                content = %s,
+                conclusion = %s,
                 iduser = COALESCE(%s, iduser),
                 date = %s,
                 wassaved = TRUE
             WHERE guid = %s
             """,
             (
-                combined_findings,
-                combined_impressions,
-                combined_conclusions,
-                report_data.get('technique'),
+                combined_content,
+                combined_conclusion,
                 rad_guid,
                 report_date,
                 report_guid,
             ),
         )
 
+        _upsert_clinicaparque_order_link(
+            cursor, order_id or accession, patient_data.get('id'),
+            exam_guid, report_guid, accession,
+        )
         connection.commit()
         cursor.close()
         connection.close()
@@ -1794,8 +2393,7 @@ def clinicaparque_addenda():
         response = {
             'success': True,
             'message': 'Addenda anexada correctamente',
-            'examination_guid': exam_guid,
-            'report_guid': report_guid,
+            'orderId': order_id,
             'accession_number': accession,
         }
         _log_communication('/clinicaparque/addenda',
@@ -1892,11 +2490,15 @@ def clinicaparque_orders_to_execute_and_read():
       - accessionNumber      (requerido) - Número de acceso (clave DICOM)
       - procedure_code       (requerido) - Código del estudio/procedimiento
       - procedure_name       (requerido) - Descripción del estudio
+      - study_description    (opcional) - Descripción del estudio para resolver
+                                          el tipo local cuando el código aún no
+                                          existe en el catálogo de NextRIS
       - modality             (requerido) - Modalidad (CR, CT, MR, DX, etc.)
       - AET                  (requerido) - AE Title del equipo
       - scheduledTime        (requerido) - Fecha/hora programada (ISO 8601)
-      - rad_id               (requerido) - Identificador del radiólogo
-      - priority_id          (requerido) - Prioridad: 0=Rutina, 1=Urgente
+      - rad_id               (opcional) - Identificador del radiólogo; si se omite se guarda vacío/NULL
+      - priority_id          (opcional) - Prioridad: 0=Rutina, 1=Urgente (por defecto 0)
+      - lateralidad          (opcional) - Descripción externa de la lateralidad
       - study_reason         (opcional) - Razón o motivo del estudio
       - req_doctor           (opcional) - Nombre del médico referente
     """
@@ -1935,8 +2537,8 @@ def clinicaparque_orders_to_execute_and_read():
         else:
             patient_required = patient_required_base + complex_fields
 
-        order_required = ['orderId', 'accessionNumber', 'procedure_code', 'procedure_name',
-                         'modality', 'AET', 'scheduledTime', 'rad_id', 'priority_id']
+        order_required = ['orderId', 'accessionNumber', 'procedure_code',
+                         'modality', 'AET', 'scheduledTime']
 
         missing = []
         for f in patient_required:
@@ -1945,6 +2547,8 @@ def clinicaparque_orders_to_execute_and_read():
         for f in order_required:
             if not order_data.get(f):
                 missing.append(f'order.{f}')
+        if not _get_external_study_description(order_data):
+            missing.append('order.procedure_name o order.study_description')
 
         if missing:
             return jsonify({
@@ -1961,6 +2565,32 @@ def clinicaparque_orders_to_execute_and_read():
             except ValueError:
                 return jsonify({'success': False, 'message': 'birthdate debe tener formato YYYY-MM-DD'}), 400
 
+        # Los campos de integración opcionales se normalizan antes de tocar la
+        # base de datos para que los defaults sean consistentes en creación y
+        # actualización de órdenes existentes.
+        rad_id = str(order_data.get('rad_id') or '').strip()
+
+        raw_priority_id = order_data.get('priority_id', 0)
+        if raw_priority_id is None or raw_priority_id == '':
+            raw_priority_id = 0
+        if isinstance(raw_priority_id, bool):
+            return jsonify({'success': False, 'message': 'priority_id debe ser 0 o 1'}), 400
+        if isinstance(raw_priority_id, int):
+            priority_id = raw_priority_id
+        elif isinstance(raw_priority_id, str) and raw_priority_id.strip() in ('0', '1'):
+            priority_id = int(raw_priority_id.strip())
+        else:
+            return jsonify({'success': False, 'message': 'priority_id debe ser 0 o 1'}), 400
+        if priority_id not in (0, 1):
+            return jsonify({'success': False, 'message': 'priority_id debe ser 0 o 1'}), 400
+
+        if 'laterality_id' in order_data:
+            return jsonify({
+                'success': False,
+                'message': 'laterality_id no forma parte del contrato externo; use laterality o lateralidad'
+            }), 400
+        raw_laterality = order_data.get('laterality', order_data.get('lateralidad'))
+
         db_config = get_db_config()
         if not db_config:
             return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
@@ -1969,6 +2599,23 @@ def clinicaparque_orders_to_execute_and_read():
         cursor = connection.cursor()
 
         _ensure_patient_type_columns(cursor)
+        _ensure_clinicaparque_order_links(cursor)
+        laterality_id = _resolve_external_laterality(cursor, raw_laterality)
+
+        severity_guid = None
+        if priority_id == 1:
+            cursor.execute(
+                "SELECT guid FROM nextris.isseverity WHERE description ILIKE '%urgente%' LIMIT 1"
+            )
+            severity_row = cursor.fetchone()
+            if not severity_row:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'No está configurada la severidad urgente'
+                }), 500
+            severity_guid = severity_row[0]
 
         # === CREAR PACIENTE SI NO EXISTE ===
         external_id = patient_data['id'].strip()
@@ -2019,12 +2666,10 @@ def clinicaparque_orders_to_execute_and_read():
 
         # === BUSCAR TIPO DE ESTUDIO ===
         procedure_code = order_data['procedure_code'].strip()
-        cursor.execute(
-            "SELECT guid FROM nextris.isstudytype WHERE code = %s LIMIT 1",
-            (procedure_code,),
+        study_description = _get_external_study_description(order_data)
+        studytype_id = _resolve_external_studytype(
+            cursor, procedure_code, study_description,
         )
-        st_row = cursor.fetchone()
-        studytype_id = st_row[0] if st_row else None
 
         # === BUSCAR EQUIPO POR AET ===
         aet = order_data['AET'].strip()
@@ -2037,13 +2682,11 @@ def clinicaparque_orders_to_execute_and_read():
         location_id = eq_row[1] if eq_row else None
 
         # === BUSCAR RADIOLOGO ===
-        rad_id = order_data['rad_id'].strip()
-        cursor.execute(
-            "SELECT guid FROM nextris.tbuser WHERE guid = %s OR username = %s OR nationalnumber = %s LIMIT 1",
-            (rad_id, rad_id, rad_id),
-        )
-        rad_row = cursor.fetchone()
-        rad_guid = rad_row[0] if rad_row else None
+        # idreferringphysician es una referencia UUID; por eso un rad_id vacío
+        # se representa en la base como NULL.
+        rad_guid = None
+        if rad_id:
+            rad_guid = _resolve_external_physician(cursor, rad_id)
 
         # === EXTRAER RAZON DEL ESTUDIO Y DOCTOR REFERENTE ===
         study_reason = (order_data.get('study_reason') or '').strip()
@@ -2057,13 +2700,36 @@ def clinicaparque_orders_to_execute_and_read():
         exam_history = ' | '.join(exam_history_parts) if exam_history_parts else None
 
         # === GENERAR NUMERO DE ADMISION ===
+        order_id = order_data['orderId'].strip()
         accession = order_data['accessionNumber'].strip()
 
-        cursor.execute(
-            "SELECT guid FROM nextris.tbexamination WHERE localacc = %s LIMIT 1",
-            (accession,),
-        )
-        existing_exam_row = cursor.fetchone()
+        mapped_order = _find_clinicaparque_order(cursor, order_id=order_id)
+        if mapped_order:
+            existing_exam_row = (mapped_order[0],)
+            cursor.execute(
+                "SELECT guid FROM nextris.tbexamination WHERE localacc = %s LIMIT 1",
+                (accession,),
+            )
+            accession_exam = cursor.fetchone()
+            if accession_exam and str(accession_exam[0]) != str(mapped_order[0]):
+                connection.rollback()
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'success': False,
+                    'message': 'accessionNumber ya pertenece a otra orden'
+                }), 409
+            if mapped_order[2] != accession:
+                cursor.execute(
+                    "UPDATE nextris.tbexamination SET localacc = %s WHERE guid = %s",
+                    (accession, mapped_order[0]),
+                )
+        else:
+            cursor.execute(
+                "SELECT guid FROM nextris.tbexamination WHERE localacc = %s LIMIT 1",
+                (accession,),
+            )
+            existing_exam_row = cursor.fetchone()
         if existing_exam_row:
             existing_exam_guid = existing_exam_row[0]
             if exam_history:
@@ -2074,12 +2740,15 @@ def clinicaparque_orders_to_execute_and_read():
                         studytype_id = COALESCE(%s, studytype_id),
                         idequipment = COALESCE(%s, idequipment),
                         location_id = COALESCE(location_id, %s),
-                        idreferringphysician = COALESCE(%s, idreferringphysician),
+                        idreferringphysician = %s,
+                        idseverity = %s,
+                        laterality_id = %s,
                         requestingphysician_name = COALESCE(%s, requestingphysician_name),
                         history = COALESCE(history, '') || E'\n' || %s
                     WHERE guid = %s
                     """,
-                    (studytype_id, equipment_guid, location_id, rad_guid, req_doctor or None, exam_history, existing_exam_guid),
+                    (studytype_id, equipment_guid, location_id, rad_guid, severity_guid,
+                     laterality_id, req_doctor or None, exam_history, existing_exam_guid),
                 )
             else:
                 cursor.execute(
@@ -2089,25 +2758,31 @@ def clinicaparque_orders_to_execute_and_read():
                         studytype_id = COALESCE(%s, studytype_id),
                         idequipment = COALESCE(%s, idequipment),
                         location_id = COALESCE(location_id, %s),
-                        idreferringphysician = COALESCE(%s, idreferringphysician),
+                        idreferringphysician = %s,
+                        idseverity = %s,
+                        laterality_id = %s,
                         requestingphysician_name = COALESCE(%s, requestingphysician_name)
                     WHERE guid = %s
                     """,
-                    (studytype_id, equipment_guid, location_id, rad_guid, req_doctor or None, existing_exam_guid),
+                    (studytype_id, equipment_guid, location_id, rad_guid, severity_guid,
+                     laterality_id, req_doctor or None, existing_exam_guid),
                 )
             cursor.execute(
                 "SELECT guid FROM nextris.tbreport WHERE idexamination = %s LIMIT 1",
                 (existing_exam_guid,),
             )
             existing_report_row = cursor.fetchone()
+            _upsert_clinicaparque_order_link(
+                cursor, order_id, external_id, existing_exam_guid,
+                existing_report_row[0] if existing_report_row else None, accession,
+            )
             connection.commit()
             cursor.close()
             connection.close()
             response = {
                 'success': True,
                 'message': 'Orden asociada al examen existente',
-                'examination_guid': existing_exam_guid,
-                'report_guid': existing_report_row[0] if existing_report_row else None,
+                'orderId': order_id,
                 'accession_number': accession,
                 'updated': True,
                 'worklist_created': False,
@@ -2146,12 +2821,14 @@ def clinicaparque_orders_to_execute_and_read():
                 guid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, studyinstanceuid,
                 idreferringphysician,
+                idseverity, laterality_id,
                 status, isexecuted, isreported, createdon,
                 location_id, "w-order", history, requestingphysician_name
             ) VALUES (
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s,
+                %s, %s,
                 'Scheduled', 0, 0, NOW(),
                 %s, 1, %s, %s
             )
@@ -2160,6 +2837,7 @@ def clinicaparque_orders_to_execute_and_read():
                 exam_guid, patient_guid, studytype_id, equipment_guid,
                 adm_number, accession, None,
                 rad_guid,
+                severity_guid, laterality_id,
                 location_id,
                 exam_history,
                 req_doctor or None,
@@ -2178,6 +2856,9 @@ def clinicaparque_orders_to_execute_and_read():
             """,
             (report_guid, exam_guid, patient_guid, adm_number),
         )
+        _upsert_clinicaparque_order_link(
+            cursor, order_id, external_id, exam_guid, report_guid, accession,
+        )
 
         # === ENVIAR A WORKLIST HL7 ===
         worklist_success = False
@@ -2194,7 +2875,7 @@ def clinicaparque_orders_to_execute_and_read():
         try:
             study_instance_uid, worklist_success = HL7Service.send_exam_to_worklist(
                 patient_data=patient_tuple,
-                exam_data=order_data.get('procedure_name', ''),
+                exam_data=study_description or '',
                 equipment_data=aet,
                 modality_data=order_data['modality'],
                 admission_number=adm_number,
@@ -2217,11 +2898,9 @@ def clinicaparque_orders_to_execute_and_read():
         response = {
             'success': True,
             'message': 'Orden creada exitosamente',
-            'examination_guid': exam_guid,
-            'report_guid': report_guid,
+            'orderId': order_id,
             'admision_number': adm_number,
             'accession_number': accession,
-            'patient_guid': patient_guid,
             'worklist_created': worklist_success,
             'study_instance_uid': str(study_instance_uid) if study_instance_uid else None,
         }
@@ -2282,7 +2961,6 @@ def clinicaparque_create_patient_from_dicom():
     {
         "success": true,
         "message": "Paciente creado exitosamente",
-        "guid": "...",
         "patientid": "NR00000001",
         "username": "57458",
         "dicom_patient_id": "57458",
@@ -2409,7 +3087,6 @@ def clinicaparque_create_patient_from_dicom():
             return jsonify({
                 'success': False,
                 'message': f'Ya existe un paciente con PatientID DICOM: {dicom_patient_id}',
-                'guid': existing[0],
                 'patientid': existing[1],
             }), 400
 
@@ -2424,7 +3101,6 @@ def clinicaparque_create_patient_from_dicom():
             return jsonify({
                 'success': False,
                 'message': f'Ya existe un paciente con nationalcode: {dicom_patient_id}',
-                'guid': existing_nc[0],
                 'patientid': existing_nc[1],
             }), 400
 
@@ -2483,7 +3159,6 @@ def clinicaparque_create_patient_from_dicom():
         response = {
             'success': True,
             'message': 'Paciente creado exitosamente desde DICOM',
-            'guid': patient_guid,
             'patientid': dicom_patient_id,
             'username': username,
             'source': 'dicom',
@@ -2676,6 +3351,7 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
     if owns_connection:
         connection = psycopg2.connect(**db_config)
     cursor = connection.cursor()
+    _ensure_clinicaparque_order_links(cursor)
 
     try:
         cursor.execute("""
@@ -2688,10 +3364,15 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 dp.birthdate,
                 dp.sexcode,
-                st.description as study_description
+                st.description as study_description,
+                l.external_order_id,
+                ex.clinicalquestion,
+                ex.history
             FROM nextris.tbexamination ex
             LEFT JOIN nextris.datapatient dp ON ex.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
+            LEFT JOIN nextris.clinicaparque_order_links l
+                ON l.examination_guid = ex.guid AND l.source = 'clinicaparque'
             WHERE ex.guid = %s
             LIMIT 1
         """, (exam_id,))
@@ -2700,14 +3381,17 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
         if not exam_row:
             return {'success': False, 'external_status': 404, 'viewer_link': '', 'error': 'Examen no encontrado'}
 
-        exam_guid, accession_number, study_uid, patient_id, patient_dni, patient_name, birthdate, sexcode, study_description = exam_row
+        exam_guid, accession_number, study_uid, patient_id, patient_dni, patient_name, birthdate, sexcode, study_description, external_order_id, clinical_question, history = exam_row
 
         cursor.execute("""
             SELECT
+                r.study_reason,
+                r.content,
+                r.conclusion,
                 r.findings,
+                r.techniques,
                 r.impressions,
                 r.conclusions,
-                r.techniques,
                 r.date,
                 r.createdon,
                 r.iduser
@@ -2717,13 +3401,19 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
         """, (exam_id,))
         report_row = cursor.fetchone()
 
-        findings = report_row[0] if report_row else ''
-        impressions = report_row[1] if report_row else ''
-        conclusions = report_row[2] if report_row else ''
-        techniques = report_row[3] if report_row else ''
-        report_date = report_row[4].isoformat() if report_row and report_row[4] else None
-        report_created = report_row[5].isoformat() if report_row and report_row[5] else None
-        rad_guid = report_row[6] if report_row else None
+        fields = canonical_fields_from_row(
+            report_row[0] if report_row else None,
+            report_row[1] if report_row else None,
+            report_row[2] if report_row else None,
+            legacy_findings=report_row[3] if report_row else None,
+            legacy_technique=report_row[4] if report_row else None,
+            legacy_impressions=report_row[5] if report_row else None,
+            legacy_conclusion=report_row[6] if report_row else None,
+            reason_fallback=clinical_question or history or study_description,
+        )
+        report_date = report_row[7].isoformat() if report_row and report_row[7] else None
+        report_created = report_row[8].isoformat() if report_row and report_row[8] else None
+        rad_guid = report_row[9] if report_row else None
 
         rad_id = ''
         if rad_guid:
@@ -2754,13 +3444,17 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
                 'accession_number': accession_number or ''
             },
             'report': {
-                'study_reason': study_description or '',
-                'technique': techniques or '',
-                'findings': findings or '',
-                'impressions': impressions or '',
-                'conclusions': conclusions or '',
+                'study_reason': fields['study_reason'] or '',
+                'technique': '',
+                'findings': fields['content'] or '',
+                'impressions': '',
+                'conclusions': fields['conclusion'] or '',
                 'report_date': report_date or report_created or '',
                 'study_uid': study_uid or ''
+            },
+            'order': {
+                'orderId': external_order_id or '',
+                'accessionNumber': accession_number or '',
             },
             'rad_id': rad_id,
             'viewer_link': viewer_link
@@ -2788,7 +3482,10 @@ def _send_report_to_external(exam_id, connection=None, created_by='system'):
                           patient_id=patient_id,
                           patient_name=patient_name,
                           accession_number=accession_number,
-                          request_body=str({'exam_id': exam_id}),
+                          request_body=str({
+                              'orderId': external_order_id,
+                              'accessionNumber': accession_number,
+                          }),
                           response_status=ext_status,
                           response_body=ext_body,
                           success=ext_success,
@@ -2822,7 +3519,8 @@ def clinicaparque_send_report():
 
     Body:
     {
-        "exam_id": "GUID del examen"
+        "orderId": "ORD-2026-001",
+        "accessionNumber": "ACC123456"
     }
     """
     try:
@@ -2830,9 +3528,25 @@ def clinicaparque_send_report():
         if not payload:
             return jsonify({'success': False, 'message': 'JSON inválido o vacío'}), 400
 
-        exam_id = payload.get('exam_id')
-        if not exam_id:
-            return jsonify({'success': False, 'message': 'exam_id es requerido'}), 400
+        order_id = str(payload.get('orderId') or '').strip()
+        accession = str(payload.get('accessionNumber') or '').strip()
+        if not order_id and not accession:
+            return jsonify({'success': False, 'message': 'orderId o accessionNumber es requerido'}), 400
+
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        _ensure_clinicaparque_order_links(cursor)
+        order_row = _find_clinicaparque_order(
+            cursor, order_id=order_id, accession=accession,
+        )
+        cursor.close()
+        connection.close()
+        if not order_row:
+            return jsonify({'success': False, 'message': 'No se encontró la orden'}), 404
+        exam_id = order_row[0]
 
         result = _send_report_to_external(exam_id)
 

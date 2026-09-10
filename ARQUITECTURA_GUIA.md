@@ -78,7 +78,6 @@ from .hl7_service import HL7Service
 **🔧 Métodos principales:**
 ```python
 ConfigService.get_db_config()      # Configuración BD
-ConfigService.get_base_folder()    # Carpeta PDF
 ConfigService.get_ipserver()       # IP servidor HL7
 ConfigService.update_config()      # Actualizar config
 ```
@@ -250,7 +249,6 @@ from apps.home.utils import get_segment
 ```python
 # Variables globales para compatibilidad con código legacy
 config = ConfigService.get_db_config()
-BASE_FOLDER = ConfigService.get_base_folder()
 IPSERVER = ConfigService.get_ipserver()
 ```
 
@@ -418,7 +416,6 @@ config = ConfigService.get_all_config()
 
 # Actualizar configuración  
 ConfigService.update_config({
-    'BASE_FOLDER': '/new/path',
     'IPSERVER': '192.168.1.100'
 })
 ```

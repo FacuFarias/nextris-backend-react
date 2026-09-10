@@ -139,8 +139,6 @@ basededatos.db
 db.sqlite3
 
 # Output generado
-output_pdfs/*
-!output_pdfs/.gitkeep
 
 # Media uploads
 media/firmas/*

@@ -10,7 +10,7 @@ import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import secrets
@@ -19,13 +19,14 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from apps.api import api_blueprint
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from apps.api.viewer_share_service import (
     create_for_exam as create_share_for_exam,
     default_expiration_hours,
     short_share_url as build_share_url,
     token_hash as hash_share_token,
 )
+from apps.api.permissions import require_permission
 
 # Cache temporal en memoria para tokens de visor (en producción usar Redis)
 viewer_tokens_cache = {}
@@ -47,6 +48,36 @@ def _get_client_ip():
     if forwarded_for:
         return forwarded_for.split(',')[0].strip()
     return request.remote_addr
+
+
+def _identity_id():
+    identity = get_jwt_identity()
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
+
+
+def _is_external_access_admin(cursor):
+    """Gestión de accesos compartidos: solo personal administrativo."""
+    user_id = _identity_id()
+    if not user_id:
+        return False
+    cursor.execute(
+        """
+        SELECT LOWER(TRIM(COALESCE(r.description, '')))
+        FROM nextris.tbuser u
+        LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+        WHERE u.guid = %s
+        LIMIT 1
+        """,
+        (str(user_id),),
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0] in ('sysadmin', 'admin', 'administrador'))
+
+
+def _iso_utc(value):
+    return value.isoformat() + 'Z' if value else None
 
 
 def _hash_share_token(raw_token):
@@ -289,7 +320,7 @@ def _load_share_scope(raw_token):
     try:
         cursor.execute(
             """
-            SELECT guid, study_iuid, expires_at, revoked
+            SELECT guid, study_iuid, expires_at, revoked, share_type
             FROM nextris.tbviewer_share_link
             WHERE token_hash = %s OR short_code = %s
             LIMIT 1
@@ -299,7 +330,12 @@ def _load_share_scope(raw_token):
         row = cursor.fetchone()
         if not row or row[3] or not row[2] or datetime.utcnow() >= row[2]:
             return None
-        return {'guid': row[0], 'study_iuid': str(row[1]), 'expires_at': row[2]}
+        return {
+            'guid': row[0],
+            'study_iuid': str(row[1]),
+            'expires_at': row[2],
+            'share_type': row[4] or 'image_share',
+        }
     finally:
         cursor.close()
         connection.close()
@@ -759,8 +795,7 @@ def validate_viewer_session():
 def get_viewer_url_by_iuid():
     """
     Obtener URL del visor DICOM usando study_iuid de PACS directamente.
-    Verifica que el estudio exista en public.study y que el usuario tenga
-    acceso a la location asignada (si tiene location_id asignada).
+    Verifica únicamente que el estudio exista en public.study.
 
     Body JSON:
     {
@@ -781,7 +816,7 @@ def get_viewer_url_by_iuid():
 
         # Buscar el estudio en PACS
         cursor.execute(
-            "SELECT pk, location_id FROM public.study WHERE study_iuid = %s",
+            "SELECT pk FROM public.study WHERE study_iuid = %s",
             (study_iuid,)
         )
         result = cursor.fetchone()
@@ -790,8 +825,6 @@ def get_viewer_url_by_iuid():
             cursor.close()
             connection.close()
             return jsonify({'success': False, 'message': 'Estudio no encontrado en PACS'}), 404
-
-        location_id = result[1]
 
         user_type = get_jwt().get('user_type', '').lower()
 
@@ -810,20 +843,6 @@ def get_viewer_url_by_iuid():
                 return jsonify({
                     'success': False,
                     'message': 'No tiene permisos para ver las imágenes de este estudio'
-                }), 403
-        elif location_id:
-            cursor.execute(
-                "SELECT 1 FROM nextris.rel_user_location WHERE user_id = %s AND location_id = %s",
-                (user_id, str(location_id))
-            )
-            has_permission = cursor.fetchone()
-            cursor.close()
-            connection.close()
-
-            if not has_permission:
-                return jsonify({
-                    'success': False,
-                    'message': 'No tiene permisos para ver las imágenes de esta ubicación'
                 }), 403
         else:
             cursor.close()
@@ -848,6 +867,7 @@ def get_viewer_url_by_iuid():
 
 @api_blueprint.route('/general/viewer-share-links', methods=['POST'])
 @jwt_required()
+@require_permission('images.share_link', include_role_permissions=True)
 def create_viewer_share_link():
     """
     Crea un enlace temporal para compartir acceso al visor de un estudio PACS.
@@ -862,6 +882,10 @@ def create_viewer_share_link():
     }
     """
     try:
+        user_id = _identity_id()
+        if not user_id:
+            return jsonify({'success': False, 'message': 'No se pudo identificar al usuario'}), 401
+
         data = request.get_json() or {}
         study_iuid = (data.get('study_iuid') or '').strip()
         reason = (data.get('reason') or '').strip() or None
@@ -879,7 +903,6 @@ def create_viewer_share_link():
         if expires_hours < 1 or expires_hours > 8760:
             return jsonify({'success': False, 'message': 'expires_hours debe estar entre 1 y 8760'}), 400
 
-        user_id = str(get_jwt_identity())
         db_config = get_db_config()
 
         connection = psycopg2.connect(**db_config)
@@ -907,21 +930,6 @@ def create_viewer_share_link():
         study_desc = study_row[2] or ''
         patient_name = study_row[3] or ''
 
-        if location_id:
-            cursor.execute(
-                "SELECT 1 FROM nextris.rel_user_location WHERE user_id = %s AND location_id = %s",
-                (user_id, str(location_id))
-            )
-            has_permission = cursor.fetchone()
-
-            if not has_permission:
-                cursor.close()
-                connection.close()
-                return jsonify({
-                    'success': False,
-                    'message': 'No tiene permisos para compartir estudios de esta ubicación'
-                }), 403
-
         raw_token = secrets.token_urlsafe(32)
         short_code = secrets.token_urlsafe(7)
         token_hash = _hash_share_token(raw_token)
@@ -929,12 +937,14 @@ def create_viewer_share_link():
         expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
         ip_address = _get_client_ip()
 
-        # Solo un enlace activo por estudio: regenerar invalida el anterior.
+        # Solo un enlace activo por estudio y tipo: regenerar invalida el anterior.
         cursor.execute(
             """
             UPDATE nextris.tbviewer_share_link
             SET revoked = TRUE, revoked_at = NOW()
-            WHERE study_iuid = %s AND revoked = FALSE
+            WHERE study_iuid = %s
+              AND share_type = 'image_share'
+              AND revoked = FALSE
             """,
             (study_iuid,),
         )
@@ -954,8 +964,9 @@ def create_viewer_share_link():
                 open_count,
                 reason,
                 patient_email,
-                created_ip
-            ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, FALSE, 0, %s, %s, %s)
+                created_ip,
+                share_type
+            ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, FALSE, 0, %s, %s, %s, 'image_share')
             RETURNING short_code
             """,
             (
@@ -1044,6 +1055,271 @@ def create_viewer_share_link():
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
+def _shared_access_rows_cte(status):
+    status_clauses = {
+        'active': "sl.revoked = FALSE AND sl.expires_at > NOW()",
+        'active_or_revoked': "(sl.revoked = TRUE OR (sl.revoked = FALSE AND sl.expires_at > NOW()))",
+        'expired': "sl.revoked = FALSE AND sl.expires_at <= NOW()",
+        'revoked': "sl.revoked = TRUE",
+    }
+    status_sql = status_clauses.get(status)
+    status_filter = f"AND {status_sql}" if status_sql else ''
+    return f"""
+        WITH link_rows AS (
+            SELECT
+                sl.guid,
+                sl.share_type,
+                sl.short_code,
+                sl.study_iuid,
+                COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ', dp.name, dp.surname)), ''),
+                    pn.alphabetic_name,
+                    ''
+                ) AS patient_name,
+                COALESCE(dp.patientid, '') AS patient_id,
+                COALESCE(ex.localacc, '') AS accession_number,
+                COALESCE(st.description, ps.study_desc, '') AS study_description,
+                sl.created_at,
+                sl.expires_at,
+                sl.revoked_at,
+                COALESCE(sl.open_count, 0) AS open_count,
+                sl.last_opened_at,
+                CASE
+                    WHEN sl.revoked THEN 'revoked'
+                    WHEN sl.expires_at <= NOW() THEN 'expired'
+                    ELSE 'active'
+                END AS status
+            FROM nextris.tbviewer_share_link sl
+            LEFT JOIN LATERAL (
+                SELECT
+                    ex.guid,
+                    ex.localacc,
+                    ex.idpatient,
+                    ex.studytype_id,
+                    ex.createdon
+                FROM nextris.tbexamination ex
+                WHERE ex.studyinstanceuid = sl.study_iuid
+                ORDER BY ex.createdon DESC NULLS LAST
+                LIMIT 1
+            ) ex ON TRUE
+            LEFT JOIN nextris.datapatient dp ON dp.guid = ex.idpatient
+            LEFT JOIN public.study ps ON ps.study_iuid = sl.study_iuid
+            LEFT JOIN public.patient p ON p.pk = ps.patient_fk
+            LEFT JOIN public.person_name pn ON pn.pk = p.pat_name_fk
+            LEFT JOIN nextris.isstudytype st ON st.guid = ex.studytype_id
+            WHERE sl.share_type = %s
+              {status_filter}
+        )
+    """
+
+
+@api_blueprint.route('/general/shared-access-links', methods=['GET'])
+@jwt_required()
+def list_shared_access_links():
+    """Lista el historial administrativo de enlaces compartidos."""
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        if not _is_external_access_admin(cursor):
+            return jsonify({'success': False, 'message': 'No autorizado'}), 403
+
+        share_type = (request.args.get('type') or 'case_link').strip().lower()
+        if share_type not in ('case_link', 'image_share'):
+            return jsonify({'success': False, 'message': 'Tipo de enlace inválido'}), 400
+
+        status = (request.args.get('status') or 'active').strip().lower()
+        include_revoked = (request.args.get('include_revoked') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+        if include_revoked and status == 'active':
+            status = 'active_or_revoked'
+        if status not in ('all', 'active', 'active_or_revoked', 'expired', 'revoked'):
+            return jsonify({'success': False, 'message': 'Estado inválido'}), 400
+
+        try:
+            page = max(1, int(request.args.get('page', 1)))
+            per_page = min(100, max(1, int(request.args.get('per_page', 20))))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'page y per_page deben ser numéricos'}), 400
+
+        search = (request.args.get('search') or '').strip()
+        search_pattern = f'%{search}%'
+        search_sql = """
+            AND (
+                patient_name ILIKE %s
+                OR patient_id ILIKE %s
+                OR accession_number ILIKE %s
+                OR study_description ILIKE %s
+                OR study_iuid ILIKE %s
+            )
+        """ if search else ''
+        search_params = [search_pattern] * 5 if search else []
+        cte = _shared_access_rows_cte(status)
+        base_params = [share_type]
+
+        cursor.execute(
+            cte + f"SELECT COUNT(*) FROM link_rows WHERE TRUE {search_sql}",
+            base_params + search_params,
+        )
+        total = int(cursor.fetchone()[0] or 0)
+
+        cursor.execute(
+            cte + f"""
+                SELECT guid, share_type, short_code, study_iuid, patient_name,
+                       patient_id, accession_number, study_description, created_at,
+                       expires_at, revoked_at, open_count, last_opened_at, status
+                FROM link_rows
+                WHERE TRUE {search_sql}
+                ORDER BY created_at DESC, guid DESC
+                LIMIT %s OFFSET %s
+            """,
+            base_params + search_params + [per_page, (page - 1) * per_page],
+        )
+        rows = cursor.fetchall()
+        items = []
+        for row in rows:
+            item = {
+                'guid': str(row[0]),
+                'type': row[1],
+                'short_code': row[2],
+                'study_iuid': row[3],
+                'patient_name': row[4] or None,
+                'patient_id': row[5] or None,
+                'accession_number': row[6] or None,
+                'study_description': row[7] or None,
+                'created_at': _iso_utc(row[8]),
+                'expires_at': _iso_utc(row[9]),
+                'revoked_at': _iso_utc(row[10]),
+                'open_count': int(row[11] or 0),
+                'last_opened_at': _iso_utc(row[12]),
+                'status': row[13],
+            }
+            public_base = _get_public_api_url()
+            if item['short_code']:
+                item['public_url'] = (
+                    f"{public_base}/case/{quote(item['short_code'], safe='')}"
+                    if item['type'] == 'case_link'
+                    else f"{public_base}/api/s/{quote(item['short_code'], safe='')}"
+                )
+            else:
+                item['public_url'] = None
+            items.append(item)
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'pages': (total + per_page - 1) // per_page,
+            },
+        }), 200
+    except Exception as exc:
+        print(f"[SHARED ACCESS LIST] Error: {exc}")
+        return jsonify({'success': False, 'message': 'No se pudieron cargar los accesos compartidos'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/general/shared-access-links/<share_guid>', methods=['PATCH'])
+@jwt_required()
+def extend_shared_access_link(share_guid):
+    """Actualiza la fecha de vencimiento de un enlace no revocado."""
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        raw_expires_at = data.get('expires_at')
+        if not raw_expires_at or not isinstance(raw_expires_at, str):
+            return jsonify({'success': False, 'message': 'expires_at es requerido'}), 400
+        try:
+            parsed_expires_at = datetime.fromisoformat(raw_expires_at.replace('Z', '+00:00'))
+            if parsed_expires_at.tzinfo:
+                parsed_expires_at = parsed_expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            return jsonify({'success': False, 'message': 'expires_at no tiene un formato válido'}), 400
+        if parsed_expires_at <= datetime.utcnow():
+            return jsonify({'success': False, 'message': 'La nueva fecha debe ser futura'}), 400
+
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        if not _is_external_access_admin(cursor):
+            return jsonify({'success': False, 'message': 'No autorizado'}), 403
+        cursor.execute(
+            """
+            UPDATE nextris.tbviewer_share_link
+            SET expires_at = %s
+            WHERE guid = %s AND revoked = FALSE
+            RETURNING guid, expires_at
+            """,
+            (parsed_expires_at, share_guid),
+        )
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute(
+                "SELECT revoked FROM nextris.tbviewer_share_link WHERE guid = %s",
+                (share_guid,),
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                return jsonify({'success': False, 'message': 'Enlace no encontrado'}), 404
+            return jsonify({'success': False, 'message': 'No se puede extender un enlace revocado'}), 409
+        connection.commit()
+        return jsonify({'success': True, 'data': {'guid': str(row[0]), 'expires_at': _iso_utc(row[1])}}), 200
+    except Exception as exc:
+        if connection:
+            connection.rollback()
+        print(f"[SHARED ACCESS EXTEND] Error: {exc}")
+        return jsonify({'success': False, 'message': 'No se pudo extender el enlace'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/general/shared-access-links/<share_guid>/revoke', methods=['POST'])
+@jwt_required()
+def revoke_shared_access_link(share_guid):
+    """Revoca inmediatamente un enlace compartido desde Gestión."""
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        if not _is_external_access_admin(cursor):
+            return jsonify({'success': False, 'message': 'No autorizado'}), 403
+        cursor.execute(
+            """
+            UPDATE nextris.tbviewer_share_link
+            SET revoked = TRUE,
+                revoked_at = COALESCE(revoked_at, NOW())
+            WHERE guid = %s
+            RETURNING guid, revoked_at
+            """,
+            (share_guid,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Enlace no encontrado'}), 404
+        connection.commit()
+        return jsonify({'success': True, 'data': {'guid': str(row[0]), 'revoked_at': _iso_utc(row[1])}}), 200
+    except Exception as exc:
+        if connection:
+            connection.rollback()
+        print(f"[SHARED ACCESS REVOKE] Error: {exc}")
+        return jsonify({'success': False, 'message': 'No se pudo revocar el enlace'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 @api_blueprint.route('/general/viewer-share-links/active', methods=['GET'])
 @jwt_required()
 def get_active_viewer_share_links():
@@ -1075,7 +1351,6 @@ def get_active_viewer_share_links():
         if not study_iuids:
             return jsonify({'success': True, 'data': {}}), 200
 
-        user_id = str(get_jwt_identity())
         db_config = get_db_config()
 
         connection = psycopg2.connect(**db_config)
@@ -1084,24 +1359,17 @@ def get_active_viewer_share_links():
 
         cursor.execute(
             """
-            WITH allowed_studies AS (
-                SELECT DISTINCT s.study_iuid
-                FROM public.study s
-                INNER JOIN nextris.rel_user_location rul
-                    ON rul.location_id::text = s.location_id::text
-                WHERE rul.user_id = %s
-                  AND s.study_iuid = ANY(%s)
-            )
             SELECT DISTINCT ON (sl.study_iuid)
                 sl.study_iuid,
                 sl.expires_at
             FROM nextris.tbviewer_share_link sl
-            INNER JOIN allowed_studies a ON a.study_iuid = sl.study_iuid
-            WHERE sl.revoked = FALSE
+            WHERE sl.study_iuid = ANY(%s)
+              AND sl.revoked = FALSE
+              AND sl.share_type = 'image_share'
               AND sl.expires_at > NOW()
             ORDER BY sl.study_iuid, sl.created_at DESC
             """,
-            (user_id, study_iuids),
+            (study_iuids,),
         )
 
         active_map = {study_iuid: {'is_active': False} for study_iuid in study_iuids}
@@ -1205,10 +1473,256 @@ def open_shared_viewer(raw_token=None, short_code=None):
             connection.close()
 
 
-def _report_share_row(report_id, user_id, cursor):
+def _get_public_case_scope(short_code):
+    """Carga y valida la credencial pública de un Case Link."""
+    scope = _load_share_scope(short_code)
+    if not scope or scope.get('share_type') != 'case_link':
+        return None
+    return scope
+
+
+@api_blueprint.route('/reports/<exam_id>/case-link', methods=['POST'])
+@jwt_required()
+@require_permission('images.share_link', include_role_permissions=True)
+def create_staff_case_link(exam_id):
+    """Genera un Case Link para personal autorizado sobre la ubicación del examen."""
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        user_id = str(get_jwt_identity())
+        cursor.execute(
+            """
+            SELECT ex.guid, ex.studyinstanceuid
+            FROM nextris.tbexamination ex
+            WHERE ex.guid = %s
+            LIMIT 1
+            """,
+            (str(exam_id),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Examen o estudio no encontrado'}), 404
+        if not row[1]:
+            return jsonify({'success': False, 'message': 'El estudio no tiene imágenes disponibles'}), 400
+
+        share_data = create_share_for_exam(
+            exam_id,
+            created_by=user_id,
+            connection=connection,
+            share_type='case_link',
+        )
+        connection.commit()
+        public_base = _get_public_api_url().rstrip('/')
+        short_code = quote(str(share_data['short_code']), safe='')
+        return jsonify({
+            'success': True,
+            'data': {
+                'case_url': f'{public_base}/case/{short_code}',
+                'share_url': share_data['share_url'],
+                'expires_at': share_data['expires_at'].isoformat() + 'Z',
+                'expires_hours': share_data['expires_hours'],
+            },
+        }), 201
+    except Exception as exc:
+        if connection:
+            connection.rollback()
+        print(f'[STAFF CASE LINK] Error creando enlace: {exc}')
+        return jsonify({'success': False, 'message': 'No se pudo generar el enlace del caso'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/s/<short_code>/case', methods=['GET'])
+def get_public_case(short_code):
+    """Devuelve los datos públicos del estudio asociado a un Case Link."""
+    scope = _get_public_case_scope(short_code)
+    if not scope:
+        return jsonify({'success': False, 'message': 'Enlace inválido o expirado'}), 404
+
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            UPDATE nextris.tbviewer_share_link
+            SET open_count = COALESCE(open_count, 0) + 1,
+                last_opened_at = NOW(),
+                last_opened_ip = %s
+            WHERE guid = %s
+            """,
+            (_get_client_ip(), scope['guid']),
+        )
+        _insert_share_access_log(
+            cursor,
+            scope['guid'],
+            True,
+            _get_client_ip(),
+            request.headers.get('User-Agent'),
+        )
+        connection.commit()
+        cursor.execute("""
+            SELECT
+                ex.guid,
+                ex.localacc,
+                COALESCE(NULLIF(TRIM(CONCAT(COALESCE(dp.name, ''), ' ', COALESCE(dp.surname, ''))), ''), pn.alphabetic_name, '') AS patient_name,
+                COALESCE(dp.patientid, '') AS patient_id,
+                COALESCE(dp.sexcode, '') AS sex,
+                dp.birthdate,
+                COALESCE(st.description, ps.study_desc, '') AS study_description,
+                COALESCE(m.description, first_series.modality, '') AS modality,
+                ps.study_date,
+                ps.study_time,
+                COALESCE(u_ref.name || ' ' || COALESCE(u_ref.surname, ''), '') AS referring_physician,
+                COALESCE(l.name, '') AS location_name,
+                COALESCE(f.name, '') AS facility_name,
+                COALESCE(ex.isreported, 0),
+                CASE WHEN COALESCE(ex.isreported, 0) = 1 AND r.guid IS NOT NULL
+                     THEN TRUE ELSE FALSE END AS report_available,
+                (SELECT COUNT(*)
+                 FROM public.instance i
+                 INNER JOIN public.series sr ON sr.pk = i.series_fk
+                 WHERE sr.study_fk = ps.pk) AS image_count
+            FROM nextris.tbviewer_share_link sl
+            INNER JOIN nextris.tbexamination ex ON ex.studyinstanceuid = sl.study_iuid
+            LEFT JOIN nextris.datapatient dp ON dp.guid = ex.idpatient
+            LEFT JOIN public.study ps ON ps.study_iuid = sl.study_iuid
+            LEFT JOIN public.patient p ON p.pk = ps.patient_fk
+            LEFT JOIN public.person_name pn ON pn.pk = p.pat_name_fk
+            LEFT JOIN nextris.isstudytype st ON st.guid = ex.studytype_id
+            LEFT JOIN nextris.ismodality m ON m.guid = st.modality_id
+            LEFT JOIN LATERAL (
+                SELECT sr.modality
+                FROM public.series sr
+                WHERE sr.study_fk = ps.pk
+                LIMIT 1
+            ) first_series ON TRUE
+            LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = ex.idreferringphysician
+            LEFT JOIN nextris.isequipment eq ON eq.guid = ex.idequipment
+            LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(ex.location_id, eq.location_id)
+            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            WHERE sl.short_code = %s
+              AND sl.study_iuid = %s
+            ORDER BY ex.createdon DESC
+            LIMIT 1
+        """, (short_code, scope['study_iuid']))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Estudio no encontrado'}), 404
+
+        report_available = bool(row[14])
+        public_base = _get_public_api_url()
+        return jsonify({
+            'success': True,
+            'data': {
+                'expires_at': scope['expires_at'].isoformat() + 'Z',
+                'patient': {
+                    'name': row[2],
+                    'id': row[3],
+                    'sex': row[4] or None,
+                    'birthdate': row[5].isoformat() if row[5] and hasattr(row[5], 'isoformat') else (str(row[5]) if row[5] else None),
+                },
+                'study': {
+                    'accession_number': row[1],
+                    'date': str(row[8]) if row[8] else None,
+                    'time': str(row[9]) if row[9] else None,
+                    'description': row[6],
+                    'modality': row[7],
+                    'image_count': int(row[15] or 0),
+                },
+                'exam': {
+                    'id': str(row[0]),
+                    'facility': row[12] or None,
+                    'institution': row[11] or None,
+                    'referring_physician': row[10].strip() or None,
+                },
+                'report_available': report_available,
+                'viewer_url': f'{public_base}/api/s/{quote(short_code, safe="")}/viewer',
+                'report_url': f'{public_base}/api/s/{quote(short_code, safe="")}/report' if report_available else None,
+            },
+        }), 200
+    except Exception as error:
+        print(f'[PUBLIC CASE] Error obteniendo datos: {error}')
+        return jsonify({'success': False, 'message': 'No se pudo cargar el caso'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/s/<short_code>/viewer', methods=['GET'])
+def open_public_case_viewer(short_code):
+    """Abre el visor DICOM limitado al estudio del Case Link."""
+    scope = _get_public_case_scope(short_code)
+    if not scope:
+        return '<h1>Enlace inválido o expirado</h1>', 404
+
+    viewer_params = urlencode({
+        'StudyInstanceUIDs': scope['study_iuid'],
+        'share_token': short_code,
+    })
+    return redirect(f'{_get_viewer_base_url()}/viewer?{viewer_params}', code=302)
+
+
+@api_blueprint.route('/s/<short_code>/report', methods=['GET'])
+def get_public_case_report(short_code):
+    """Devuelve el reporte disponible del Case Link sin requerir JWT."""
+    scope = _get_public_case_scope(short_code)
+    if not scope:
+        return jsonify({'success': False, 'message': 'Enlace inválido o expirado'}), 404
+
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT r.guid, ex.guid, ex.localacc
+            FROM nextris.tbexamination ex
+            INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
+            WHERE ex.studyinstanceuid = %s
+              AND ex.isreported = 1
+            ORDER BY ex.createdon DESC
+            LIMIT 1
+        """, (scope['study_iuid'],))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return jsonify({'success': False, 'message': 'Reporte no disponible'}), 404
+
+        from io import BytesIO
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(row[1])
+        except ReportPdfNotAvailable:
+            return jsonify({'success': False, 'message': 'Reporte no disponible', 'code': 'REPORT_NOT_AVAILABLE'}), 404
+        response = send_file(
+            BytesIO(rendered.content),
+            as_attachment=request.args.get('download', '').lower() in ('1', 'true', 'yes', 'on'),
+            download_name=rendered.filename,
+            mimetype='application/pdf',
+            max_age=0,
+        )
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def _report_share_row(report_id, cursor):
     cursor.execute(
         """
-        SELECT ex.studyinstanceuid, ex.location_id
+        SELECT ex.studyinstanceuid
         FROM nextris.tbexamination ex
         WHERE ex.guid = %s
         LIMIT 1
@@ -1218,17 +1732,6 @@ def _report_share_row(report_id, user_id, cursor):
     row = cursor.fetchone()
     if not row or not row[0]:
         return None
-    if row[1]:
-        cursor.execute(
-            """
-            SELECT 1 FROM nextris.rel_user_location
-            WHERE user_id = %s AND location_id = %s
-            LIMIT 1
-            """,
-            (str(user_id), str(row[1])),
-        )
-        if not cursor.fetchone():
-            return False
     return row
 
 
@@ -1240,9 +1743,7 @@ def create_report_share_link(report_id):
     try:
         connection = psycopg2.connect(**get_db_config())
         cursor = connection.cursor()
-        row = _report_share_row(report_id, get_jwt_identity(), cursor)
-        if row is False:
-            return jsonify({'success': False, 'message': 'No tiene permisos para compartir este estudio'}), 403
+        row = _report_share_row(report_id, cursor)
         if not row:
             return jsonify({'success': False, 'message': 'Reporte o estudio no encontrado'}), 404
         result = create_share_for_exam(
@@ -1270,9 +1771,7 @@ def get_report_share_link(report_id):
     try:
         connection = psycopg2.connect(**get_db_config())
         cursor = connection.cursor()
-        row = _report_share_row(report_id, get_jwt_identity(), cursor)
-        if row is False:
-            return jsonify({'success': False, 'message': 'No tiene permisos para consultar este estudio'}), 403
+        row = _report_share_row(report_id, cursor)
         if not row:
             return jsonify({'success': False, 'message': 'Reporte o estudio no encontrado'}), 404
         cursor.execute(
@@ -1280,7 +1779,10 @@ def get_report_share_link(report_id):
             SELECT guid, study_iuid, expires_at, revoked, open_count,
                    last_opened_at, created_at
             FROM nextris.tbviewer_share_link
-            WHERE study_iuid = %s AND revoked = FALSE AND expires_at > NOW()
+            WHERE study_iuid = %s
+              AND share_type = 'image_share'
+              AND revoked = FALSE
+              AND expires_at > NOW()
             ORDER BY created_at DESC LIMIT 1
             """,
             (row[0],),
@@ -1309,16 +1811,16 @@ def revoke_report_share_link(report_id):
     try:
         connection = psycopg2.connect(**get_db_config())
         cursor = connection.cursor()
-        row = _report_share_row(report_id, get_jwt_identity(), cursor)
-        if row is False:
-            return jsonify({'success': False, 'message': 'No tiene permisos para revocar este estudio'}), 403
+        row = _report_share_row(report_id, cursor)
         if not row:
             return jsonify({'success': False, 'message': 'Reporte o estudio no encontrado'}), 404
         cursor.execute(
             """
             UPDATE nextris.tbviewer_share_link
             SET revoked = TRUE, revoked_at = NOW()
-            WHERE study_iuid = %s AND revoked = FALSE
+            WHERE study_iuid = %s
+              AND share_type = 'image_share'
+              AND revoked = FALSE
             """,
             (row[0],),
         )
@@ -1341,10 +1843,9 @@ def revoke_share_link_by_guid(share_guid):
     try:
         connection = psycopg2.connect(**get_db_config())
         cursor = connection.cursor()
-        user_id = str(get_jwt_identity())
         cursor.execute(
             """
-            SELECT sl.location_id
+            SELECT sl.guid
             FROM nextris.tbviewer_share_link sl
             WHERE sl.guid = %s
             LIMIT 1
@@ -1354,16 +1855,6 @@ def revoke_share_link_by_guid(share_guid):
         row = cursor.fetchone()
         if not row:
             return jsonify({'success': False, 'message': 'Enlace no encontrado'}), 404
-        if row[0]:
-            cursor.execute(
-                """
-                SELECT 1 FROM nextris.rel_user_location
-                WHERE user_id = %s AND location_id = %s LIMIT 1
-                """,
-                (user_id, str(row[0])),
-            )
-            if not cursor.fetchone():
-                return jsonify({'success': False, 'message': 'No tiene permisos para revocar este enlace'}), 403
         cursor.execute(
             """
             UPDATE nextris.tbviewer_share_link

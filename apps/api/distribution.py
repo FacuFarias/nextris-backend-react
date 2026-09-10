@@ -5,6 +5,7 @@ Endpoints para gestión y envío de informes médicos finalizados
 """
 
 from flask import request, jsonify, send_file, current_app
+from io import BytesIO
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
@@ -345,7 +346,7 @@ def send_report_email(exam_id):
         # Obtener información del reporte y examen
         query = """
             SELECT 
-                r.pdfpath,
+                r.guid,
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
                 ex.localacc as accession_number,
@@ -381,7 +382,6 @@ def send_report_email(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
         
-        pdf_path = result[0]
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
@@ -428,13 +428,21 @@ def send_report_email(exam_id):
                     }
                 }), 409
         
-        if not pdf_path or not os.path.exists(pdf_path):
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(exam_id)
+        except ReportPdfNotAvailable:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
-                'message': 'PDF del informe no encontrado'
+                'message': 'Informe PDF no disponible',
+                'code': 'REPORT_NOT_AVAILABLE',
             }), 404
+        except Exception as render_error:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': f'Error generando PDF: {render_error}'}), 500
         
         if not smtp_user or not smtp_password:
             smtp_fallback = get_smtp_fallback_from_any_facility(connection)
@@ -557,14 +565,13 @@ def send_report_email(exam_id):
         msg.attach(alternative_part)
         
         # Adjuntar PDF
-        with open(pdf_path, 'rb') as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(rendered.content)
         
         encoders.encode_base64(part)
         part.add_header(
             'Content-Disposition',
-            f'attachment; filename= informe_{accession_number}.pdf'
+            f'attachment; filename= {rendered.filename}'
         )
         msg.attach(part)
         
@@ -780,9 +787,9 @@ def view_examination_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Obtener ruta del PDF
+        # El PDF se renderiza bajo demanda desde el reporte vigente.
         query = """
-            SELECT r.pdfpath
+            SELECT r.guid
             FROM nextris.tbreport r
             INNER JOIN nextris.tbexamination e ON r.idexamination = e.guid
             WHERE e.guid = %s
@@ -798,23 +805,22 @@ def view_examination_report(exam_id):
                 'success': False,
                 'message': 'Informe PDF no disponible para este examen'
             }), 404
-        
-        pdf_path = result[0]
-        
-        # Normalizar y verificar que el archivo existe
-        absolute_path = os.path.abspath(os.path.normpath(pdf_path))
-        
-        if not os.path.exists(absolute_path):
-            return jsonify({
-                'success': False,
-                'message': 'Archivo PDF no encontrado en el sistema'
-            }), 404
-        
-        # Enviar el PDF para visualizar en el navegador (no como descarga)
-        return send_file(
-            absolute_path,
-            mimetype='application/pdf'
+
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(exam_id)
+        except ReportPdfNotAvailable:
+            return jsonify({'success': False, 'message': 'Informe PDF no disponible', 'code': 'REPORT_NOT_AVAILABLE'}), 404
+
+        response = send_file(
+            BytesIO(rendered.content),
+            as_attachment=request.args.get('download', '').lower() in ('1', 'true', 'yes', 'on'),
+            download_name=rendered.filename,
+            mimetype='application/pdf',
+            max_age=0,
         )
+        response.headers['Cache-Control'] = 'no-store'
+        return response
         
     except Exception as e:
         return jsonify({
@@ -927,7 +933,7 @@ def get_dicom_viewer_info(exam_id):
 # ====================================================================
 
 def send_whatsapp_document(api_url, api_token, phone_number_id, recipient_phone,
-                           pdf_path, caption, document_filename):
+                           pdf_content, caption, document_filename):
     """
     Envía un documento PDF por WhatsApp usando la Meta Cloud API.
 
@@ -943,14 +949,13 @@ def send_whatsapp_document(api_url, api_token, phone_number_id, recipient_phone,
     # Paso 1: Subir el PDF como media
     upload_url = f"{api_url}/{phone_number_id}/media"
 
-    with open(pdf_path, 'rb') as pdf_file:
-        upload_response = requests.post(
-            upload_url,
-            headers=headers_auth,
-            files={'file': (document_filename, pdf_file, 'application/pdf')},
-            data={'messaging_product': 'whatsapp', 'type': 'application/pdf'},
-            timeout=30
-        )
+    upload_response = requests.post(
+        upload_url,
+        headers=headers_auth,
+        files={'file': (document_filename, pdf_content, 'application/pdf')},
+        data={'messaging_product': 'whatsapp', 'type': 'application/pdf'},
+        timeout=30
+    )
 
     if upload_response.status_code != 200:
         return False, f"Error al subir media: {upload_response.status_code} - {upload_response.text}"
@@ -1082,7 +1087,7 @@ def send_report_whatsapp(exam_id):
         # Obtener información del reporte, examen y config WhatsApp de la facility
         query = """
             SELECT
-                r.pdfpath,
+                r.guid,
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
                 ex.localacc as accession_number,
@@ -1116,7 +1121,6 @@ def send_report_whatsapp(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
 
-        pdf_path = result[0]
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
@@ -1168,13 +1172,21 @@ def send_report_whatsapp(exam_id):
                 }
             }), 500
 
-        if not pdf_path or not os.path.exists(pdf_path):
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(exam_id)
+        except ReportPdfNotAvailable:
             cursor.close()
             connection.close()
             return jsonify({
                 'success': False,
-                'message': 'PDF del informe no encontrado'
+                'message': 'Informe PDF no disponible',
+                'code': 'REPORT_NOT_AVAILABLE',
             }), 404
+        except Exception as render_error:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': f'Error generando PDF: {render_error}'}), 500
 
         # Construir caption del documento
         caption = (
@@ -1185,12 +1197,12 @@ def send_report_whatsapp(exam_id):
             f"- {sender_name}"
         )
 
-        document_filename = f"informe_{accession_number}.pdf"
+        document_filename = rendered.filename
 
         # Enviar documento PDF por WhatsApp
         success, message = send_whatsapp_document(
             wa_api_url, wa_api_token, wa_phone_number_id,
-            clean_phone, pdf_path, caption, document_filename
+            clean_phone, rendered.content, caption, document_filename
         )
 
         if not success:

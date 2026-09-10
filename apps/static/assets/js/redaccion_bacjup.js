@@ -503,6 +503,9 @@ function VerPDF() {
             a.href = url;
             a.target = '_blank';
             a.click();
+            window.setTimeout(function () {
+                window.URL.revokeObjectURL(url);
+            }, 60000);
         })
         .catch(error => {
             console.error('Error:', error);

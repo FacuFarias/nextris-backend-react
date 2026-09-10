@@ -284,7 +284,8 @@ def _get_patient_studies_context(user_id, patient_guid, limit, reported_only=Fal
                    e.isexecuted,
                    e.studyinstanceuid,
                    st.description,
-                   rep.pdfpath,
+                   CASE WHEN COALESCE(e.isreported, 0) = 1 AND rep.guid IS NOT NULL
+                        THEN TRUE ELSE FALSE END AS report_available,
                    eq.aetitle,
                    loc.name
             FROM nextris.tbexamination e
@@ -311,7 +312,7 @@ def _get_patient_studies_context(user_id, patient_guid, limit, reported_only=Fal
                 'is_executed': bool(row[5]),
                 'study_instance_uid': row[6],
                 'study_type': row[7],
-                'report_pdf_path': row[8],
+                'report_available': bool(row[8]),
                 'equipment_aetitle': row[9],
                 'location_name': row[10],
             })
@@ -478,18 +479,9 @@ def _build_images_link(study_instance_uid: str | None, exam_guid: str | None = N
 def _build_report_link(study: dict, base_url: str) -> str | None:
     """Builds a link for report visualization/download."""
     exam_guid = (study.get('guid') or '').strip()
-    if exam_guid:
+    if exam_guid and study.get('report_available'):
         encoded_exam = quote(exam_guid)
         return f"{base_url.rstrip('/')}/api/pdfs/by-exam/{encoded_exam}"
-
-    report_path = (study.get('report_pdf_path') or '').strip()
-
-    if report_path:
-        # Backward-compatible fallback by filename.
-        safe_filename = os.path.basename(report_path)
-        if safe_filename:
-            encoded = quote(safe_filename)
-            return f"{base_url.rstrip('/')}/api/pdfs/{encoded}"
 
     return None
 
@@ -632,7 +624,8 @@ def _search_studies_with_filters_context(
                    e.isexecuted,
                    e.studyinstanceuid,
                    st.description,
-                   rep.pdfpath,
+                   CASE WHEN COALESCE(e.isreported, 0) = 1 AND rep.guid IS NOT NULL
+                        THEN TRUE ELSE FALSE END AS report_available,
                    eq.aetitle,
                    loc.name,
                    dp.guid,
@@ -664,7 +657,7 @@ def _search_studies_with_filters_context(
                 'is_executed': bool(row[5]),
                 'study_instance_uid': row[6],
                 'study_type': row[7],
-                'report_pdf_path': row[8],
+                'report_available': bool(row[8]),
                 'equipment_aetitle': row[9],
                 'location_name': row[10],
                 'patient_guid': row[11],

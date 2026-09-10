@@ -14,6 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 from apps.home.services import DatabaseService, ConfigService
 from apps.api.facility_plan_usage import ensure_plan_management_schema, check_limit_before_action
 
@@ -137,6 +138,8 @@ def send_to_pacs(filepath):
 
 
 @api_blueprint.route('/manual/upload', methods=['POST'])
+@jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def manual_upload():
     """
     Endpoint para subir archivos DICOM
@@ -530,6 +533,8 @@ def manual_upload():
 
 
 @api_blueprint.route('/manual/unlinked-studies', methods=['GET'])
+@jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def manual_unlinked_studies():
     """
     Lista estudios DICOM cargados manualmente.
@@ -760,6 +765,7 @@ def manual_unlinked_studies():
 
 @api_blueprint.route('/dicom/search-examinations', methods=['GET'])
 @jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def dicom_search_examinations():
     """
     Busca exámenes existentes para vincular con estudios DICOM
@@ -860,6 +866,7 @@ def dicom_search_examinations():
 
 @api_blueprint.route('/dicom/link-study', methods=['POST'])
 @jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def dicom_link_study():
     """
     Vincula un estudio DICOM cargado manualmente con una orden/examen existente
@@ -1109,6 +1116,7 @@ def dicom_link_study():
 
 @api_blueprint.route('/dicom/linked-studies', methods=['GET'])
 @jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def dicom_linked_studies():
     """
     Lista vínculos activos entre estudios PACS/DICOM y órdenes RIS.
@@ -1273,6 +1281,7 @@ def dicom_linked_studies():
 
 @api_blueprint.route('/dicom/unlink-study', methods=['POST'])
 @jwt_required()
+@require_permission('dicom.studies.manage', include_role_permissions=True)
 def dicom_unlink_study():
     """
     Desvincula un estudio de una orden.
@@ -1820,7 +1829,7 @@ def reassign_dicom_study():
             study_iuid = study_row[0]
             accession_no = study_row[1]
             study_desc = study_row[2]
-            
+
             # 2. Si se proporciona new_patient, crear el paciente primero
             if new_patient_data and not patient_guid:
                 nombre = new_patient_data.get('nombre', '').strip()
@@ -1870,13 +1879,22 @@ def reassign_dicom_study():
                     INSERT INTO nextris.tbexamination (
                         guid, idpatient, localacc, studyinstanceuid,
                         status, isexecuted, isreported, isimage,
-                        createdon, executedon
+                        createdon, executedon, "w-order"
                     ) VALUES (
                         %s, %s, %s, %s,
-                        'Executed', 1, 0, 1,
-                        NOW(), NOW()
+                        %s, %s, 0, 1,
+                        NOW(), %s, %s
                     )
-                """, (exam_guid, patient_guid, accession_no, study_iuid))
+                """, (
+                    exam_guid,
+                    patient_guid,
+                    accession_no,
+                    study_iuid,
+                    'Scheduled',
+                    0,
+                    None,
+                    0,
+                ))
                 
                 # Crear reporte vacío
                 report_guid = str(uuid_mod.uuid4())

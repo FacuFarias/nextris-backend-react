@@ -64,7 +64,7 @@
 
 1. **GET** `/config/system` - Obtener configuración del sistema
 2. **PUT/PATCH** `/config/system` - Actualizar configuración
-3. **GET** `/config/workflow` - Obtener configuración de workflow
+3. **GET/PUT** `/config/workflow` - Consultar o configurar el retardo de envío de reportes firmados a Clínica Parque
 4. **GET** `/config/modalities` - Listar modalidades
 5. **GET** `/config/body-parts` - Listar partes del cuerpo
 6. **GET** `/config/study-groups` - Listar grupos de estudio
@@ -164,3 +164,9 @@ Todas las respuestas siguen el formato estándar:
 - Billing API
 - Notifications API
 - Analytics API
+# Reportes: contrato canónico
+
+Los endpoints de reportes y plantillas aceptan y devuelven `study_reason`,
+`content` y `conclusion`. Los nombres históricos (`findings`, `techniques`,
+`impressions`, `conclusions`) siguen disponibles únicamente como aliases
+deprecados para clientes legacy.

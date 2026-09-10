@@ -10,11 +10,13 @@ import psycopg2
 import pytz
 from datetime import datetime, timedelta
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
     check_limit_before_action,
 
 )
+from apps.services.report_fields import canonical_fields_from_row, legacy_aliases
 
 
 def get_db_config():
@@ -1208,6 +1210,7 @@ def create_appointment_medico():
 
 @api_blueprint.route('/examinations/<exam_id>/execute', methods=['POST'])
 @jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
 def execute_examination(exam_id):
     """
     Marca una orden como ejecutada y actualiza detalles clínicos
@@ -1484,16 +1487,32 @@ def get_report_data(exam_id):
         
         # Obtener reporte
         cursor.execute("""
-            SELECT 
+            SELECT
                 Guid, IdExamination, IdPatient, admnumber,
-                IdReferringPhysician, Findings, Impressions, Techniques,
-                Conclusions, WasSaved
+                IdReferringPhysician, study_reason, content, conclusion,
+                Findings, Impressions, Techniques, Conclusions, WasSaved
             FROM nextris.tbReport
             WHERE IdExamination = %s
         """, (exam_id,))
         
         report_row = cursor.fetchone()
-        report = list(report_row) if report_row else []
+        report_fields = canonical_fields_from_row(
+            report_row[5] if report_row else None,
+            report_row[6] if report_row else None,
+            report_row[7] if report_row else None,
+            legacy_findings=report_row[8] if report_row else None,
+            legacy_impressions=report_row[9] if report_row else None,
+            legacy_technique=report_row[10] if report_row else None,
+            legacy_conclusion=report_row[11] if report_row else None,
+            reason_fallback=exam[13] or exam[12],
+        )
+        # Mantener la lista legacy para consumidores antiguos y exponer además
+        # el contrato canónico en la respuesta.
+        report = (
+            [report_row[0], report_row[1], report_row[2], report_row[3],
+             report_fields['content'], '', '', report_fields['conclusion'], report_row[12]]
+            if report_row else []
+        )
         
         # Obtener tipo de estudio y modalidad
         cursor.execute("""
@@ -1512,7 +1531,8 @@ def get_report_data(exam_id):
         predefinido = {}
         if default_predef_id:
             cursor.execute("""
-                SELECT Findings, Impressions, Techniques, Conclusions, Tittle
+                SELECT study_reason, content, conclusion,
+                       Findings, Impressions, Techniques, Conclusions, Tittle
                 FROM nextris.tbinfpredef
                 WHERE Guid = %s
             """, (default_predef_id,))
@@ -1520,11 +1540,15 @@ def get_report_data(exam_id):
             predef_row = cursor.fetchone()
             if predef_row:
                 predefinido = {
-                    'findings': predef_row[0] if predef_row[0] else '',
-                    'impressions': predef_row[1] if predef_row[1] else '',
-                    'techniques': predef_row[2] if predef_row[2] else '',
-                    'conclusions': predef_row[3] if predef_row[3] else '',
-                    'tittle': predef_row[4] if predef_row[4] else ''
+                    **legacy_aliases(canonical_fields_from_row(
+                        predef_row[0], predef_row[1], predef_row[2],
+                        legacy_findings=predef_row[3], legacy_impressions=predef_row[4],
+                        legacy_technique=predef_row[5], legacy_conclusion=predef_row[6],
+                    )),
+                    'study_reason': predef_row[0] or '',
+                    'content': predef_row[1] or '',
+                    'conclusion': predef_row[2] or '',
+                    'tittle': predef_row[7] if predef_row[7] else ''
                 }
         
         # Obtener lateralidad
@@ -1543,12 +1567,16 @@ def get_report_data(exam_id):
         
         result = {
             'report': report,
+            'study_reason': report_fields['study_reason'],
+            'content': report_fields['content'],
+            'conclusion': report_fields['conclusion'],
+            **legacy_aliases(report_fields),
             'isreported': 1 if exam[4] else 0,
             'isimage': 1 if exam[5] else 0,
             'study_instance_uid': exam[6] if exam[6] else '',
             'predefinido': predefinido,
             'descripcion_predef': descripcion_predef if descripcion_predef else '',
-            'wassaved': report[9] if report and len(report) > 9 else 0,
+            'wassaved': report[8] if report and len(report) > 8 else 0,
             'fecha_examen': exam[7].strftime('%d/%m/%Y') if exam[7] else '',
             'modality': modality if modality else '',
             'numberofviews': exam[8] if exam[8] else '',

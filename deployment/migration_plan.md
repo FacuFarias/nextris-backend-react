@@ -10,6 +10,19 @@ NextRIS es un sistema de información de radiología (RIS) compuesto por dos apl
 | **Frontend** | `nextris-front-react` | React 19 + Vite + TypeScript | 80 (Nginx) |
 | **Base de datos** | - | PostgreSQL 16 | 5432 |
 
+### Migración de PDFs de informes (20260821)
+
+Los informes firmados ya no se escriben en disco. Aplicar
+`deployment/migrations/20260821_on_demand_report_pdfs.sql` y validar primero
+que los informes firmados se renderizan correctamente desde `tbreport`. Luego,
+si existe una instalación anterior, eliminar únicamente los PDFs heredados y
+la carpeta de salida concreta:
+
+```bash
+find /var/www/nextris-dev-react/output_pdfs -maxdepth 1 -type f -name '*.pdf' -delete
+rmdir /var/www/nextris-dev-react/output_pdfs 2>/dev/null || true
+```
+
 ---
 
 ## Requisitos del Servidor
@@ -141,7 +154,7 @@ sudo cp deployment/config/backend.env.example .env
 sudo nano .env
 
 # Crear directorios necesarios
-sudo mkdir -p output_pdfs media/firmas uploads_dicom
+sudo mkdir -p media/firmas uploads_dicom
 sudo chown -R $(whoami):$(whoami) /var/www/nextris-dev-react
 
 # Configurar servicio systemd
@@ -256,7 +269,6 @@ DB_NAME=pacsdb
 # SERVIDOR
 # ===========================================
 IPSERVER=<IP_DEL_SERVIDOR>
-BASE_FOLDER=/var/www/nextris-dev-react/output_pdfs
 
 # ===========================================
 # SEGURIDAD
@@ -433,7 +445,6 @@ WantedBy=multi-user.target
 │   │   ├── sql/                    # Scripts SQL
 │   │   ├── config/                 # Archivos de configuración
 │   │   └── migrations/             # Migraciones SQL
-│   ├── output_pdfs/                # PDFs generados
 │   ├── media/firmas/               # Firmas digitales
 │   └── uploads_dicom/              # Archivos DICOM subidos
 │
@@ -596,7 +607,6 @@ sudo netstat -tlnp | grep 5001
 ```bash
 sudo chown -R root:root /var/www/nextris-dev-react
 sudo chown -R root:root /var/www/nextris-front-react
-sudo chmod -R 755 /var/www/nextris-dev-react/output_pdfs
 sudo chmod -R 755 /var/www/nextris-dev-react/media
 sudo chmod -R 755 /var/www/nextris-dev-react/uploads_dicom
 ```

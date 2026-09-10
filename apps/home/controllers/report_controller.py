@@ -10,6 +10,7 @@ import uuid
 import shutil
 import html
 import re
+from io import BytesIO
 import psycopg2
 import smtplib
 from datetime import datetime
@@ -18,10 +19,15 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from apps.home.services.database_service import DatabaseService
 from apps.home.services.config_service import ConfigService
+from apps.services.report_fields import (
+    canonical_fields_from_row,
+    fields_are_complete,
+    legacy_aliases,
+    normalize_report_payload,
+)
 
 # Importar funciones para firmas digitales
 from apps.home.controllers.config_controller import get_user_signature_data
-from apps.api.viewer_share_service import create_for_exam as create_share_for_exam
 
 # Crear blueprint para reportes
 report_bp = Blueprint('report', __name__, url_prefix='/api')
@@ -219,17 +225,16 @@ def _draw_share_qr_page(c, share_url, width, height):
     c.drawString(url_x, height - 350, share_url)
     c.linkURL(share_url, (url_x, height - 352, url_x + url_width, height - 340), thickness=0)
 
-def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_filename=None):
+def generate_report_pdf_with_signature(report_id, pdf_filename=None):
     """
     Genera un PDF completo del reporte con firma digital.
     
     Args:
         report_id: ID del reporte/examen
-        output_dir: Directorio donde se guardará el PDF
         pdf_filename: Nombre personalizado del archivo PDF (opcional)
     """
     print(f"[PDF_GEN] Iniciando generación de PDF para report_id: {report_id}")
-    print(f"[PDF_GEN] output_dir: {output_dir}, pdf_filename: {pdf_filename}")
+    print(f"[PDF_GEN] pdf_filename: {pdf_filename}")
     
     try:
         from reportlab.pdfgen import canvas
@@ -239,18 +244,9 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
 
         # Raíz del proyecto nextris-dev-react (independiente del cwd del servicio)
         app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-
-        # Forzar directorio de salida absoluto para que siempre quede en el repo.
-        if not os.path.isabs(output_dir):
-            output_dir = os.path.join(app_root, output_dir)
         
         # Configuración de base de datos
-        config = {
-            'host': 'localhost',
-            'database': 'pacsdb',
-            'user': 'pacs',
-            'password': 'pacs'
-        }
+        config = ConfigService.get_db_config()
         
         # Conectar a la base de datos
         connection = psycopg2.connect(**config)
@@ -264,7 +260,10 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
                 WHERE rep.IdExamination = %s
                 ORDER BY
                     CASE
-                        WHEN COALESCE(NULLIF(BTRIM(rep.Findings), ''), '') <> ''
+                        WHEN COALESCE(NULLIF(BTRIM(rep.study_reason), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.content), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.conclusion), ''), '') <> ''
+                          OR COALESCE(NULLIF(BTRIM(rep.Findings), ''), '') <> ''
                           OR COALESCE(NULLIF(BTRIM(rep.Techniques), ''), '') <> ''
                           OR COALESCE(NULLIF(BTRIM(rep.Impressions), ''), '') <> ''
                           OR COALESCE(NULLIF(BTRIM(rep.Conclusions), ''), '') <> ''
@@ -277,7 +276,10 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
             )
                  SELECT p.Surname, p.Name, st.Description, rep.Date,
                      COALESCE(NULLIF(u_ref.username, ''), tbex.idreferringphysician::text) AS referring_physician_name,
-                   rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
+                   tbex.clinicalquestion, tbex.history,
+                   rep.study_reason, rep.content, rep.conclusion,
+                   rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser,
+                   COALESCE(tbex.IsReported, 0) AS is_reported
             FROM selected_report rep
             LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
             LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.Guid
@@ -296,36 +298,44 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
             connection.close()
             return None
 
-        surname, name, examen, fecha, refmed, findings, techniques, impressions, conclusions, userid = data
+        (
+            surname, name, examen, fecha, refmed, clinical_question, history,
+            study_reason, content, conclusion,
+            legacy_findings, legacy_techniques, legacy_impressions, legacy_conclusions,
+            userid, is_reported,
+        ) = data
+        if not bool(is_reported):
+            cursor.close()
+            connection.close()
+            return None
 
         # El QR se crea en la misma transacción/conexión que genera el PDF. El
         # token plano vive únicamente en memoria durante esta operación; la BD
         # conserva exclusivamente su hash.
         share_data = None
         try:
-            share_data = create_share_for_exam(report_id, created_by=userid, connection=connection)
+            from apps.api.viewer_share_service import get_or_create_active_for_exam
+            share_data = get_or_create_active_for_exam(report_id, created_by=userid, connection=connection)
             # El enlace del QR debe quedar persistido aunque una consulta
             # opcional posterior del encabezado falle para este estudio.
             connection.commit()
         except Exception as share_error:
             print(f"[PDF_GEN] No se pudo crear enlace QR de imágenes: {share_error}")
 
-        findings = _normalize_report_text_for_pdf(findings)
-        techniques = _normalize_report_text_for_pdf(techniques)
-        impressions = _normalize_report_text_for_pdf(impressions)
-        conclusions = _normalize_report_text_for_pdf(conclusions)
+        fields = canonical_fields_from_row(
+            study_reason, content, conclusion,
+            legacy_findings=legacy_findings,
+            legacy_impressions=legacy_impressions,
+            legacy_technique=legacy_techniques,
+            legacy_conclusion=legacy_conclusions,
+            reason_fallback=clinical_question or history,
+        )
+        study_reason = _normalize_report_text_for_pdf(fields['study_reason'])
+        content = _normalize_report_text_for_pdf(fields['content'])
+        conclusion = _normalize_report_text_for_pdf(fields['conclusion'])
 
-        # Crear directorio si no existe
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        
-        # Usar nombre personalizado o el predeterminado
-        if pdf_filename:
-            pdf_file_path = os.path.join(output_dir, pdf_filename)
-        else:
-            pdf_file_path = os.path.join(output_dir, f"r_{report_id}.pdf")
-            
-        c = canvas.Canvas(pdf_file_path, pagesize=letter)
+        pdf_stream = BytesIO()
+        c = canvas.Canvas(pdf_stream, pagesize=letter)
         width, height = letter
 
         # Obtener datos institucionales (prioridad: ubicación del examen).
@@ -486,10 +496,9 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         y_position = height - 260
         
         sections = [
-            ("Técnicas de Examen:", techniques or ""),
-            ("Hallazgos:", findings or ""),
-            ("Impresiones:", impressions or ""),
-            ("Conclusión:", conclusions or "")
+            ("Razón del estudio:", study_reason or ""),
+            ("Contenido:", content or ""),
+            ("Conclusión:", conclusion or "")
         ]
 
         for title, content in sections:
@@ -586,6 +595,8 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
                 print(f"[PDF_GEN] No se pudo dibujar el QR: {qr_error}")
 
         c.save()
+        pdf_bytes = pdf_stream.getvalue()
+        pdf_stream.close()
 
         # Persistir el enlace que corresponde al QR generado en este PDF.
         connection.commit()
@@ -594,8 +605,8 @@ def generate_report_pdf_with_signature(report_id, output_dir='output_pdfs', pdf_
         cursor.close()
         connection.close()
         
-        print(f"[SUCCESS] PDF generado con firma: {pdf_file_path}")
-        return pdf_file_path
+        print(f"[SUCCESS] PDF generado en memoria: {len(pdf_bytes)} bytes")
+        return pdf_bytes
         
     except Exception as e:
         print(f"[ERROR] Error generando PDF con firma: {e}")
@@ -654,7 +665,8 @@ def get_predefinido(guid):
         print(f"[INFO] Solicitando predefinido con guid: {guid}")
         
         query = """
-            SELECT guid, tittle, findings, impression, technique, conclusion, studytype_id
+            SELECT guid, tittle, findings, impression, technique, conclusion, studytype_id,
+                   study_reason, content
             FROM nextris.tbinfpredef 
             WHERE guid=%s
         """
@@ -666,10 +678,26 @@ def get_predefinido(guid):
             response = {
                 'guid': row[0],
                 'tittle': row[1] or '',  # Frontend espera 'tittle'
-                'findings': row[2] or '',  # Frontend espera 'findings'
-                'impression': row[3] or '',  # Frontend espera 'impression'
-                'technique': row[4] or '',  # Frontend espera 'technique'
-                'conclusion': row[5] or '',  # Frontend espera 'conclusion'
+                **legacy_aliases(canonical_fields_from_row(
+                    row[7], row[8], row[5],
+                    legacy_findings=row[2], legacy_impressions=row[3],
+                    legacy_technique=row[4], legacy_conclusion=row[5],
+                )),
+                'study_reason': canonical_fields_from_row(
+                    row[7], row[8], row[5], legacy_findings=row[2],
+                    legacy_impressions=row[3], legacy_technique=row[4],
+                    legacy_conclusion=row[5]
+                )['study_reason'],
+                'content': canonical_fields_from_row(
+                    row[7], row[8], row[5], legacy_findings=row[2],
+                    legacy_impressions=row[3], legacy_technique=row[4],
+                    legacy_conclusion=row[5]
+                )['content'],
+                'conclusion': canonical_fields_from_row(
+                    row[7], row[8], row[5], legacy_findings=row[2],
+                    legacy_impressions=row[3], legacy_technique=row[4],
+                    legacy_conclusion=row[5]
+                )['conclusion'],
                 'studytype_id': row[6],
                 # También mantener los nombres en español por compatibilidad
                 'titulo': row[1] or '',
@@ -699,10 +727,16 @@ def guardar_predefinido():
         # Extraer datos del request (coincidiendo con el frontend)
         title = data.get('title', '')
         studytype_id = data.get('studytype_id')
-        findings = data.get('hallazgostext', '')  # hallazgos
-        technique = data.get('tecnicastext', '')  # técnicas
-        impression = data.get('impresionestext', '')  # impresiones
-        conclusion = data.get('conclusionestext', '')  # conclusiones
+        normalized = normalize_report_payload({
+            **data,
+            'findings': data.get('findings', data.get('hallazgostext', '')),
+            'technique': data.get('technique', data.get('tecnicastext', '')),
+            'impression': data.get('impression', data.get('impresionestext', '')),
+            'conclusion': data.get('conclusion', data.get('conclusionestext', '')),
+        })
+        study_reason = normalized.get('study_reason', '')
+        content = normalized.get('content', '')
+        conclusion = normalized.get('conclusion', '')
         isdefault = data.get('isdefault', 0)
         
         # Generar nuevo GUID
@@ -710,14 +744,14 @@ def guardar_predefinido():
         
         # Insertar en la base de datos
         query = """
-            INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO nextris.tbinfpredef
+            (guid, tittle, study_reason, content, conclusion, studytype_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """
         
         result = DatabaseService.execute_query(
             query, 
-            (new_guid, title, findings, impression, technique, conclusion, studytype_id),
+            (new_guid, title, study_reason, content, conclusion, studytype_id),
             commit=True
         )
         
@@ -850,7 +884,11 @@ def quitar_definitivo():
         print(f"[INFO] Procesando exam_id: {exam_id}")
         
         # Ejecutar query usando DatabaseService
-        query = "UPDATE nextris.tbexamination SET IsReported=0 WHERE Guid=%s"
+        query = """
+            UPDATE nextris.tbexamination
+            SET IsReported = 0, reportdate = NULL
+            WHERE Guid = %s
+        """
         print(f"[INFO] Ejecutando query: {query} con ID: {exam_id}")
         
         result = DatabaseService.execute_query(query, (exam_id,), fetch_all=False, commit=True)
@@ -885,25 +923,30 @@ def guardar_reporte():
         
         print(f"[INFO] Datos recibidos: {data}")
         
-        # Validar campos requeridos
-        required_fields = ['id', 'val_findings', 'val_tecnicas', 'val_impresiones', 'val_conclusiones']
-        for field in required_fields:
-            if field not in data:
-                print(f"[ERROR] Campo requerido faltante: {field}")
-                return jsonify({'error': f'Campo requerido faltante: {field}'}), 400
-        
         exam_id = data['id']
-        findings = data['val_findings']
-        techniques = data['val_tecnicas']
-        impressions = data['val_impresiones']
-        conclusions = data['val_conclusiones']
+        compat_payload = dict(data)
+        compat_payload.setdefault('study_reason', data.get('val_study_reason', ''))
+        compat_payload.setdefault('findings', data.get('val_findings', ''))
+        compat_payload.setdefault('technique', data.get('val_tecnicas', ''))
+        compat_payload.setdefault('impression', data.get('val_impresiones', ''))
+        compat_payload.setdefault('conclusion', data.get('val_conclusions', data.get('val_conclusiones', '')))
+        normalized = normalize_report_payload(compat_payload)
+        if not normalized.get('study_reason'):
+            fallback = DatabaseService.execute_query(
+                "SELECT clinicalquestion, history FROM nextris.tbexamination WHERE guid=%s",
+                (exam_id,), fetch_one=True,
+            )
+            if fallback:
+                normalized['study_reason'] = fallback[0] or fallback[1] or ''
+        if not fields_are_complete(normalized):
+            return jsonify({'error': 'Razón del estudio, Contenido y Conclusión son requeridos'}), 400
         
         print(f"[INFO] Guardando reporte para examen ID: {exam_id}")
         
         # Query seguro usando parámetros para evitar SQL injection
         query = """
             UPDATE nextris.tbReport 
-            SET findings=%s, techniques=%s, impressions=%s, conclusions=%s, wassaved=true 
+            SET study_reason=%s, content=%s, conclusion=%s, wassaved=true
             WHERE IdExamination=%s
         """
         
@@ -911,7 +954,7 @@ def guardar_reporte():
         
         result = DatabaseService.execute_query(
             query, 
-            (findings, techniques, impressions, conclusions, exam_id), 
+            (normalized['study_reason'], normalized['content'], normalized['conclusion'], exam_id),
             fetch_all=False, 
             commit=True
         )
@@ -926,413 +969,85 @@ def guardar_reporte():
 
 @report_bp.route('/firmar_reporte', methods=['POST'])
 def firmar_reporte():
-    """Firma un reporte médico (marca como reportado)"""
+    """Firma un reporte legacy sin generar ni almacenar un PDF."""
     try:
-        print("[INFO] Iniciando firmar_reporte")
-        
-        # Obtener datos del request
-        reporteid = request.get_json()
-        if not reporteid:
-            print("[ERROR] No se recibieron datos JSON")
-            return jsonify({'error': 'No se recibieron datos'}), 400
-        
-        exam_id = reporteid.get('id')
+        payload = request.get_json(silent=True) or {}
+        exam_id = payload.get('id')
         if not exam_id:
-            print("[ERROR] Falta el ID del examen en el request")
             return jsonify({'error': 'Falta el ID del examen'}), 400
-        
-        # Obtener el ID del médico que firma (puede venir del request o de la sesión)
-        reporter_physician_id = reporteid.get('reporter_physician_id')
+
+        reporter_physician_id = (
+            payload.get('reporter_physician_id')
+            or session.get('user_guid')
+            or session.get('user_id')
+        )
         if not reporter_physician_id:
-            # Fallback: intentar obtener de la sesión
-            reporter_physician_id = session.get('user_guid') or session.get('user_id')
-            print(f"[INFO] ID del médico obtenido de sesión: {reporter_physician_id}")
+            return jsonify({'error': 'No se pudo determinar el médico firmante'}), 400
+
+        connection = psycopg2.connect(**ConfigService.get_db_config())
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT r.study_reason, r.content, r.conclusion,
+                   r.findings, r.techniques, r.impressions, r.conclusions,
+                   e.clinicalquestion, e.history
+            FROM nextris.tbreport r
+            JOIN nextris.tbexamination e ON e.guid = r.idexamination
+            WHERE r.idexamination=%s
+            ORDER BY r.date DESC NULLS LAST LIMIT 1
+            """, (exam_id,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            fields = canonical_fields_from_row(
+                existing[0], existing[1], existing[2],
+                legacy_findings=existing[3], legacy_technique=existing[4],
+                legacy_impressions=existing[5], legacy_conclusion=existing[6],
+                reason_fallback=existing[7] or existing[8],
+            )
+            if not fields_are_complete(fields):
+                cursor.close(); connection.close()
+                return jsonify({'error': 'Razón del estudio, Contenido y Conclusión son requeridos', 'code': 'REPORT_FIELDS_REQUIRED'}), 400
         else:
-            print(f"[INFO] ID del médico recibido del frontend: {reporter_physician_id}")
-        
-        if not reporter_physician_id:
-            print("[WARNING] No se pudo determinar el ID del médico que firma")
-        
-        print(f"[INFO] Firmando reporte para examen ID: {exam_id}, Médico: {reporter_physician_id}")
-        
-        # 1. Marcar el examen como reportado
-        query = "UPDATE nextris.tbexamination SET isreported=1 WHERE Guid=%s"
-        print(f"[INFO] Ejecutando query: {query} con ID: {exam_id}")
-        
-        result = DatabaseService.execute_query(query, (exam_id,), fetch_all=False, commit=True)
-        
-        # 2. Actualizar estado si existe la función
-        try:
-            from apps.home.routes import updatestatus
-            updatestatus(exam_id)
-            print("[INFO] Estado actualizado exitosamente")
-        except Exception as update_error:
-            print(f"[WARNING] No se pudo actualizar el estado: {str(update_error)}")
-        
-        # 3. Crear PDF con formato profesional usando ReportLab
-        try:
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.pagesizes import letter
-            from reportlab.lib.units import inch
-            
-            print("[INFO] Generando PDF con formato profesional...")
-            
-            pdf_path = f"output_pdfs/r_{exam_id}.pdf"
-            absolute_pdf_path = os.path.abspath(pdf_path)
-            
-            pdf_directory = os.path.dirname(absolute_pdf_path)
-            if not os.path.exists(pdf_directory):
-                os.makedirs(pdf_directory, exist_ok=True)
-            
-            # Consulta para obtener datos completos del reporte
-            query = """
-                  SELECT p.surname, p.name, st.description, rep.date,
-                      COALESCE(NULLIF(u_ref.username, ''), rep.idreferringphysician::text) AS referring_physician_name,
-                       rep.findings, rep.techniques, rep.impressions, rep.conclusions
-                FROM nextris.tbreport rep
-                LEFT JOIN nextris.tbexamination tbex ON tbex.guid = rep.idexamination
-                LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.guid
-                LEFT JOIN nextris.datapatient p ON p.patientid = rep.idpatient
-                  LEFT JOIN nextris.tbuser u_ref ON u_ref.guid = rep.idreferringphysician
-                WHERE rep.idexamination = %s
+            cursor.close(); connection.close()
+            return jsonify({'error': 'Reporte no encontrado'}), 404
+        cursor.execute(
             """
-            
-            datos = DatabaseService.execute_query(query, (exam_id,), fetch_one=True)
-            print(f"[DEBUG] Datos del reporte: {datos}")
-            
-            if datos:
-                surname, name, examen, fecha, refmed, findings, techniques, impressions, conclusions = datos
-            else:
-                # Fallback si no hay datos completos
-                surname = name = "Información pendiente"
-                examen = "Examen médico"
-                fecha = datetime.now().strftime('%d/%m/%Y')
-                refmed = "No proporcionado"
-                findings = techniques = impressions = conclusions = ""
-
-            # El endpoint legado también debe generar el mismo enlace corto
-            # que usa el generador principal, para que sus PDFs incluyan QR.
-            share_data = None
-            try:
-                share_connection = psycopg2.connect(**ConfigService.get_db_config())
-                share_data = create_share_for_exam(
-                    exam_id,
-                    created_by=reporter_physician_id,
-                    connection=share_connection,
-                )
-                share_connection.commit()
-                share_connection.close()
-            except Exception as share_error:
-                print(f"[WARNING] No se pudo crear enlace QR para PDF legado: {share_error}")
-            
-            # Crear el PDF
-            c = canvas.Canvas(absolute_pdf_path, pagesize=letter)
-            width, height = letter
-            
-            # Obtener datos institucionales y logo
-            inst_query = "SELECT name, address, phone, mail, logo_path FROM nextris.isbasicinformation ORDER BY guid ASC LIMIT 1"
-            institucion = DatabaseService.execute_query(inst_query, fetch_one=True)
-            
-            if institucion:
-                nombre_inst = institucion[0] or ''
-                direccion_inst = institucion[1] or ''
-                telefono_inst = institucion[2] or ''
-                mail_inst = institucion[3] or ''
-                logo_path_db = institucion[4]
-            else:
-                nombre_inst = ''
-                direccion_inst = ''
-                telefono_inst = ''
-                mail_inst = ''
-                logo_path_db = None
-
-            # Si el informe pertenece a una ubicación configurada, sus datos
-            # tienen prioridad; los campos vacíos conservan el fallback general.
-            location_query = """
-                SELECT loc.name, loc.address, loc.phone, loc.mail, loc.logo_path
-                FROM nextris.tbexamination ex
-                LEFT JOIN nextris.isequipment eq ON eq.guid = ex.idequipment
-                LEFT JOIN nextris.tblocation loc ON loc.guid = COALESCE(ex.location_id, eq.location_id)
-                WHERE ex.guid = %s
-                LIMIT 1
+            UPDATE nextris.tbreport
+            SET iduser = %s, wassaved = TRUE, date = NOW()
+            WHERE idexamination = %s
+            """,
+            (reporter_physician_id, exam_id),
+        )
+        cursor.execute(
             """
-            location_data = DatabaseService.execute_query(location_query, (exam_id,), fetch_one=True)
-            if not location_data or not any(location_data):
-                location_data = DatabaseService.execute_query(
-                    """
-                    SELECT name, address, phone, mail, logo_path
-                    FROM nextris.tblocation
-                    WHERE LOWER(COALESCE(status, 'active')) = 'active'
-                      AND (
-                          SELECT COUNT(*)
-                          FROM nextris.tblocation
-                          WHERE LOWER(COALESCE(status, 'active')) = 'active'
-                      ) = 1
-                    LIMIT 1
-                    """,
-                    fetch_one=True
-                )
-            if location_data:
-                nombre_inst = nombre_inst or location_data[0] or ''
-                direccion_inst = direccion_inst or location_data[1] or ''
-                telefono_inst = telefono_inst or location_data[2] or ''
-                mail_inst = mail_inst or location_data[3] or ''
-                logo_path_db = logo_path_db or location_data[4]
-            
-            # Añadir el logo institucional si existe
-            legacy_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-            logo_to_use = _resolve_pdf_asset_path(logo_path_db, legacy_app_root)
-            if not logo_to_use:
-                logo_to_use = _resolve_pdf_asset_path(
-                    'apps/static/assets/img/icono.jpg',
-                    legacy_app_root
-                )
-            print(f"[DEBUG] Using logo: {logo_to_use}")
-            try:
-                c.drawImage(logo_to_use, 50, height - 125, width=2*inch, preserveAspectRatio=True, mask='auto')
-            except Exception as e:
-                print(f"[WARNING] No se pudo cargar el logo: {e}")
-            
-            # Encabezado institucional
-            c.setFont("Helvetica-Bold", 16)
-            c.drawString(200, height - 50, nombre_inst)
-            c.setFont("Helvetica", 12)
-            c.drawString(200, height - 70, direccion_inst)
-            c.drawString(200, height - 90, f"Tel: {telefono_inst}")
-            c.drawString(200, height - 110, f"Mail: {mail_inst}")
-            
-            # Examen debajo del logo
-            c.setFont("Helvetica-Bold", 14)
-            examen_lines = wrap_text_advanced(f"Exámen: {examen or 'Examen médico'}", width - 50, "Helvetica-Bold", 14, c)
-            y_examen = height - 220
-            for line in examen_lines:
-                if y_examen < 80:  # Nueva página si no hay espacio
-                    c.showPage()
-                    y_examen = height - 50
-                c.drawString(50, y_examen, line)
-                y_examen -= 18
-            
-            # Añadir los datos del informe
-            c.setFont("Helvetica", 12)
-            
-            # Verificar espacio para datos del paciente
-            if y_examen < 150:
-                c.showPage()
-                y_position = height - 50
-            else:
-                y_position = y_examen - 30
-            
-            c.drawString(50, y_position, f"Paciente: {name or ''}, {surname or ''}")
-            y_position -= 20
-            c.drawString(50, y_position, f"Fecha: {fecha or 'N/A'}")
-            y_position -= 20
-            c.drawString(50, y_position, f"Médico Referente: {refmed or 'No proporcionado'}")
-            y_position -= 40
-            
-            # Añadir contenido médico usando la nueva función
-            max_width = width - 50  # Margen derecho optimizado
-            
-            # Secciones de contenido médico
-            medical_sections = [
-                ("Técnicas de Examen:", techniques or ""),
-                ("Hallazgos:", findings or ""),
-                ("Impresiones:", impressions or ""),
-                ("Conclusión:", conclusions or "")
-            ]
-            
-            for title, content in medical_sections:
-                y_position = draw_text_section(c, title, content, y_position, max_width)
-            
-            # ===== AGREGAR FIRMA DIGITAL AL FINAL =====
-            # Asegurar espacio suficiente para la firma
-            if y_position < 200:
-                c.showPage()
-                y_position = height - 50
-            
-            # Obtener datos de firma del usuario actual usando Flask-Login
-            # Usar como firmante el médico recibido al firmar el reporte. La
-            # sesión puede corresponder a otro usuario en la UI legado.
-            current_user_id = reporter_physician_id
-            if not current_user_id and current_user and current_user.is_authenticated:
-                current_user_id = current_user.id
-                print(f"[INFO] Usuario autenticado: {current_user.username} (ID: {current_user_id})")
-            elif not current_user_id:
-                print(f"[WARNING] No hay usuario autenticado")
-                # Fallback: intentar obtener de session si existe
-                current_user_id = session.get('_user_id') or session.get('user_guid')
-                print(f"[DEBUG] Usando ID de sesión como fallback: {current_user_id}")
-            
-            print(f"[DEBUG] Datos completos de sesión: {dict(session)}")
-            
-            if current_user_id:
-                print(f"[INFO] Buscando firma para usuario: {current_user_id}")
-                try:
-                    signature_data = get_user_signature_data(current_user_id)
-                    if not signature_data:
-                        # Aunque no exista una firma gráfica habilitada, el
-                        # PDF debe identificar al médico que realizó la firma.
-                        signer = DatabaseService.execute_query(
-                            "SELECT name, surname FROM nextris.tbuser WHERE guid=%s",
-                            (current_user_id,),
-                            fetch_one=True,
-                        )
-                        if signer:
-                            signature_data = {
-                                'aclaracion_firma': ' '.join(
-                                    part for part in (signer[0], signer[1]) if part
-                                ).strip(),
-                                'matricula_nacional': None,
-                                'firma_digital': None,
-                                'firma_habilitada': False,
-                                'firma_path': None,
-                            }
-                    print(f"[DEBUG] Datos de firma obtenidos: {signature_data}")
-                    
-                    if signature_data and signature_data.get('firma_digital'):
-                        print(f"[INFO] Agregando firma del médico: {signature_data.get('aclaracion_firma', 'N/A')}")
-                        
-                        # Línea separadora
-                        y_position -= 30
-                        c.line(50, y_position, width - 50, y_position)
-                        y_position -= 30
-                        
-                        # Título de firma
-                        c.setFont("Helvetica-Bold", 12)
-                        c.drawString(50, y_position, "FIRMA DIGITAL:")
-                        y_position -= 30
-                        
-                        # Imagen de la firma
-                        firma_path = signature_data.get('firma_path')
-                        if firma_path and os.path.exists(firma_path):
-                            try:
-                                signature_width = 150
-                                signature_height = 75
-                                c.drawImage(firma_path, 50, y_position - signature_height, 
-                                          width=signature_width, height=signature_height, 
-                                          preserveAspectRatio=True, mask='auto')
-                                
-                                # Datos del médico al lado de la firma
-                                c.setFont("Helvetica", 11)
-                                text_x = signature_width + 80
-                                c.drawString(text_x, y_position - 20, 
-                                           f"Dr. {signature_data.get('aclaracion_firma', 'N/A')}")
-                                c.drawString(text_x, y_position - 35, 
-                                           f"M.N.: {signature_data.get('matricula_nacional', 'N/A')}")
-                                c.drawString(text_x, y_position - 50, "Firma Digital Verificada")
-                                
-                                # Fecha y hora de firma
-                                c.setFont("Helvetica", 9)
-                                c.drawString(text_x, y_position - 65, 
-                                           f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-                                
-                                print("[SUCCESS] Firma agregada correctamente al PDF")
-                                
-                            except Exception as img_error:
-                                print(f"[WARNING] Error agregando imagen de firma: {str(img_error)}")
-                                # Fallback: solo texto sin imagen
-                                c.setFont("Helvetica", 11)
-                                c.drawString(50, y_position - 20, f"Dr. {signature_data.get('aclaracion_firma', 'N/A')}")
-                                c.drawString(50, y_position - 35, f"M.N.: {signature_data.get('matricula_nacional', 'N/A')}")
-                                c.drawString(50, y_position - 50, "Firma Digital")
-                                c.setFont("Helvetica", 9)
-                                c.drawString(50, y_position - 65, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-                        else:
-                            print(f"[WARNING] Archivo de firma no encontrado: {firma_path}")
-                            # Solo texto sin imagen
-                            c.setFont("Helvetica", 11)
-                            c.drawString(50, y_position - 20, f"Dr. {signature_data.get('aclaracion_firma', 'N/A')}")
-                            c.drawString(50, y_position - 35, f"M.N.: {signature_data.get('matricula_nacional', 'N/A')}")
-                            c.drawString(50, y_position - 50, "Firma Digital")
-                            c.setFont("Helvetica", 9)
-                            c.drawString(50, y_position - 65, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-                    else:
-                        print(f"[INFO] No se encontró firma habilitada para el usuario: {current_user_id}")
-                        print(f"[DEBUG] Signature data completa: {signature_data}")
-                        # Agregar texto indicativo de que no hay firma configurada pero con datos del usuario
-                        y_position -= 30
-                        c.line(50, y_position, width - 50, y_position)
-                        y_position -= 30
-                        c.setFont("Helvetica-Bold", 12)
-                        c.drawString(50, y_position, "FIRMA DIGITAL:")
-                        y_position -= 25
-                        c.setFont("Helvetica", 11)
-                        
-                        # Intentar mostrar al menos los datos del usuario si están disponibles
-                        if signature_data and signature_data.get('aclaracion_firma'):
-                            c.drawString(50, y_position, f"Dr. {signature_data.get('aclaracion_firma', 'N/A')}")
-                            c.drawString(50, y_position - 15, f"M.N.: {signature_data.get('matricula_nacional', 'N/A')}")
-                            c.drawString(50, y_position - 30, "Firma digital no configurada")
-                        else:
-                            c.drawString(50, y_position, f"Usuario ID: {current_user_id}")
-                            c.drawString(50, y_position - 15, "Firma digital no configurada")
-                        
-                        c.setFont("Helvetica", 9)
-                        c.drawString(50, y_position - 45, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-                        
-                except Exception as signature_error:
-                    print(f"[ERROR] Error obteniendo datos de firma: {str(signature_error)}")
-                    # Fallback básico pero con información del usuario
-                    y_position -= 30
-                    c.line(50, y_position, width - 50, y_position)
-                    y_position -= 30
-                    c.setFont("Helvetica-Bold", 12)
-                    c.drawString(50, y_position, "FIRMA DIGITAL:")
-                    y_position -= 25
-                    c.setFont("Helvetica", 11)
-                    c.drawString(50, y_position, f"Usuario ID: {current_user_id}")
-                    c.drawString(50, y_position - 15, "Error al cargar firma digital")
-                    c.setFont("Helvetica", 9)
-                    c.drawString(50, y_position - 30, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-            else:
-                print("[WARNING] No hay usuario en sesión para agregar firma")
-                print(f"[DEBUG] session.keys(): {list(session.keys())}")
-                # Firma genérica
-                y_position -= 30
-                c.line(50, y_position, width - 50, y_position)
-                y_position -= 30
-                c.setFont("Helvetica-Bold", 12)
-                c.drawString(50, y_position, "FIRMA DIGITAL:")
-                y_position -= 25
-                c.setFont("Helvetica", 11)
-                c.drawString(50, y_position, "Usuario no identificado")
-                c.setFont("Helvetica", 9)
-                c.drawString(50, y_position - 15, f"Firmado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+            UPDATE nextris.tbexamination
+            SET isreported = 1, assignto = %s, reportdate = CURRENT_TIMESTAMP
+            WHERE guid = %s
+            """,
+            (reporter_physician_id, exam_id),
+        )
+        if cursor.rowcount == 0:
+            connection.rollback()
+            cursor.close()
+            connection.close()
+            return jsonify({'error': 'Examen no encontrado'}), 404
 
-            # Mantener el QR al final también en este generador legado.
-            if share_data and share_data.get('share_url'):
-                try:
-                    c.showPage()
-                    _draw_share_qr_page(c, share_data['share_url'], width, height)
-                except Exception as qr_error:
-                    print(f"[WARNING] No se pudo dibujar el QR en PDF legado: {qr_error}")
-            
-            c.save()
-            print(f"[SUCCESS] PDF generado con formato profesional y firma: {absolute_pdf_path}")
-                
-        except Exception as pdf_generation_error:
-            print(f"[ERROR] Error generando PDF con ReportLab: {str(pdf_generation_error)}")
-            return jsonify({'error': f'Error generando PDF: {str(pdf_generation_error)}'}), 500
+        # Keep the legacy signing endpoint consistent with the React API:
+        # signed reports are sent to Clínica Parque by the persistent queue.
+        from apps.services.clinicaparque_report_queue import enqueue_report_send
+        report_send_schedule = enqueue_report_send(exam_id, connection=connection)
 
-        print(f"[INFO] PDF final en: {pdf_path}")
-        
-        # 4. Actualizar la ruta del PDF y el médico que firmó en tbReport
-        try:
-            query = "UPDATE nextris.tbReport SET pdfpath=%s, idreporterphysician=%s WHERE IdExamination=%s"
-            DatabaseService.execute_query(query, (pdf_path, reporter_physician_id, exam_id), fetch_all=False, commit=True)
-            print(f"[INFO] Ruta del PDF y médico firmante actualizados en tbReport")
-        except Exception as pdf_error:
-            print(f"[WARNING] No se pudo actualizar la ruta del PDF o médico firmante: {str(pdf_error)}")
-        
-        print("[INFO] Reporte firmado exitosamente")
+        connection.commit()
+        cursor.close()
+        connection.close()
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': 'Reporte firmado exitosamente',
-            'pdf_path': pdf_path
-        })
-        
-    except Exception as e:
-        print(f"[ERROR] Error en firmar_reporte: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+            'report_send': report_send_schedule,
+        }), 200
+    except Exception as error:
+        return jsonify({'error': str(error)}), 500
 
 
 @report_bp.route('/editar_predefinido', methods=['POST'])
@@ -1349,21 +1064,25 @@ def editar_predefinido():
         
         title = data.get('title', '')
         studytype_id = data.get('studytype_id')
-        findings = data.get('hallazgostext', '')  # hallazgos
-        technique = data.get('tecnicastext', '')  # técnicas
-        impression = data.get('impresionestext', '')  # impresiones
-        conclusion = data.get('conclusionestext', '')  # conclusiones
+        normalized = normalize_report_payload({
+            **data,
+            'findings': data.get('findings', data.get('hallazgostext', '')),
+            'technique': data.get('technique', data.get('tecnicastext', '')),
+            'impression': data.get('impression', data.get('impresionestext', '')),
+            'conclusion': data.get('conclusion', data.get('conclusionestext', '')),
+        })
         
         # Actualizar en la base de datos
         query = """
             UPDATE nextris.tbinfpredef 
-            SET tittle=%s, findings=%s, impression=%s, technique=%s, conclusion=%s, studytype_id=%s
+            SET tittle=%s, study_reason=%s, content=%s, conclusion=%s, studytype_id=%s
             WHERE guid=%s
         """
         
         result = DatabaseService.execute_query(
             query, 
-            (title, findings, impression, technique, conclusion, studytype_id, guid),
+            (title, normalized.get('study_reason', ''), normalized.get('content', ''),
+             normalized.get('conclusion', ''), studytype_id, guid),
             commit=True
         )
         
@@ -1392,33 +1111,25 @@ def send_mail(report_id):
         SMTP_PASSWORD = 'pjiwxoqulgvdctgc'
         FROM_EMAIL = 'facufarias93@gmail.com'
         
-        # Obtener información del reporte
-        pdf_query = "SELECT pdfpath FROM nextris.tbReport WHERE IdExamination = %s"
-        pdf_result = DatabaseService.execute_query(pdf_query, (report_id,))
-        
         # Obtener información del examen
         exam_query = "SELECT StudyInstanceUID, IsImage, IdPatient, LocalAcc, guid FROM nextris.tbexamination WHERE Guid = %s"
         exam_result = DatabaseService.execute_query(exam_query, (report_id,))
         
-        if not pdf_result or not exam_result:
+        if not exam_result:
             print("[ERROR] Reporte o examen no encontrado en la base de datos")
             return jsonify({"error": "Reporte no encontrado"}), 404
             
-        pdf_path = pdf_result[0][0]
         study_data = exam_result[0]
         study_instance_uid = study_data[0]
         guid_examination = study_data[4]
         
-        print(f"[DEBUG] PDF path: {pdf_path}")
         print(f"[DEBUG] GUID examination: {guid_examination}")
-        
-        # Normalizar y verificar la ruta del PDF
-        pdf_path = os.path.normpath(pdf_path)
-        absolute_path = os.path.abspath(pdf_path)
-        
-        if not os.path.exists(absolute_path):
-            print(f"[ERROR] PDF no encontrado en la ruta: {absolute_path}")
-            return jsonify({"error": "PDF no encontrado"}), 404
+
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(report_id)
+        except ReportPdfNotAvailable:
+            return jsonify({"error": "Informe PDF no disponible"}), 404
             
         print("[DEBUG] PDF encontrado, preparando email...")
         
@@ -1434,10 +1145,9 @@ def send_mail(report_id):
         msg.attach(body)
         
         # Adjuntar el archivo PDF
-        with open(absolute_path, 'rb') as file:
-            pdf_attachment = MIMEApplication(file.read(), _subtype='pdf')
-            pdf_attachment.add_header('Content-Disposition', 'attachment', filename=os.path.basename(absolute_path))
-            msg.attach(pdf_attachment)
+        pdf_attachment = MIMEApplication(rendered.content, _subtype='pdf')
+        pdf_attachment.add_header('Content-Disposition', 'attachment', filename=rendered.filename)
+        msg.attach(pdf_attachment)
         
         # Enviar el email
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:

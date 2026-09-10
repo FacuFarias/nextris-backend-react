@@ -183,7 +183,6 @@ nextris-backend-react/
 ├── tests/                     # Tests automatizados
 ├── deployment/                # Scripts de deployment
 ├── media/                     # Archivos multimedia
-├── output_pdfs/              # PDFs generados
 ├── API_DOCUMENTATION.md      # Documentación completa
 ├── requirements.txt          # Dependencias Python
 ├── run.py                    # Entry point

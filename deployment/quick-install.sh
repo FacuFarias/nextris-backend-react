@@ -76,7 +76,6 @@ DB_PORT=5432
 DB_NAME=pacsdb
 
 IPSERVER=148.230.72.8
-BASE_FOLDER=/var/www/nextris-dev/output_pdfs
 
 SECRET_KEY=nextris_dev_secret_key_12345
 DICOM_VIEWER_URL=https://viewer.nextris.cloud/
@@ -85,9 +84,7 @@ EOF
 chown nextris:nextris /var/www/nextris-dev/.env
 
 echo -e "${YELLOW}7. Creando directorios necesarios...${NC}"
-mkdir -p /var/www/nextris-dev/output_pdfs
 mkdir -p /var/www/nextris-dev/media/firmas
-chown -R nextris:nextris /var/www/nextris-dev/output_pdfs
 chown -R nextris:nextris /var/www/nextris-dev/media
 
 echo -e "${YELLOW}8. Sincronizando frontend...${NC}"

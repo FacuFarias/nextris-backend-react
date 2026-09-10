@@ -346,119 +346,9 @@ function GenerarInforme(TablaId) {
 
 // Validación de credenciales del usuario
 function validarCredencialesUsuario() {
-    var usernameInput = document.getElementById('current_username');
-    var username = usernameInput ? usernameInput.value : null;
-    
-  return new Promise(function(resolve) {
-    // Mostrar el modal
-    var modal = new bootstrap.Modal(document.getElementById('modal_firmar_informe'));
-    var passwordInput = document.getElementById('password_firma');
-    var btnConfirmar = document.getElementById('btn_confirmar_firma');
-    var form = document.getElementById('form_firmar_informe');
-    
-    // Limpiar el input de contraseña
-    passwordInput.value = '';
-    passwordInput.classList.remove('is-invalid');
-    
-    // Mostrar el modal
-    modal.show();
-    
-    // Enfocar el input cuando se muestre el modal
-    document.getElementById('modal_firmar_informe').addEventListener('shown.bs.modal', function () {
-      passwordInput.focus();
-    }, { once: true });
-    
-    // Función para validar
-    var validar = function() {
-      var password = passwordInput.value.trim();
-      
-      if (!password) {
-        passwordInput.classList.add('is-invalid');
-        return;
-      }
-      
-      // Deshabilitar botón mientras valida
-      btnConfirmar.disabled = true;
-      btnConfirmar.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Validando...';
-      
-      // Llamada al backend para validar
-      console.log("Validando para usuario y contraseña:", username+" / "+password);
-      fetch('/validar_credenciales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username, password: password })
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log("Respuesta del servidor:", data);
-        
-        if (data.success === true) {
-          // Credenciales válidas
-          modal.hide();
-          resolve(true);
-        } else {
-          // Credenciales inválidas
-          passwordInput.classList.add('is-invalid');
-          passwordInput.value = '';
-          passwordInput.focus();
-          
-          // Mostrar toast de error
-          if (typeof showErrorToast === 'function') {
-            showErrorToast('Error', 'Contraseña incorrecta. Por favor intente nuevamente.');
-          }
-          
-          // Restaurar botón
-          btnConfirmar.disabled = false;
-          btnConfirmar.innerHTML = '<i class="fas fa-signature me-1"></i>Confirmar y Firmar';
-        }
-      })
-      .catch(error => {
-        console.error('Error al validar credenciales:', error);
-        passwordInput.classList.add('is-invalid');
-        
-        if (typeof showErrorToast === 'function') {
-          showErrorToast('Error', 'Error al validar las credenciales. Intente nuevamente.');
-        }
-        
-        // Restaurar botón
-        btnConfirmar.disabled = false;
-        btnConfirmar.innerHTML = '<i class="fas fa-signature me-1"></i>Confirmar y Firmar';
-      });
-    };
-    
-    // Evento para el botón confirmar
-    var confirmarHandler = function() {
-      validar();
-    };
-    
-    // Evento para presionar Enter en el input
-    var enterHandler = function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        validar();
-      }
-    };
-    
-    // Agregar eventos
-    btnConfirmar.addEventListener('click', confirmarHandler, { once: true });
-    passwordInput.addEventListener('keypress', enterHandler);
-    
-    // Evento cuando se cierra el modal sin confirmar
-    document.getElementById('modal_firmar_informe').addEventListener('hidden.bs.modal', function () {
-      // Remover event listeners
-      btnConfirmar.removeEventListener('click', confirmarHandler);
-      passwordInput.removeEventListener('keypress', enterHandler);
-      
-      // Restaurar botón
-      btnConfirmar.disabled = false;
-      btnConfirmar.innerHTML = '<i class="fas fa-signature me-1"></i>Confirmar y Firmar';
-      
-      // Si no se resolvió la promesa, resolver como false
-      if (btnConfirmar.disabled === false) {
-        resolve(false);
-      }
-    }, { once: true });
-  });
+  // La sesión autenticada determina al firmante; no se solicita nuevamente
+  // su contraseña para completar la firma.
+  return Promise.resolve(true);
 }
 
 function ConfigBtnExpand(CardId,colapseShowId,collapseId,btnId,otherCardId){
@@ -1060,6 +950,5 @@ document.addEventListener("DOMContentLoaded", function() {
     tbody_g = document.querySelector('#tabla-pacientes tbody');
     tbody_g.addEventListener('dblclick', function () { GenerarInforme('tabla-pacientes') });
 });
-
 
 

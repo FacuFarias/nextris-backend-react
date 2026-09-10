@@ -6,6 +6,7 @@ Script de prueba para los endpoints de Clínica Parque
 
 import requests
 import json
+import os
 import sys
 from datetime import datetime
 
@@ -154,6 +155,197 @@ def test_create_order_patient_temporal():
         return None
 
 
+def test_create_order_without_optional_fields():
+    """Crear orden sin rad_id ni priority_id: deben aplicarse sus defaults."""
+    print_header("ORDEN SIN RAD_ID NI PRIORITY_ID")
+    print_test("POST /clinicaparque/orders_to_execute_and_read")
+
+    timestamp = int(datetime.now().timestamp())
+    payload = {
+        "patient": {
+            "id": f"TEST-OPTIONAL-{timestamp}",
+            "dni": "12345678",
+            "name": "JUAN PEREZ TEST",
+            "birthdate": "1993-09-20",
+            "sex": "M",
+            "patient_type": "F",
+            "healthcard_type": "Particular"
+        },
+        "order": {
+            "orderId": f"ORD-OPTIONAL-{timestamp}",
+            "accessionNumber": f"ACC-OPTIONAL-{timestamp}",
+            "procedure_code": "RX-01",
+            "procedure_name": "Radiografía de Tórax",
+            "modality": "CR",
+            "AET": "PACS_SERVER",
+            "scheduledTime": "2026-05-14T10:30:00Z"
+        }
+    }
+
+    resp = requests.post(f"{API_URL}/clinicaparque/orders_to_execute_and_read", headers=headers(), json=payload)
+    data = resp.json()
+    print(f"Status: {resp.status_code}")
+    print(f"Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+
+    if resp.status_code == 200 and data.get("success"):
+        print_success("Orden creada con defaults de rad_id y priority_id")
+        return data
+    print_error(f"Error: {data.get('message')}")
+    return None
+
+
+def test_create_order_with_laterality():
+    """Crear orden urgente con lateralidad; requiere UUID configurado para la instalación."""
+    laterality_id = os.environ.get("CLINICAPARQUE_LATERALITY_ID")
+    if not laterality_id:
+        print(f"{Colors.YELLOW}↷ Se omite lateralidad: definir CLINICAPARQUE_LATERALITY_ID{Colors.ENDC}")
+        return True
+
+    print_header("ORDEN CON PRIORIDAD Y LATERALIDAD")
+    print_test("POST /clinicaparque/orders_to_execute_and_read")
+
+    timestamp = int(datetime.now().timestamp())
+    payload = {
+        "patient": {
+            "id": f"TEST-LAT-{timestamp}",
+            "dni": "12345678",
+            "name": "JUAN PEREZ TEST",
+            "birthdate": "1993-09-20",
+            "sex": "M",
+            "patient_type": "F",
+            "healthcard_type": "Particular"
+        },
+        "order": {
+            "orderId": f"ORD-LAT-{timestamp}",
+            "accessionNumber": f"ACC-LAT-{timestamp}",
+            "procedure_code": "RX-01",
+            "procedure_name": "Radiografía de Tórax",
+            "modality": "CR",
+            "AET": "PACS_SERVER",
+            "scheduledTime": "2026-05-14T10:30:00Z",
+            "priority_id": 1,
+            "laterality_id": laterality_id
+        }
+    }
+
+    resp = requests.post(f"{API_URL}/clinicaparque/orders_to_execute_and_read", headers=headers(), json=payload)
+    data = resp.json()
+    print(f"Status: {resp.status_code}")
+    print(f"Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+
+    if resp.status_code == 200 and data.get("success"):
+        print_success("Orden creada con prioridad urgente y lateralidad")
+        return data
+    print_error(f"Error: {data.get('message')}")
+    return None
+
+
+def test_update_existing_order_fields():
+    """Verificar que una orden existente actualiza prioridad y lateralidad."""
+    laterality_id = os.environ.get("CLINICAPARQUE_LATERALITY_ID")
+    if not laterality_id:
+        print(f"{Colors.YELLOW}↷ Se omite actualización: definir CLINICAPARQUE_LATERALITY_ID{Colors.ENDC}")
+        return True
+
+    print_header("ACTUALIZAR PRIORIDAD Y LATERALIDAD DE ORDEN EXISTENTE")
+    timestamp = int(datetime.now().timestamp())
+    patient = {
+        "id": f"TEST-UPDATE-{timestamp}",
+        "dni": "12345678",
+        "name": "JUAN PEREZ TEST",
+        "birthdate": "1993-09-20",
+        "sex": "M",
+        "patient_type": "F",
+        "healthcard_type": "Particular"
+    }
+    order = {
+        "orderId": f"ORD-UPDATE-{timestamp}",
+        "accessionNumber": f"ACC-UPDATE-{timestamp}",
+        "procedure_code": "RX-01",
+        "procedure_name": "Radiografía de Tórax",
+        "modality": "CR",
+        "AET": "PACS_SERVER",
+        "scheduledTime": "2026-05-14T10:30:00Z",
+        "priority_id": 0
+    }
+
+    first = requests.post(
+        f"{API_URL}/clinicaparque/orders_to_execute_and_read",
+        headers=headers(), json={"patient": patient, "order": order}
+    )
+    if first.status_code != 200 or not first.json().get("success"):
+        print_error(f"No se pudo crear la orden base: {first.text}")
+        return False
+
+    order.update({"priority_id": 1, "laterality_id": laterality_id})
+    second = requests.post(
+        f"{API_URL}/clinicaparque/orders_to_execute_and_read",
+        headers=headers(), json={"patient": patient, "order": order}
+    )
+    data = second.json()
+    if second.status_code == 200 and data.get("success") and data.get("updated"):
+        print_success("Orden existente actualizada")
+        return True
+    print_error(f"Error al actualizar: {second.status_code} {data}")
+    return False
+
+
+def test_create_order_invalid_priority():
+    """Rechazar una prioridad distinta de 0 o 1."""
+    print_header("VALIDACIÓN - PRIORITY_ID INVÁLIDO")
+    print_test("POST /clinicaparque/orders_to_execute_and_read")
+
+    payload = {
+        "patient": {"id": "TEST-PRIORITY-001", "patient_type": "T"},
+        "order": {
+            "orderId": "ORD-PRIORITY-001",
+            "accessionNumber": "ACC-PRIORITY-001",
+            "procedure_code": "RX-01",
+            "procedure_name": "Test",
+            "modality": "CR",
+            "AET": "PACS_SERVER",
+            "scheduledTime": "2026-05-14T10:30:00Z",
+            "priority_id": 2
+        }
+    }
+
+    resp = requests.post(f"{API_URL}/clinicaparque/orders_to_execute_and_read", headers=headers(), json=payload)
+    data = resp.json()
+    if resp.status_code == 400 and "priority_id" in data.get("message", ""):
+        print_success("priority_id inválido rechazado")
+        return True
+    print_error(f"Respuesta inesperada: {resp.status_code} {data}")
+    return False
+
+
+def test_create_order_invalid_laterality():
+    """Rechazar una lateralidad que no sea un UUID válido."""
+    print_header("VALIDACIÓN - LATERALITY_ID INVÁLIDO")
+    print_test("POST /clinicaparque/orders_to_execute_and_read")
+
+    payload = {
+        "patient": {"id": "TEST-LATERALITY-001", "patient_type": "T"},
+        "order": {
+            "orderId": "ORD-LATERALITY-001",
+            "accessionNumber": "ACC-LATERALITY-001",
+            "procedure_code": "RX-01",
+            "procedure_name": "Test",
+            "modality": "CR",
+            "AET": "PACS_SERVER",
+            "scheduledTime": "2026-05-14T10:30:00Z",
+            "laterality_id": "not-a-uuid"
+        }
+    }
+
+    resp = requests.post(f"{API_URL}/clinicaparque/orders_to_execute_and_read", headers=headers(), json=payload)
+    data = resp.json()
+    if resp.status_code == 400 and "laterality_id" in data.get("message", ""):
+        print_success("laterality_id inválido rechazado")
+        return True
+    print_error(f"Respuesta inesperada: {resp.status_code} {data}")
+    return False
+
+
 def test_create_order_validation():
     """Probar validación de campos requeridos"""
     print_header("VALIDACIÓN - CAMPOS FALTANTES")
@@ -234,10 +426,25 @@ if __name__ == "__main__":
     print("\n3. Crear orden para ejecutar y leer (con paciente Temporal)")
     test_create_order_patient_temporal()
 
-    print("\n4. Validación - campos faltantes")
+    print("\n4. Crear orden sin rad_id ni priority_id")
+    test_create_order_without_optional_fields()
+
+    print("\n5. Crear orden con prioridad y lateralidad")
+    test_create_order_with_laterality()
+
+    print("\n6. Actualizar prioridad y lateralidad de orden existente")
+    test_update_existing_order_fields()
+
+    print("\n7. Validación - campos faltantes")
     test_create_order_validation()
 
-    print("\n5. Validación - patient_type inválido")
+    print("\n8. Validación - patient_type inválido")
     test_create_order_invalid_patient_type()
+
+    print("\n9. Validación - priority_id inválido")
+    test_create_order_invalid_priority()
+
+    print("\n10. Validación - laterality_id inválido")
+    test_create_order_invalid_laterality()
 
     print_header("FIN DE PRUEBAS")

@@ -35,7 +35,13 @@ from apps.api.facility_plan_usage import (
     get_global_plan_snapshot,
     append_plan_change_audit,
 )
-from apps.home.services.app_config_service import get_app_config, update_app_config, get_app_modules, update_app_module
+from apps.home.services.app_config_service import (
+    ensure_app_config_table,
+    get_app_config,
+    update_app_config,
+    get_app_modules,
+    update_app_module,
+)
 
 
 def get_db_config():
@@ -532,18 +538,18 @@ def update_system_config():
         }), 500
 
 
-@api_blueprint.route('/config/workflow', methods=['GET'])
+@api_blueprint.route('/config/workflow', methods=['GET', 'PUT'])
 @jwt_required()
-def get_workflow_config():
+def workflow_config():
     """
-    Obtiene la configuración de workflow
+    Obtiene o actualiza la configuración de workflow para el envío diferido
+    de reportes firmados a Clínica Parque.
     
     Returns:
     {
         "success": true,
         "data": {
-            "agenda_tipo": "...",
-            "agenda_estudios": "..."
+            "report_send_delay_minutes": 15
         }
     }
     """
@@ -557,37 +563,48 @@ def get_workflow_config():
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
-        ensure_permissions_schema(connection)
-        seed_permissions(connection)
-        
-        query = """
-            SELECT agenda_tipo, agenda_estudios
+        ensure_app_config_table(connection)
+
+        if request.method == 'PUT':
+            payload = request.get_json(silent=True) or {}
+            raw_delay = payload.get('report_send_delay_minutes')
+            if isinstance(raw_delay, bool) or not isinstance(raw_delay, int):
+                cursor.close()
+                connection.close()
+                return jsonify({'success': False, 'message': 'El retardo debe ser un número entero'}), 400
+            delay_minutes = raw_delay
+            if delay_minutes < 0 or delay_minutes > 1440:
+                cursor.close()
+                connection.close()
+                return jsonify({'success': False, 'message': 'El retardo debe estar entre 0 y 1440 minutos'}), 400
+
+            cursor.execute(
+                """
+                UPDATE nextris.app_config
+                SET report_send_delay_minutes = %s, updated_at = NOW()
+                WHERE id = 1
+                """,
+                (delay_minutes,),
+            )
+            connection.commit()
+
+        cursor.execute(
+            """
+            SELECT COALESCE(report_send_delay_minutes, 15)
             FROM nextris.app_config
             WHERE id = 1
-        """
-        
-        cursor.execute(query)
+            """
+        )
         result = cursor.fetchone()
-        
+        delay_minutes = int(result[0]) if result else 15
+
         cursor.close()
         connection.close()
-        
-        if result:
-            return jsonify({
-                'success': True,
-                'data': {
-                    'agenda_tipo': result[0],
-                    'agenda_estudios': result[1]
-                }
-            }), 200
-        else:
-            return jsonify({
-                'success': True,
-                'data': {
-                    'agenda_tipo': None,
-                    'agenda_estudios': None
-                }
-            }), 200
+
+        return jsonify({
+            'success': True,
+            'data': {'report_send_delay_minutes': delay_minutes},
+        }), 200
         
     except Exception as e:
         return jsonify({

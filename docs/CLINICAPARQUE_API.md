@@ -400,6 +400,7 @@ Body para paciente Final (F):
     "scheduledTime": "2026-05-14T10:30:00Z",
     "rad_id": "ID_MEDICO",
     "priority_id": 1,
+    "laterality_id": "UUID_LATERALIDAD",
     "study_reason": "Dolor torácico",
     "req_doctor": "Dr. Juan García"
   }
@@ -443,14 +444,18 @@ Body para paciente Temporal (T) o Neonatal (N):
 | `orderId` | String | Sí | Número de orden o solicitud |
 | `accessionNumber` | String | Sí | Número de acceso (clave DICOM) |
 | `procedure_code` | String | Sí | Código del estudio/procedimiento |
-| `procedure_name` | String | Sí | Descripción del estudio |
+| `procedure_name` | String | Sí* | Descripción del estudio |
+| `study_description` | String | No* | Descripción del estudio; si `procedure_code` aún no existe en NextRIS, se usa para resolver y actualizar el tipo de estudio del examen |
 | `modality` | String | Sí | Modalidad: `CR`, `CT`, `MR`, `DX`, etc. |
 | `AET` | String | Sí | AE Title del equipo |
 | `scheduledTime` | String | Sí | Fecha/hora programada (ISO 8601) |
-| `rad_id` | String | Sí | Identificador del radiólogo |
-| `priority_id` | Int | Sí | Prioridad: `0` (Rutina), `1` (Urgente) |
+| `rad_id` | String | No | Identificador del radiólogo; si se omite se guarda vacío/`NULL` |
+| `priority_id` | Int | No | Prioridad: `0` (Rutina), `1` (Urgente); por defecto `0` |
+| `laterality_id` | UUID | No | UUID de la lateralidad existente en `islaterality` |
 | `study_reason` | String | No | Razón o motivo del estudio |
 | `req_doctor` | String | No | Nombre del médico referente (se guarda en `requestingphysician_name`) |
+
+\* Se debe enviar `procedure_name` o `study_description`.
 
 #### Comportamiento
 
@@ -461,6 +466,14 @@ Body para paciente Temporal (T) o Neonatal (N):
    - `status = 'Scheduled'`
    - `requestingphysician_name`: valor de `req_doctor`
    - `history`: incluye razón del estudio si se provee
+   - `idreferringphysician`: radiólogo resuelto por `rad_id`, o `NULL` si no se informa
+   - `idseverity`: severidad urgente cuando `priority_id` es `1`; rutina (`NULL`) cuando es `0`
+   - `laterality_id`: lateralidad recibida, si se informa
+
+Si el examen ya fue creado previamente por PACS y el código recibido todavía
+no existe en `isstudytype`, el endpoint busca `study_description` (o, si no se
+envía, `procedure_name`) por descripción. Cuando encuentra una coincidencia,
+actualiza `tbexamination.studytype_id` en el mismo procesamiento de la orden.
 3. **Reporte**: Crea entrada vacía en `tbreport`
 4. **Worklist**: Envía orden HL7 al worklist DICOM
 
@@ -505,7 +518,8 @@ curl -X POST http://<SERVER>:<PORT>/api/clinicaparque/orders_to_execute_and_read
       "AET": "PACS_SERVER",
       "scheduledTime": "2026-05-14T10:30:00Z",
       "rad_id": "ID_MEDICO",
-      "priority_id": 1
+      "priority_id": 1,
+      "laterality_id": "UUID_LATERALIDAD"
     }
   }'
 ```
@@ -972,11 +986,21 @@ Cuando una imagen llega al PACS dcm4chee, se ejecutan automáticamente dos trigg
 
 1. dcm4chee recibe estudio → INSERT en `public.study`
 2. Al hacer COMMIT, el trigger deferred se ejecuta
-3. Busca el paciente en `nextris.datapatient` por DICOM PatientID
-4. Limpia `study_desc` y busca coincidencia con `nextris.isstudytype.description`
-5. Genera número de admisión (`ADM000001`, `ADM000002`, ...)
-6. Crea examen en `nextris.tbexamination` con `isimage = 1`
-7. Crea reporte vacío en `nextris.tbreport`
+3. Si existe una orden sin imagen, intenta reconciliarla por `accession_no`,
+   `PatientName` normalizado y el mismo día del estudio/orden
+4. Si la reconciliación tiene éxito, actualiza `studyinstanceuid` con el UID
+   real del PACS y marca `isimage = 1`
+5. Si no existe una orden, busca el paciente en `nextris.datapatient` por
+   DICOM PatientID
+6. Limpia `study_desc` y busca coincidencia con `nextris.isstudytype.description`
+7. Genera número de admisión (`ADM000001`, `ADM000002`, ...)
+8. Crea examen en `nextris.tbexamination` con `isimage = 1`
+9. Crea reporte vacío en `nextris.tbreport`
+
+La reconciliación no exige que el PatientID DICOM sea igual al PatientID de la
+orden: cuando coinciden accession, nombre y fecha, se conserva el paciente de
+la orden. La migración que instala esta regla es
+`20260902_reconcile_pacs_studies_by_patient_accession_date.sql`.
 
 #### Mapeo de examen
 
@@ -987,8 +1011,8 @@ Cuando una imagen llega al PACS dcm4chee, se ejecutan automáticamente dos trigg
 | `admisionnumber` | Generado: `ADM000001`, `ADM000002`, ... |
 | `localacc` | `accession_no` del estudio PACS |
 | `studyinstanceuid` | `study_iuid` del estudio PACS |
-| `status` | `'Executed'` |
-| `isexecuted` | `1` |
+| `status` | `'Scheduled'` |
+| `isexecuted` | `0` |
 | `isreported` | `0` |
 | `isimage` | `1` |
 
@@ -1116,3 +1140,10 @@ curl -X POST http://192.168.0.76:5001/api/clinicaparque/addenda \
 7. **Puerto**: Configurar según el entorno (por defecto: 5001)
 8. **Usuarios**: Al crear paciente, se genera usuario automático (username=`id`, password=últimos 3 dígitos)
 9. **Vinculación automática**: Al crear paciente (vía API o DICOM), se buscan y vinculan automáticamente todos los estudios existentes en el PACS para ese paciente
+# Compatibilidad de campos de reportes
+
+La integración acepta el formato canónico `study_reason`, `content` y
+`conclusion`, además del payload histórico. En los envíos salientes se conserva
+el contrato existente: `findings` contiene `content`, `conclusions` contiene
+`conclusion`, y `technique`/`impressions` se envían vacíos. Las addendas se
+anexan como bloques fechados dentro de Contenido y/o Conclusión.

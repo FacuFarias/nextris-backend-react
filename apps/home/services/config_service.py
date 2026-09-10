@@ -26,11 +26,6 @@ class ConfigService:
         }
 
     @staticmethod
-    def get_base_folder():
-        """Obtiene la carpeta base para archivos PDF"""
-        return os.getenv('BASE_FOLDER', '/app/output_pdfs')
-
-    @staticmethod
     def get_ipserver():
         """Obtiene la IP del servidor HL7"""
         return os.getenv('IPSERVER', '127.0.0.1')
@@ -45,7 +40,6 @@ class ConfigService:
         """Obtiene toda la configuración actual"""
         return {
             'config': ConfigService.get_db_config(),
-            'BASE_FOLDER': ConfigService.get_base_folder(),
             'IPSERVER': ConfigService.get_ipserver(),
             'FHIR_SERVER_URL': ConfigService.get_fhir_server_url()
         }
@@ -82,10 +76,6 @@ class ConfigService:
                 os.environ[key] = str(v)
                 updates[key] = str(v)
 
-        if 'BASE_FOLDER' in data:
-            os.environ['BASE_FOLDER'] = data['BASE_FOLDER']
-            updates['BASE_FOLDER'] = data['BASE_FOLDER']
-
         if 'IPSERVER' in data:
             os.environ['IPSERVER'] = data['IPSERVER']
             updates['IPSERVER'] = data['IPSERVER']
@@ -102,6 +92,5 @@ class ConfigService:
 
 # Variables globales de configuración para compatibilidad
 config = ConfigService.get_db_config()
-BASE_FOLDER = ConfigService.get_base_folder()
 IPSERVER = ConfigService.get_ipserver()
 server_url = ConfigService.get_fhir_server_url()

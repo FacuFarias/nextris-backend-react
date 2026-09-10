@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from apps.api import api_blueprint
 from apps.authentication.util import hash_pass
-from apps.home.controllers.report_controller import generate_report_pdf_with_signature
+from apps.services.report_fields import normalize_report_payload
 
 
 def get_db_config():
@@ -175,23 +175,25 @@ def create_examination(cursor, patient_guid, exam_data, report_data, study_uid=N
         exam_data.get('history')
     ))
 
+    report_fields = normalize_report_payload(
+        report_data, reason_fallback=exam_data.get('clinicalquestion') or exam_data.get('history')
+    )
     report_guid = str(uuid.uuid4())
     cursor.execute("""
         INSERT INTO nextris.tbreport (
             guid, idexamination, idpatient, admnumber, iduser,
-            findings, impressions, techniques, conclusions,
+            study_reason, content, conclusion,
             wassaved, createdon, date
         ) VALUES (
             %s, %s, %s, %s, %s,
-            %s, %s, %s, %s,
+            %s, %s, %s,
             true, NOW(), NOW()
         )
     """, (
         report_guid, exam_guid, patient_guid, adm_number, rad_user_guid,
-        report_data.get('findings', ''),
-        report_data.get('impressions', ''),
-        report_data.get('techniques', ''),
-        report_data.get('conclusions', '')
+        report_fields.get('study_reason', ''),
+        report_fields.get('content', ''),
+        report_fields.get('conclusion', '')
     ))
 
     return exam_guid, report_guid, adm_number
@@ -356,14 +358,18 @@ def external_receive_study():
             missing.append('patient.dni')
         if not exam_data.get('studytype_id'):
             missing.append('examination.studytype_id')
-        if not report_data.get('findings'):
-            missing.append('report.findings')
-        if not report_data.get('impressions'):
-            missing.append('report.impressions')
-        if not report_data.get('techniques'):
-            missing.append('report.techniques')
-        if not report_data.get('conclusions'):
-            missing.append('report.conclusions')
+        report_fields = normalize_report_payload(
+            report_data,
+            reason_fallback=report_data.get('study_reason')
+                or exam_data.get('clinicalquestion') or exam_data.get('history')
+        )
+        for key, label in (
+            ('study_reason', 'report.study_reason'),
+            ('content', 'report.content'),
+            ('conclusion', 'report.conclusion'),
+        ):
+            if not report_fields.get(key):
+                missing.append(label)
 
         if missing:
             return jsonify({
@@ -386,7 +392,7 @@ def external_receive_study():
 
         # --- Paso 3: Crear examen + reporte ---
         exam_guid, report_guid, adm_number = create_examination(
-            cursor, patient_guid, exam_data, report_data, study_uid, rad_id
+            cursor, patient_guid, exam_data, report_fields, study_uid, rad_id
         )
 
         # --- Paso 4: Vincular PACS ---
@@ -407,28 +413,6 @@ def external_receive_study():
             SET isreported = 1, reportdate = NOW(), assignto = %s
             WHERE guid = %s
         """, (rad_user_guid, exam_guid))
-
-        # Generar PDF
-        pdf_filename = f"{adm_number}_{patient_data.get('nationalcode', 'unknown')}.pdf"
-        pdf_relative_path = f"output_pdfs/{pdf_filename}"
-        
-        connection.commit()  # Commit antes de generar PDF
-        
-        try:
-            pdf_path = generate_report_pdf_with_signature(
-                exam_guid, 
-                output_dir='output_pdfs', 
-                pdf_filename=pdf_filename
-            )
-            if pdf_path:
-                cursor.execute("""
-                    UPDATE nextris.tbreport
-                    SET pdfpath = %s
-                    WHERE guid = %s
-                """, (pdf_relative_path, report_guid))
-                connection.commit()
-        except Exception as pdf_error:
-            print(f"[WARNING] Error generando PDF: {pdf_error}")
 
         # --- Paso 6: Log ---
         request_id = log_external_call(

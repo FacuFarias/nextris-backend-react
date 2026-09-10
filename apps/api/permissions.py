@@ -19,8 +19,7 @@ PERMISSION_CATALOG = [
     {'code': 'tabs.patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pestaña Pacientes'},
     {'code': 'tabs.appointments.view', 'module': 'appointments', 'action': 'view', 'description': 'Ver pestaña Citas'},
     {'code': 'tabs.admissions.view', 'module': 'admissions', 'action': 'view', 'description': 'Ver pestaña Admisión'},
-    {'code': 'tabs.execution.view', 'module': 'execution', 'action': 'view', 'description': 'Ver pestaña Ejecución'},
-    {'code': 'tabs.reports.view', 'module': 'reports', 'action': 'view', 'description': 'Ver pestaña Redacción/Informes'},
+    {'code': 'tabs.worklist.view', 'module': 'worklist', 'action': 'view', 'description': 'Ver Lista de trabajo'},
     {'code': 'tabs.distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
     {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
     {'code': 'tabs.gestion.view', 'module': 'gestion', 'action': 'view', 'description': 'Ver pestaña Gestión'},
@@ -49,8 +48,7 @@ PERMISSION_CATALOG = [
     {'code': 'distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
     {'code': 'distribution.perform', 'module': 'distribution', 'action': 'perform', 'description': 'Hacer la distribución'},
 
-    {'code': 'execution.view_pending', 'module': 'execution', 'action': 'view_pending', 'description': 'Ver ejecuciones pendientes'},
-    {'code': 'execution.execute', 'module': 'execution', 'action': 'execute', 'description': 'Ejecutar'},
+    {'code': 'worklist.confirm_execute', 'module': 'worklist', 'action': 'confirm_execute', 'description': 'Confirmar o ejecutar estudios'},
 
     {'code': 'patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pacientes'},
     {'code': 'patients.manage', 'module': 'patients', 'action': 'manage', 'description': 'Generar nuevos pacientes / editar pacientes'},
@@ -58,8 +56,9 @@ PERMISSION_CATALOG = [
     {'code': 'images.view', 'module': 'images', 'action': 'view', 'description': 'Ver imágenes DICOM'},
     {'code': 'images.share_link', 'module': 'images', 'action': 'share_link', 'description': 'Generar enlace compartido de imágenes'},
 
-    {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
-    {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
+    {'code': 'reports.write', 'module': 'reports', 'action': 'write', 'description': 'Redactar informes'},
+    {'code': 'templates.manage', 'module': 'templates', 'action': 'manage', 'description': 'Gestionar informes predefinidos'},
+    {'code': 'dicom.studies.manage', 'module': 'dicom', 'action': 'manage_studies', 'description': 'Cargar, vincular y desvincular estudios DICOM'},
     {'code': 'reports.assign', 'module': 'reports', 'action': 'assign', 'description': 'Asignar estudio a un usuario'},
     {'code': 'reports.notes.delete', 'module': 'reports', 'action': 'delete_notes', 'description': 'Eliminar notas de estudios'},
 ]
@@ -68,6 +67,12 @@ PERMISSION_CATALOG = [
 DEPRECATED_PERMISSION_ALIASES = {
     # Backward compatibility for renamed permissions.
     'tabs.preferences.view': 'tabs.gestion.view',
+    'tabs.execution.view': 'tabs.worklist.view',
+    'execution.view_pending': 'tabs.worklist.view',
+    'execution.execute': 'worklist.confirm_execute',
+    'tabs.reports.view': 'tabs.worklist.view',
+    'reports.view_writing': 'reports.write',
+    'reports.view_reports': 'templates.manage',
 }
 
 
@@ -101,20 +106,21 @@ ROLE_BASED_PERMISSIONS = {
         'tabs.appointments.view',
         'tabs.admissions.view',
         'tabs.distribution.view',
-        'tabs.reports.view',
-        'reports.view_writing',
-        'reports.view_reports',
+        'tabs.worklist.view',
+        'images.view',
+        'images.share_link',
+    },
+    'administrador': {
+        'images.view',
+        'images.share_link',
     },
     'tecnico': {
         'tabs.patients.view',
         'patients.view',
-        'tabs.execution.view',
-        'execution.view_pending',
+        'tabs.worklist.view',
+        'worklist.confirm_execute',
         'tabs.images.view',
         'images.view',
-        'tabs.reports.view',
-        'reports.view_writing',
-        'reports.view_reports',
     },
     'medico': {
         'tabs.patients.view',
@@ -123,11 +129,11 @@ ROLE_BASED_PERMISSIONS = {
         'tabs.admissions.view',
         'admissions.view',
         'admissions.create_spontaneous',
-        'tabs.execution.view',
-        'execution.view_pending',
-        'tabs.reports.view',
-        'reports.view_writing',
-        'reports.view_reports',
+        'tabs.worklist.view',
+        'reports.write',
+        'templates.manage',
+        'dicom.studies.manage',
+        'tabs.gestion.view',
         'reports.sign',
         'reports.assign',
         'tabs.images.view',

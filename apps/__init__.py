@@ -43,6 +43,14 @@ def register_blueprints(app, enable_legacy_ui=False):
     app.register_blueprint(api_blueprint)
     app.register_blueprint(structured_reports_bp)
 
+    # Delayed Clínica Parque transmissions are persisted in PostgreSQL and
+    # claimed safely by whichever Gunicorn worker is available.
+    try:
+        from apps.services.clinicaparque_report_queue import start_report_queue_worker
+        start_report_queue_worker()
+    except Exception as error:
+        print(f"[WARNING] Could not start Clínica Parque report queue: {error}")
+
     if enable_legacy_ui:
         for module_name in ('authentication', 'home'):
             module = import_module('apps.{}.routes'.format(module_name))

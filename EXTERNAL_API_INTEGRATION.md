@@ -4,7 +4,7 @@
 
 ### POST /api/external/receive-study
 
-Recibe un paciente, examen y reporte. El reporte se firma automáticamente y genera PDF.
+Recibe un paciente, examen y reporte. El reporte se firma automáticamente; el PDF se genera bajo demanda.
 
 **URL:** `http://<IP_SERVIDOR>/api/external/receive-study`
 
@@ -79,7 +79,7 @@ Recibe un paciente, examen y reporte. El reporte se firma automáticamente y gen
 | techniques | string | SÍ | Técnica utilizada |
 | conclusions | string | SÍ | Conclusión del estudio |
 
-**Nota:** El reporte se firma automáticamente al recibirlo. Se genera PDF y se marca como `isreported=1`.
+**Nota:** El reporte se firma automáticamente y se marca como `isreported=1`. El PDF sólo se genera cuando un consumidor lo solicita.
 
 #### rad_id (OPCIONAL)
 
@@ -283,9 +283,8 @@ curl "http://192.168.0.76/api/external/logs/3b2fd1c2-1a1e-48b5-9ddd-2ac113fd8952
 
 ### Firma automática del reporte
 - El reporte se firma automáticamente al recibirlo
-- Se genera PDF con firma digital del radiólogo
+- El PDF con firma digital se genera bajo demanda desde el contenido vigente
 - Se marca `isreported=1` en el examen
-- El PDF se almacena en `output_pdfs/`
 
 ### Vinculación con PACS
 - Si se envía `study_uid`, el sistema busca el estudio en el PACS

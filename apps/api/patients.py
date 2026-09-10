@@ -1179,7 +1179,8 @@ def get_patient_history(guid):
                 ex.isimage,
                 mod.externalcode as modality,
                 CONCAT(us_referring.name,' ',us_referring.surname) as medico_referente,
-                rep.pdfpath,
+                CASE WHEN COALESCE(ex.isreported, 0) = 1 AND rep.guid IS NOT NULL
+                     THEN TRUE ELSE FALSE END AS report_available,
                 loc.name as ubicacion,
                 COALESCE(ex.hidden_in_portal, 0) as hidden_in_portal,
                 ex.studyinstanceuid
@@ -1209,7 +1210,7 @@ def get_patient_history(guid):
                 'modalidad': row[7] or 'N/A',
                 'con_imagen': 'Sí' if row[6] == 1 else 'No',
                 'isreported': row[4],
-                'pdf_path': row[9] or None,
+                'report_available': bool(row[9]),
                 'ubicacion': row[10] or 'Sin ubicación',
                 'hidden_in_portal': row[11],
                 'studyinstanceuid': row[12] or None

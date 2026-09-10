@@ -8,6 +8,7 @@ from flask import request, jsonify
 from flask_jwt_extended import jwt_required
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
 from datetime import datetime
 
 
@@ -28,6 +29,7 @@ def get_user_locations(user_id, connection):
 
 @api_blueprint.route('/executions/orders', methods=['GET'])
 @jwt_required()
+@require_permission('tabs.worklist.view', include_role_permissions=True)
 def get_execution_orders():
     """
     Obtiene órdenes de exámenes pendientes de ejecución
@@ -128,6 +130,7 @@ def get_execution_orders():
 
 @api_blueprint.route('/executions/examination/<exam_guid>/details', methods=['GET'])
 @jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
 def get_execution_examination_details(exam_guid):
     """
     Obtiene detalles completos de un examen para ejecución
@@ -233,6 +236,7 @@ def get_execution_examination_details(exam_guid):
 
 @api_blueprint.route('/executions/examination/<exam_guid>/execute', methods=['POST'])
 @jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
 def execute_examination_order(exam_guid):
     """
     Ejecuta un examen actualizando su estado y detalles clínicos
@@ -327,6 +331,7 @@ def execute_examination_order(exam_guid):
 
 @api_blueprint.route('/executions/examination/<exam_guid>/cancel', methods=['POST'])
 @jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
 def cancel_examination_execution_order(exam_guid):
     """
     Cancela la ejecución de un examen (marca como no ejecutado)

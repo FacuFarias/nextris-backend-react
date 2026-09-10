@@ -2359,7 +2359,6 @@ document.addEventListener("DOMContentLoaded", function() {
                 document.getElementById('db_port').value = data.config.port || '';
                 document.getElementById('db_name').value = data.config.database || '';
             }
-            document.getElementById('base_folder').value = data.BASE_FOLDER || '';
             document.getElementById('ip_server').value = data.IPSERVER || '';
         });
 

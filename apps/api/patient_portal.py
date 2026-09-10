@@ -4,9 +4,11 @@ API del Portal de Pacientes - Endpoints para pacientes autenticados
 Permite a los pacientes gestionar su perfil y acceder a su información
 """
 
-from flask import jsonify, request, send_file, current_app
+from flask import jsonify, request, send_file, current_app, Response
+from io import BytesIO
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
+import requests
 from datetime import datetime
 import os
 import smtplib
@@ -16,6 +18,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from urllib.parse import urlparse
 from apps.api import api_blueprint
+from apps.api.viewer_share_service import create_for_exam as create_share_for_exam
 
 
 def get_db_config():
@@ -408,6 +411,8 @@ def get_my_studies():
                 "examination_id": "uuid",
                 "order_id": "uuid",
                 "accession_number": "ACC001234",
+                "patient_name": "Juan Pérez",
+                "patient_id": "NR00000001",
                 "study_type": "TOMOGRAFIA DE TORAX",
                 "modality": "CT",
                 "study_date": "2026-01-10",
@@ -448,7 +453,7 @@ def get_my_studies():
         
         # Obtener el patient_id del datapatient
         cursor.execute("""
-            SELECT dp.guid 
+            SELECT dp.guid, dp.name, dp.surname, dp.patientid
             FROM nextris.tbuser_patient up
             INNER JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
             WHERE up.guid = %s
@@ -464,6 +469,8 @@ def get_my_studies():
             }), 404
         
         patient_data_id = result[0]
+        patient_name = ' '.join(filter(None, (result[1], result[2])))
+        patient_id = result[3]
         
         # Query base - usar tbexamination directamente sin tborder
         base_query = """
@@ -597,6 +604,8 @@ def get_my_studies():
             studies.append({
                 'examination_id': row[0],
                 'accession_number': row[1],
+                'patient_name': patient_name,
+                'patient_id': patient_id,
                 'study_type': row[2],
                 'modality': row[3],
                 'study_date': study_date,
@@ -627,6 +636,158 @@ def get_my_studies():
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+# ====================================================================
+# CASE LINK - ENLACE PÚBLICO DEL ESTUDIO DEL PACIENTE
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/examinations/<exam_id>/case-link', methods=['POST'])
+@jwt_required()
+def create_patient_case_link(exam_id):
+    """Genera un enlace público temporal para un examen del paciente."""
+    connection = None
+    try:
+        patient_user_id = get_jwt_identity()
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT ex.guid, ex.studyinstanceuid
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.tbexamination ex ON ex.idpatient = up.datapatient_id
+            WHERE up.guid = %s
+              AND ex.guid = %s
+              AND (ex.hidden_in_portal = 0 OR ex.hidden_in_portal IS NULL)
+        """, (patient_user_id, exam_id))
+        study = cursor.fetchone()
+        cursor.close()
+
+        if not study:
+            connection.close()
+            return jsonify({'success': False, 'message': 'Estudio no encontrado'}), 404
+        if not study[1]:
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio no tiene imágenes disponibles'}), 400
+
+        share_data = create_share_for_exam(
+            exam_id,
+            created_by=patient_user_id,
+            connection=connection,
+            share_type='case_link',
+        )
+        connection.commit()
+        connection.close()
+        connection = None
+
+        public_base = current_app.config.get('PUBLIC_API_URL', '').strip().rstrip('/')
+        if not public_base:
+            public_base = f"{request.headers.get('X-Forwarded-Proto', request.scheme)}://{request.headers.get('X-Forwarded-Host', request.host)}"
+
+        short_code = share_data['short_code']
+        return jsonify({
+            'success': True,
+            'data': {
+                'case_url': f'{public_base}/case/{short_code}',
+                'share_url': share_data['share_url'],
+                'expires_at': share_data['expires_at'].isoformat() + 'Z',
+                'expires_hours': share_data['expires_hours'],
+            },
+        }), 201
+    except Exception as error:
+        if connection:
+            connection.rollback()
+            connection.close()
+        print(f'[PATIENT CASE LINK] Error creando enlace: {error}')
+        return jsonify({'success': False, 'message': 'No se pudo generar el enlace del caso'}), 500
+
+
+# ====================================================================
+# DESCARGAR IMÁGENES - ESTUDIO DICOM DEL PACIENTE
+# ====================================================================
+
+@api_blueprint.route('/patient-portal/examinations/<exam_id>/images/download', methods=['GET'])
+@jwt_required()
+def download_study_images(exam_id):
+    """Descarga todas las imágenes DICOM del estudio como archivo ZIP."""
+    pacs_response = None
+    try:
+        patient_user_id = get_jwt_identity()
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT ex.studyinstanceuid, ex.localacc
+            FROM nextris.tbuser_patient up
+            INNER JOIN nextris.tbexamination ex ON ex.idpatient = up.datapatient_id
+            WHERE up.guid = %s
+              AND ex.guid = %s
+              AND (ex.hidden_in_portal = 0 OR ex.hidden_in_portal IS NULL)
+        """, (patient_user_id, exam_id))
+        study = cursor.fetchone()
+        cursor.close()
+        connection.close()
+
+        if not study or not study[0]:
+            return jsonify({'success': False, 'message': 'Imágenes no encontradas para este estudio'}), 404
+
+        # Reutiliza la configuración y autenticación PACS ya usada por la carga DICOM.
+        from apps.api.dicom_routes import PACS_STOW_URL, get_pacs_token
+        from urllib.parse import quote
+
+        study_uid, accession_number = str(study[0]), study[1] or exam_id
+        pacs_url = f"{PACS_STOW_URL.rstrip('/')}/{quote(study_uid, safe='')}"
+        pacs_token = get_pacs_token()
+        pacs_response = requests.get(
+            pacs_url,
+            params={'accept': 'application/zip'},
+            headers={
+                'Authorization': f'Bearer {pacs_token}',
+                'Accept': 'application/zip',
+            },
+            stream=True,
+            timeout=300,
+            verify=False,
+        )
+
+        if pacs_response.status_code != 200:
+            message = pacs_response.text[:300] if pacs_response.text else 'No se pudieron descargar las imágenes'
+            pacs_response.close()
+            pacs_response = None
+            return jsonify({'success': False, 'message': message}), 502
+
+        safe_accession = ''.join(char if char.isalnum() or char in '-_' else '_' for char in str(accession_number))
+        headers = {
+            'Content-Disposition': f'attachment; filename="estudio_{safe_accession}.zip"',
+            'Content-Type': 'application/zip',
+        }
+        if pacs_response.headers.get('Content-Length'):
+            headers['Content-Length'] = pacs_response.headers['Content-Length']
+
+        stream_response = pacs_response
+
+        def stream_content():
+            try:
+                for chunk in stream_response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                stream_response.close()
+
+        response = Response(stream_content(), status=200, headers=headers)
+        pacs_response = None
+        return response
+
+    except requests.RequestException as error:
+        if pacs_response:
+            pacs_response.close()
+        return jsonify({'success': False, 'message': f'Error conectando con el PACS: {str(error)}'}), 502
+    except Exception as error:
+        if pacs_response:
+            pacs_response.close()
+        return jsonify({'success': False, 'message': f'Error descargando imágenes: {str(error)}'}), 500
 
 
 # ====================================================================
@@ -667,7 +828,7 @@ def get_patient_report(exam_id):
 
         # Obtener el PDF verificando que el examen pertenece al paciente
         cursor.execute("""
-            SELECT r.pdfpath, ex.localacc
+            SELECT r.guid, ex.localacc
             FROM nextris.tbexamination ex
             INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
             WHERE ex.guid = %s
@@ -682,21 +843,23 @@ def get_patient_report(exam_id):
         if not result:
             return jsonify({'success': False, 'message': 'Informe no encontrado'}), 404
 
-        pdf_path = result[0]
         accession_number = result[1]
 
-        # Resolver a ruta absoluta (la DB guarda rutas relativas al raíz del proyecto)
-        abs_pdf_path = os.path.abspath(pdf_path)
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(exam_id)
+        except ReportPdfNotAvailable:
+            return jsonify({'success': False, 'message': 'Informe PDF no disponible', 'code': 'REPORT_NOT_AVAILABLE'}), 404
 
-        if not pdf_path or not os.path.exists(abs_pdf_path):
-            return jsonify({'success': False, 'message': 'Archivo PDF no encontrado'}), 404
-
-        return send_file(
-            abs_pdf_path,
+        response = send_file(
+            BytesIO(rendered.content),
             mimetype='application/pdf',
-            as_attachment=False,
-            download_name=f'informe_{accession_number}.pdf'
+            as_attachment=request.args.get('download', '').lower() in ('1', 'true', 'yes', 'on'),
+            download_name=rendered.filename,
+            max_age=0,
         )
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
@@ -757,7 +920,7 @@ def share_examination(exam_id):
         # Verificar que el examen pertenece al paciente y tiene informe
         query = """
             SELECT
-                r.pdfpath,
+                r.guid,
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
                 ex.localacc as accession_number,
@@ -798,7 +961,6 @@ def share_examination(exam_id):
             connection.close()
             return jsonify({'success': False, 'message': 'Estudio no encontrado o sin informe disponible'}), 404
 
-        pdf_path = result[0]
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
@@ -813,10 +975,17 @@ def share_examination(exam_id):
         study_uid = result[11]
         has_images = bool(result[12])
 
-        if not pdf_path or not os.path.exists(pdf_path):
+        from apps.services.report_pdf_service import ReportPdfNotAvailable, render_report_pdf
+        try:
+            rendered = render_report_pdf(exam_id)
+        except ReportPdfNotAvailable:
             cursor.close()
             connection.close()
-            return jsonify({'success': False, 'message': 'PDF del informe no encontrado'}), 404
+            return jsonify({'success': False, 'message': 'Informe PDF no disponible', 'code': 'REPORT_NOT_AVAILABLE'}), 404
+        except Exception as render_error:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': f'Error generando PDF: {render_error}'}), 500
 
         if not smtp_user or not smtp_password:
             cursor.close()
@@ -856,12 +1025,11 @@ Saludos cordiales,
 
         msg.attach(MIMEText(body, 'plain'))
 
-        with open(pdf_path, 'rb') as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(rendered.content)
 
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename=informe_{accession_number}.pdf')
+        part.add_header('Content-Disposition', f'attachment; filename={rendered.filename}')
         msg.attach(part)
 
         server = smtplib.SMTP(smtp_server, smtp_port)

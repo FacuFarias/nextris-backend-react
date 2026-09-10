@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS nextris.tbviewer_share_link (
     guid VARCHAR(100) PRIMARY KEY,
     token_hash VARCHAR(128) NOT NULL UNIQUE,
     study_iuid VARCHAR(255) NOT NULL,
+    share_type VARCHAR(30) NOT NULL DEFAULT 'image_share',
     location_id VARCHAR(100) NULL,
     created_by_user_id VARCHAR(100) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -19,6 +20,8 @@ CREATE TABLE IF NOT EXISTS nextris.tbviewer_share_link (
     last_opened_at TIMESTAMP NULL,
     created_ip VARCHAR(64) NULL,
     last_opened_ip VARCHAR(64) NULL,
+    CONSTRAINT ck_tbviewer_share_link_share_type
+        CHECK (share_type IN ('case_link', 'image_share')),
     CONSTRAINT fk_viewer_share_location
         FOREIGN KEY (location_id)
         REFERENCES nextris.tblocation (guid)

@@ -371,8 +371,9 @@ BEGIN
         v_adm_number,
         CASE WHEN NEW.accession_no IS NOT NULL AND NEW.accession_no != '*' THEN NEW.accession_no ELSE NULL END,
         CASE WHEN NEW.study_iuid IS NOT NULL AND NEW.study_iuid != '*' THEN NEW.study_iuid ELSE NULL END,
-        'Executed', 1, 0, 1,
-        NOW(), NOW()
+        'Scheduled', 0,
+        0, 1,
+        NOW(), NULL
     );
 
     -- 7. Create empty report
