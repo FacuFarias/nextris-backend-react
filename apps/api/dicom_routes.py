@@ -14,7 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from apps.api import api_blueprint
-from apps.api.permissions import require_permission
+from apps.api.permissions import require_admin_permission, require_permission
 from apps.home.services import DatabaseService, ConfigService
 from apps.api.facility_plan_usage import ensure_plan_management_schema, check_limit_before_action
 
@@ -864,6 +864,295 @@ def dicom_search_examinations():
         }), 500
 
 
+@api_blueprint.route('/dicom/missing-image-candidates', methods=['GET'])
+@jwt_required()
+@require_admin_permission('worklist.link_missing_images')
+def dicom_missing_image_candidates():
+    """Lista estudios PACS del mismo paciente que todavía no están vinculados."""
+    examination_guid = (request.args.get('examination_guid') or '').strip()
+    if not examination_guid:
+        return jsonify({
+            'success': False,
+            'message': 'Se requiere examination_guid',
+        }), 400
+
+    conn = None
+    cursor = None
+    try:
+        conn = psycopg2.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT e.guid, e.localacc, e.studyinstanceuid,
+                   dp.patientid, dp.name, dp.surname
+            FROM nextris.tbexamination e
+            INNER JOIN nextris.datapatient dp ON dp.guid = e.idpatient
+            WHERE e.guid = %s
+              AND COALESCE(e.isimage, 0) = 0
+            """,
+            (examination_guid,),
+        )
+        exam_row = cursor.fetchone()
+        if not exam_row:
+            return jsonify({
+                'success': False,
+                'message': 'El estudio no existe o ya tiene imágenes vinculadas',
+            }), 404
+
+        patient_id = _normalize_dicom_value(exam_row[3])
+        if not patient_id:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'examination': {
+                        'guid': str(exam_row[0]),
+                        'accession_number': exam_row[1],
+                        'patient_id': None,
+                        'patient_name': ' '.join(filter(None, [exam_row[4], exam_row[5]])),
+                    },
+                    'candidates': [],
+                },
+            }), 200
+
+        cursor.execute(
+            """
+            SELECT
+                s.pk,
+                s.study_iuid,
+                NULLIF(s.accession_no, '') AS accession_number,
+                NULLIF(s.study_date, '') AS study_date,
+                NULLIF(s.study_time, '') AS study_time,
+                NULLIF(s.study_desc, '') AS study_description,
+                COALESCE(pn.alphabetic_name, 'PACS SIN NOMBRE') AS patient_name,
+                COALESCE(string_agg(DISTINCT NULLIF(sr.modality, ''), ', '), '') AS modality,
+                COUNT(DISTINCT sr.pk) AS series_count,
+                COUNT(i.pk) AS instance_count,
+                trim(COALESCE(s.accession_no, '')) = trim(COALESCE(%s, '')) AS accession_matches
+            FROM public.study s
+            INNER JOIN public.patient pp ON pp.pk = s.patient_fk
+            INNER JOIN public.dicomattrs da ON da.pk = pp.dicomattrs_fk
+            LEFT JOIN public.person_name pn ON pn.pk = pp.pat_name_fk
+            LEFT JOIN public.series sr ON sr.study_fk = s.pk
+            LEFT JOIN public.instance i ON i.series_fk = sr.pk
+            WHERE public._parse_dicom_patient_id(da.attrs) = %s
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM nextris.tbpacs_study_link l
+                  WHERE l.link_status = 'linked'
+                    AND (l.pacs_study_pk = s.pk OR l.pacs_study_iuid = s.study_iuid)
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM nextris.tbexamination linked_exam
+                  WHERE COALESCE(linked_exam.isimage, 0) = 1
+                    AND linked_exam.studyinstanceuid = s.study_iuid
+              )
+            GROUP BY s.pk, s.study_iuid, s.accession_no, s.study_date,
+                     s.study_time, s.study_desc, pn.alphabetic_name
+            ORDER BY accession_matches DESC,
+                     NULLIF(s.study_date, '') DESC NULLS LAST,
+                     NULLIF(s.study_time, '') DESC NULLS LAST,
+                     s.pk DESC
+            LIMIT 100
+            """,
+            (exam_row[1], patient_id),
+        )
+        candidates = []
+        for row in cursor.fetchall():
+            candidates.append({
+                'pacs_study_pk': row[0],
+                'study_instance_uid': row[1],
+                'accession_number': row[2],
+                'study_date': row[3],
+                'study_time': row[4],
+                'study_description': row[5] or 'Sin descripción',
+                'patient_name': row[6],
+                'modality': row[7],
+                'series_count': row[8],
+                'instance_count': row[9],
+                'accession_matches': bool(row[10]),
+            })
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'examination': {
+                    'guid': str(exam_row[0]),
+                    'accession_number': exam_row[1],
+                    'patient_id': patient_id,
+                    'patient_name': ' '.join(filter(None, [exam_row[4], exam_row[5]])),
+                },
+                'candidates': candidates,
+            },
+        }), 200
+    except Exception as exc:
+        print(f"[ERROR] Error buscando candidatos PACS para vinculación: {exc}")
+        return jsonify({
+            'success': False,
+            'message': 'No se pudieron consultar los estudios PACS disponibles',
+        }), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@api_blueprint.route('/dicom/link-missing-image', methods=['POST'])
+@jwt_required()
+@require_admin_permission('worklist.link_missing_images')
+def dicom_link_missing_image():
+    """Vincula manualmente un estudio PACS a una orden sin imágenes."""
+    data = request.get_json() or {}
+    examination_guid = str(data.get('examination_guid') or '').strip()
+    pacs_study_pk = data.get('pacs_study_pk')
+    if not examination_guid or pacs_study_pk in (None, ''):
+        return jsonify({
+            'success': False,
+            'message': 'Se requiere examination_guid y pacs_study_pk',
+        }), 400
+
+    conn = None
+    cursor = None
+    try:
+        current_user = get_jwt_identity()
+        conn = psycopg2.connect(**config)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT e.guid, e.localacc, e.studyinstanceuid, dp.patientid
+            FROM nextris.tbexamination e
+            INNER JOIN nextris.datapatient dp ON dp.guid = e.idpatient
+            WHERE e.guid = %s
+              AND COALESCE(e.isimage, 0) = 0
+            FOR UPDATE OF e
+            """,
+            (examination_guid,),
+        )
+        exam_row = cursor.fetchone()
+        if not exam_row:
+            return jsonify({
+                'success': False,
+                'message': 'El estudio no existe o ya tiene imágenes vinculadas',
+            }), 404
+
+        cursor.execute(
+            """
+            SELECT s.pk, s.study_iuid,
+                   public._parse_dicom_patient_id(da.attrs)
+            FROM public.study s
+            INNER JOIN public.patient pp ON pp.pk = s.patient_fk
+            INNER JOIN public.dicomattrs da ON da.pk = pp.dicomattrs_fk
+            WHERE s.pk = %s
+            """,
+            (pacs_study_pk,),
+        )
+        pacs_row = cursor.fetchone()
+        if not pacs_row:
+            return jsonify({
+                'success': False,
+                'message': 'No se encontró el estudio PACS seleccionado',
+            }), 404
+
+        if _normalize_dicom_value(pacs_row[2]) != _normalize_dicom_value(exam_row[3]):
+            return jsonify({
+                'success': False,
+                'message': 'El estudio PACS no pertenece al mismo PatientID DICOM',
+            }), 409
+
+        cursor.execute(
+            """
+            SELECT l.order_guid
+            FROM nextris.tbpacs_study_link l
+            WHERE l.link_status = 'linked'
+              AND (l.pacs_study_pk = %s OR l.pacs_study_iuid = %s)
+            FOR UPDATE
+            """,
+            (pacs_row[0], pacs_row[1]),
+        )
+        active_link = cursor.fetchone()
+        if active_link:
+            return jsonify({
+                'success': False,
+                'message': 'El estudio PACS ya está vinculado a otra orden',
+            }), 409
+
+        cursor.execute(
+            """
+            SELECT 1
+            FROM nextris.tbexamination
+            WHERE COALESCE(isimage, 0) = 1
+              AND studyinstanceuid = %s
+            LIMIT 1
+            """,
+            (pacs_row[1],),
+        )
+        if cursor.fetchone():
+            return jsonify({
+                'success': False,
+                'message': 'El estudio PACS ya está vinculado a otra orden',
+            }), 409
+
+        cursor.execute(
+            "SELECT username FROM nextris.tbuser WHERE guid = %s",
+            (str(current_user),),
+        )
+        user_row = cursor.fetchone()
+        linked_by_username = user_row[0] if user_row else None
+
+        cursor.execute(
+            """
+            INSERT INTO nextris.tbpacs_study_link (
+                pacs_study_pk, pacs_study_iuid, order_guid, order_study_uuid,
+                link_status, source, linked_at, linked_by_user_guid,
+                linked_by_username, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, 'linked', 'manual', CURRENT_TIMESTAMP,
+                      %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (
+                pacs_row[0],
+                pacs_row[1],
+                examination_guid,
+                exam_row[2],
+                str(current_user) if current_user else None,
+                linked_by_username,
+            ),
+        )
+        cursor.execute(
+            """
+            UPDATE nextris.tbexamination
+            SET isimage = 1, studyinstanceuid = %s
+            WHERE guid = %s
+            """,
+            (pacs_row[1], examination_guid),
+        )
+        conn.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Imágenes vinculadas correctamente',
+            'data': {
+                'examination_guid': examination_guid,
+                'pacs_study_pk': pacs_row[0],
+                'study_instance_uid': pacs_row[1],
+            },
+        }), 200
+    except Exception as exc:
+        if conn:
+            conn.rollback()
+        print(f"[ERROR] Error vinculando imágenes faltantes: {exc}")
+        return jsonify({
+            'success': False,
+            'message': 'No se pudieron vincular las imágenes',
+        }), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
 @api_blueprint.route('/dicom/link-study', methods=['POST'])
 @jwt_required()
 @require_permission('dicom.studies.manage', include_role_permissions=True)
@@ -1629,18 +1918,19 @@ def get_studies_by_location(location_id):
             'study': "CASE WHEN s.study_date ~ '^\\d{8}$' THEN TO_DATE(s.study_date, 'YYYYMMDD')::timestamp END",
         }
         
-        # Aplicar búsqueda
+        # Aplicar búsqueda por nombre, Patient ID, accession, UID o descripción.
         if search_term:
             base_query += """
                 AND (
                     COALESCE(pn.alphabetic_name, 'Unknown') ILIKE %s
+                    OR COALESCE(_parse_dicom_patient_id(da.attrs), '') ILIKE %s
                     OR s.accession_no ILIKE %s
                     OR s.study_iuid ILIKE %s
                     OR s.study_desc ILIKE %s
                 )
             """
             search_param = f"%{search_term}%"
-            params.extend([search_param, search_param, search_param, search_param])
+            params.extend([search_param, search_param, search_param, search_param, search_param])
 
         if filter_patient_name:
             base_query += """

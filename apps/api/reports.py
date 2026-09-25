@@ -14,12 +14,20 @@ import os
 import re
 import html
 from decimal import Decimal, InvalidOperation
+from datetime import timezone
 from apps.services.report_fields import (
     canonical_fields_from_row,
     fields_are_complete,
     legacy_aliases,
     merge_template_study_reason,
     normalize_report_payload,
+)
+from apps.services.clinicaparque_workflow import (
+    WORKFLOW_ALREADY_READ,
+    WORKFLOW_CANCELLED,
+    apply_already_read,
+    apply_cancel,
+    ensure_workflow_schema,
 )
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
 
@@ -51,6 +59,15 @@ def parse_filter_values(value):
     if not value:
         return []
     return [item.strip() for item in str(value).split(',') if item.strip()]
+
+
+def _serialize_utc_datetime(value):
+    """Expose UTC-naive database timestamps with an explicit UTC offset."""
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
 
 
 def _serialize_examination_note(row):
@@ -1387,6 +1404,7 @@ def get_examinations_for_reporting():
         ensure_report_type_schema(connection)
         ensure_user_default_schema(connection)
         ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         
         # Query base - exámenes ejecutados
@@ -1400,17 +1418,17 @@ def get_examinations_for_reporting():
             reported_filter = ""
         elif show_reported:
             # Solo reportados
-            reported_filter = "AND e.IsReported = 1"
+            reported_filter = "AND (e.IsReported = 1 OR e.clinicaparque_workflow_state IN ('cancelled', 'already_read'))"
         elif show_ready:
             # Solo listos (no reportados)
-            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.clinicaparque_workflow_state, 'pending') = 'pending'"
         else:
             # Ninguno activo: no mostrar nada
             reported_filter = "AND 1=0"
         
         base_query = f"""
             SELECT e.Guid, 
-                   CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                   CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
                    dp.patientid,
                    dp.nationalcode,
                    st.Description as study_type,
@@ -1493,17 +1511,29 @@ def get_examinations_for_reporting():
                    ,resolved_template.template_id
                    ,resolved_template.template_name
                    ,resolved_template.template_source
+                   ,COALESCE(e.clinicaparque_workflow_state, 'pending')
+                   ,e.clinicaparque_workflow_state_at
+                   ,e.clinicaparque_workflow_state_source
+                   ,e.clinicaparque_workflow_state_user_id
+                   ,cr.code AS cancellation_reason_code
+                   ,cr.description AS cancellation_reason
+                   ,ps.study_date AS study_date
+                   ,ps.study_time AS study_time
+                   ,ps.created_time AS arrival_time
              FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
             LEFT JOIN nextris.tbreport rep ON e.Guid = rep.IdExamination
+            LEFT JOIN public.study ps ON ps.study_iuid = e.studyinstanceuid
             LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
             LEFT JOIN nextris.tbuser ub ON e.blockby::text = ub.guid
             LEFT JOIN nextris.tbuser ua ON e.assignto::text = ua.guid
+            LEFT JOIN nextris.clinicaparque_cancellation_reasons cr
+                ON cr.guid = e.clinicaparque_cancellation_reason_id
             LEFT JOIN LATERAL (
                 SELECT
                     ip.guid AS template_id,
@@ -1553,19 +1583,20 @@ def get_examinations_for_reporting():
             base_query += " AND e.assignto = %s"
             params.append(user_id)
 
-        # Búsqueda libre por paciente, DNI, admisión, accession o estudio.
+        # Búsqueda libre por paciente, Patient ID, DNI, admisión, accession o estudio.
         if search:
             search_pattern = f"%{search.lower()}%"
             base_query += """
                 AND (
                     LOWER(COALESCE(CONCAT(dp.Name, ' ', dp.Surname), '')) LIKE %s
+                    OR LOWER(COALESCE(dp.patientid, '')) LIKE %s
                     OR LOWER(COALESCE(dp.nationalcode, '')) LIKE %s
                     OR LOWER(COALESCE(e.LocalAcc, '')) LIKE %s
                     OR LOWER(COALESCE(e.AdmisionNumber, '')) LIKE %s
                     OR LOWER(COALESCE(st.Description, '')) LIKE %s
                 )
             """
-            params.extend([search_pattern] * 5)
+            params.extend([search_pattern] * 6)
 
         # Por defecto solo se muestran estudios que tienen imágenes. La opción
         # "Incluir sin imágenes" habilita explícitamente ambos grupos.
@@ -1670,7 +1701,7 @@ def get_examinations_for_reporting():
                 'study_type': row[4] or '',
                 'admission_number': row[5] or '',
                 'accession_number': row[6] or '',
-                'created_on': row[7].isoformat() if row[7] else None,
+                'created_on': _serialize_utc_datetime(row[7]),
                 'status': row[8] or '',
                 'is_reported': bool(row[9]),
                 'is_executed': bool(row[10]),
@@ -1707,6 +1738,18 @@ def get_examinations_for_reporting():
                  'applied_template_id': str(row[41]) if row[41] else None,
                  'template_name': row[42] or '',
                  'template_source': row[43] or '',
+                 'workflow_state': row[44] or 'pending',
+                 # Los timestamps de workflow se almacenan como UTC naive.
+                 # Exponerlos con offset evita que el navegador los interprete
+                 # accidentalmente como hora local.
+                 'workflow_state_at': _serialize_utc_datetime(row[45]),
+                 'workflow_state_source': row[46] or None,
+                 'workflow_state_user_id': str(row[47]) if row[47] else None,
+                'cancellation_reason_code': row[48] or None,
+                'cancellation_reason': row[49] or None,
+                'study_date': row[50] or None,
+                'study_time': row[51] or None,
+                'arrival_time': row[52].isoformat() if row[52] else None,
              })
         
         cursor.close()
@@ -1759,17 +1802,29 @@ def confirm_study(exam_id):
             }), 500
 
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
 
         cursor.execute(
-            "SELECT 1 FROM nextris.tbexamination WHERE guid = %s",
+            """
+            SELECT COALESCE(clinicaparque_workflow_state, 'pending'),
+                   COALESCE(isreported, 0)
+            FROM nextris.tbexamination WHERE guid = %s
+            """,
             (exam_id,),
         )
-        if not cursor.fetchone():
+        exam_state = cursor.fetchone()
+        if not exam_state:
             return jsonify({
                 'success': False,
                 'message': 'Examen no encontrado'
             }), 404
+        if exam_state[0] == 'already_read':
+            return jsonify({'success': False, 'message': 'Este estudio ya fue leído en Info Parque y no puede modificarse', 'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE'}), 409
+        if exam_state[0] == 'cancelled':
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede modificarse', 'code': 'STUDY_CANCELLED'}), 409
+        if exam_state[1]:
+            return jsonify({'success': False, 'message': 'El estudio ya fue reportado y no puede modificarse', 'code': 'STUDY_ALREADY_REPORTED'}), 409
 
         cursor.execute(
             "SELECT 1 FROM nextris.isstudytype WHERE guid = %s",
@@ -1845,6 +1900,206 @@ def confirm_study(exam_id):
             connection.close()
 
 
+def _workflow_action_error(error, action=None):
+    if isinstance(error, LookupError):
+        return jsonify({'success': False, 'message': str(error)}), 404
+    if isinstance(error, (ValueError, TypeError)):
+        return jsonify({'success': False, 'message': str(error)}), 400
+    if isinstance(error, PermissionError):
+        if action == WORKFLOW_CANCELLED and 'reportado' not in str(error).lower():
+            code = 'STUDY_CANCELLED'
+        elif action == WORKFLOW_ALREADY_READ and 'terminal' in str(error).lower():
+            code = 'STUDY_ALREADY_READ_IN_INFOPARQUE'
+        else:
+            code = 'STUDY_ALREADY_REPORTED'
+        return jsonify({'success': False, 'message': str(error), 'code': code}), 409
+    return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+
+
+@api_blueprint.route('/config/cancellation-reasons', methods=['GET'])
+@jwt_required()
+def get_cancellation_reasons():
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        include_inactive = request.args.get('include_inactive', '').lower() in ('1', 'true', 'yes')
+        query = """
+            SELECT guid, code, description, sort_order, active
+            FROM nextris.clinicaparque_cancellation_reasons
+        """
+        if not include_inactive:
+            query += " WHERE active = TRUE"
+        query += " ORDER BY sort_order, description"
+        cursor.execute(query)
+        return jsonify({'success': True, 'data': [
+            {'guid': str(row[0]), 'code': row[1], 'description': row[2],
+             'sort_order': row[3], 'active': bool(row[4])}
+            for row in cursor.fetchall()
+        ]}), 200
+    except Exception as error:
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/config/cancellation-reasons', methods=['POST'])
+@jwt_required()
+def create_cancellation_reason():
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        code = str(data.get('code') or '').strip().upper()
+        description = str(data.get('description') or '').strip()
+        if not code or not description:
+            return jsonify({'success': False, 'message': 'code y description son obligatorios'}), 400
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        active_value = data.get('active', True)
+        if isinstance(active_value, str):
+            active_value = active_value.strip().lower() in ('1', 'true', 'yes', 'on')
+        cursor.execute(
+            """
+            INSERT INTO nextris.clinicaparque_cancellation_reasons
+                (guid, code, description, sort_order, active)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING guid, code, description, sort_order, active
+            """,
+            (str(uuid.uuid4()), code, description, int(data.get('sort_order') or 0),
+             bool(active_value)),
+        )
+        row = cursor.fetchone()
+        connection.commit()
+        return jsonify({'success': True, 'data': {
+            'guid': str(row[0]), 'code': row[1], 'description': row[2],
+            'sort_order': row[3], 'active': bool(row[4]),
+        }}), 201
+    except psycopg2.errors.UniqueViolation:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'El código ya existe'}), 409
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/config/cancellation-reasons/<reason_id>', methods=['PATCH', 'PUT'])
+@jwt_required()
+def update_cancellation_reason(reason_id):
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        allowed = {'code', 'description', 'sort_order', 'active'}
+        updates = [key for key in allowed if key in data]
+        if not updates:
+            return jsonify({'success': False, 'message': 'No hay campos para actualizar'}), 400
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        assignments = []
+        values = []
+        for key in updates:
+            column = key
+            value = data[key]
+            if key == 'code':
+                value = str(value or '').strip().upper()
+            elif key == 'description':
+                value = str(value or '').strip()
+            elif key == 'sort_order':
+                value = int(value)
+            elif key == 'active':
+                if isinstance(value, str):
+                    value = value.strip().lower() in ('1', 'true', 'yes', 'on')
+                else:
+                    value = bool(value)
+            assignments.append(f'{column} = %s')
+            values.append(value)
+        assignments.append('updated_at = NOW()')
+        values.append(reason_id)
+        cursor.execute(
+            f"UPDATE nextris.clinicaparque_cancellation_reasons SET {', '.join(assignments)} WHERE guid = %s RETURNING guid, code, description, sort_order, active",
+            values,
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Motivo no encontrado'}), 404
+        connection.commit()
+        return jsonify({'success': True, 'data': {
+            'guid': str(row[0]), 'code': row[1], 'description': row[2],
+            'sort_order': row[3], 'active': bool(row[4]),
+        }}), 200
+    except (ValueError, TypeError):
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'sort_order inválido'}), 400
+    except psycopg2.errors.UniqueViolation:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'El código ya existe'}), 409
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def _execute_local_workflow_action(exam_id, action):
+    connection = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        actor = normalize_user_id(get_jwt_identity())
+        if action == WORKFLOW_CANCELLED:
+            data = request.get_json(silent=True) or {}
+            result = apply_cancel(connection, exam_id, data.get('reason_code'),
+                                  data.get('detail'), source='nextris_ui', user_id=actor)
+        else:
+            result = apply_already_read(connection, exam_id, source='nextris_ui',
+                                        user_id=actor)
+        connection.commit()
+        return jsonify({'success': True, 'message':
+                        'Estudio cancelado correctamente' if action == WORKFLOW_CANCELLED
+                        else 'Estudio marcado como ya leído', 'data': result}), 200
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return _workflow_action_error(error, action)
+    finally:
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/examinations/<exam_id>/cancel', methods=['POST'])
+@jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
+def cancel_examination_from_worklist(exam_id):
+    return _execute_local_workflow_action(exam_id, WORKFLOW_CANCELLED)
+
+
+@api_blueprint.route('/examinations/<exam_id>/already-read', methods=['POST'])
+@jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
+def mark_examination_already_read(exam_id):
+    return _execute_local_workflow_action(exam_id, WORKFLOW_ALREADY_READ)
+
+
 @api_blueprint.route('/examinations/<exam_id>/report', methods=['GET'])
 @jwt_required()
 @require_permission('reports.write', include_role_permissions=True)
@@ -1892,6 +2147,7 @@ def get_examination_report(exam_id):
 
         connection = psycopg2.connect(**config)
         ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
 
         cursor.execute(
@@ -1915,7 +2171,11 @@ def get_examination_report(exam_id):
                    e.CreatedOn AS exam_date,
                    dp.patientid AS patient_identifier,
                    dp.nationalcode AS national_code,
-                   st.modality_id
+                   st.modality_id,
+                   COALESCE(e.clinicaparque_workflow_state, 'pending') AS workflow_state,
+                   e.clinicaparque_workflow_state_at,
+                   e.clinicaparque_workflow_state_source,
+                   e.clinicaparque_cancellation_detail
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
            LEFT JOIN nextris.tblocation loc ON e.location_id = loc.guid
@@ -1962,6 +2222,10 @@ def get_examination_report(exam_id):
         patient_identifier = exam[23]
         national_code = exam[24]
         modality_id = exam[25]
+        workflow_state = exam[26] or 'pending'
+        workflow_state_at = exam[27]
+        workflow_state_source = exam[28]
+        workflow_detail = exam[29]
 
         cursor.execute(
             """
@@ -2029,7 +2293,7 @@ def get_examination_report(exam_id):
                     conclusion = effective_template['conclusion']
                     selected_template_id = effective_template['template_id']
                     selected_template_report_type = effective_template['report_type']
-        elif study_type_id:
+        elif study_type_id and workflow_state == 'pending':
             ensure_report_type_schema(connection)
             ensure_template_location_schema(connection)
             structured_enabled = _is_structured_reports_enabled(cursor, facility_id)
@@ -2125,6 +2389,11 @@ def get_examination_report(exam_id):
                 }),
                 'was_saved': was_saved,
                 'report_available': report_available,
+                'workflow_state': workflow_state,
+                'workflow_state_at': _serialize_utc_datetime(workflow_state_at),
+                'workflow_state_source': workflow_state_source,
+                'workflow_detail': workflow_detail or '',
+                'report_read_only': workflow_state in ('cancelled', 'already_read'),
                 'updated_on': updated_on.isoformat() if updated_on else None,
                 'history': history or '',
                 'clinical_question': clinical_question or '',
@@ -2210,12 +2479,14 @@ def update_examination_report(exam_id):
         
         connection = psycopg2.connect(**config)
         ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         # Verificar que el examen existe
         cursor.execute("""
             SELECT e.IdPatient,
                    e.AdmisionNumber,
-                   COALESCE(e.IsReported, 0) AS is_reported
+                   COALESCE(e.IsReported, 0) AS is_reported,
+                   COALESCE(e.clinicaparque_workflow_state, 'pending') AS workflow_state
             FROM nextris.tbexamination e
             WHERE e.Guid = %s
         """, (exam_id,))
@@ -2232,6 +2503,23 @@ def update_examination_report(exam_id):
         patient_id = exam[0]
         admission_number = exam[1]
         already_reported = bool(exam[2])
+        workflow_state = exam[3] or 'pending'
+        if workflow_state == 'already_read':
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Este estudio ya fue leído en Info Parque y no puede redactarse en NextRIS',
+                'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE',
+            }), 409
+        if workflow_state == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El estudio está cancelado y no puede redactarse',
+                'code': 'STUDY_CANCELLED',
+            }), 409
         
         # Verificar si ya existe un reporte
         cursor.execute("""
@@ -3106,7 +3394,28 @@ def save_report(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT COALESCE(clinicaparque_workflow_state, 'pending')
+            FROM nextris.tbexamination WHERE guid = %s
+            """,
+            (exam_id,),
+        )
+        workflow = cursor.fetchone()
+        if not workflow:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+        if workflow[0] == 'already_read':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Este estudio ya fue leído en Info Parque y no puede redactarse en NextRIS', 'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE'}), 409
+        if workflow[0] == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
         
         query = """
             UPDATE nextris.tbreport 
@@ -3197,22 +3506,32 @@ def get_next_exam():
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         
         # Obtener la fecha de creación del examen actual para buscar el siguiente
         cursor.execute("""
-            SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+            SELECT CreatedOn,
+                   COALESCE(clinicaparque_workflow_state, 'pending'),
+                   COALESCE(isreported, 0)
+            FROM nextris.tbexamination WHERE Guid = %s
         """, (current_exam_id,))
         current_exam = cursor.fetchone()
         current_created_on = current_exam[0] if current_exam else None
+        if current_exam and current_exam[1] == 'already_read':
+            cursor.close(); connection.close()
+            return jsonify({'success': False, 'message': 'Este estudio ya fue leído en Info Parque y no puede seleccionar el siguiente examen', 'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE'}), 409
+        if current_exam and current_exam[1] == 'cancelled':
+            cursor.close(); connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede seleccionar el siguiente examen', 'code': 'STUDY_CANCELLED'}), 409
         
         # Aplicar el mismo filtro de reportado que en la lista
         if show_reported and show_ready:
             reported_filter = ""
         elif show_reported:
-            reported_filter = "AND e.IsReported = 1"
+            reported_filter = "AND (e.IsReported = 1 OR e.clinicaparque_workflow_state IN ('cancelled', 'already_read'))"
         elif show_ready:
-            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.clinicaparque_workflow_state, 'pending') = 'pending'"
         else:
             reported_filter = "AND 1=0"
         
@@ -3220,7 +3539,7 @@ def get_next_exam():
         query = f"""
             SELECT e.Guid, 
                    e.studyinstanceuid,
-                   CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                   CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
                    dp.nationalcode,
                    st.Description as study_type,
                    e.LocalAcc,
@@ -3359,6 +3678,7 @@ def sign_report(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         # Obtener datos del examen para el nombre del PDF
         cursor.execute("""
@@ -3367,7 +3687,8 @@ def sign_report(exam_id):
                    p.Name,
                    p.Surname,
                    e.IdPatient,
-                   COALESCE(e.IsReported, 0) AS is_reported
+                   COALESCE(e.IsReported, 0) AS is_reported,
+                   COALESCE(e.clinicaparque_workflow_state, 'pending') AS workflow_state
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
             WHERE e.Guid = %s
@@ -3382,7 +3703,15 @@ def sign_report(exam_id):
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
         
-        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_reported = exam_data
+        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_reported, workflow_state = exam_data
+        if workflow_state == 'already_read':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Este estudio ya fue leído en Info Parque y no puede redactarse en NextRIS', 'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE'}), 409
+        if workflow_state == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
         already_reported = bool(is_reported)
         
         # Verificar si existe el reporte, si no, crearlo.
@@ -3496,9 +3825,9 @@ def sign_report(exam_id):
                 if show_reported and show_ready:
                     reported_filter = ""
                 elif show_reported:
-                    reported_filter = "AND e.IsReported = 1"
+                    reported_filter = "AND (e.IsReported = 1 OR e.clinicaparque_workflow_state IN ('cancelled', 'already_read'))"
                 elif show_ready:
-                    reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+                    reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.clinicaparque_workflow_state, 'pending') = 'pending'"
                 else:
                     reported_filter = "AND 1=0"
 
@@ -3737,11 +4066,13 @@ def block_examination(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         
         # Verificar si el examen existe y si ya está bloqueado
         cursor.execute("""
-            SELECT blockby FROM nextris.tbexamination
+            SELECT blockby, COALESCE(clinicaparque_workflow_state, 'pending')
+            FROM nextris.tbexamination
             WHERE Guid = %s
         """, (exam_id,))
         
@@ -3755,6 +4086,15 @@ def block_examination(exam_id):
             }), 404
         
         current_block = result[0]
+        workflow_state = result[1]
+        if workflow_state == 'already_read':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Este estudio ya fue leído en Info Parque y no puede redactarse en NextRIS', 'code': 'STUDY_ALREADY_READ_IN_INFOPARQUE'}), 409
+        if workflow_state == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
         
         # Si ya está bloqueado por otro usuario, no permitir
         if current_block and str(current_block) != str(user_id):

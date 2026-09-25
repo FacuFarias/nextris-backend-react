@@ -35,6 +35,7 @@ PERMISSION_CATALOG = [
     {'code': 'distribution.send_report_whatsapp', 'module': 'distribution', 'action': 'send_report_whatsapp', 'description': 'Enviar informe por WhatsApp'},
     {'code': 'distribution.update_email', 'module': 'distribution', 'action': 'update_email', 'description': 'Actualizar email para distribución'},
     {'code': 'users.manage', 'module': 'users', 'action': 'manage', 'description': 'Gestionar usuarios'},
+    {'code': 'users.impersonate', 'module': 'users', 'action': 'impersonate', 'description': 'Conectarse como otro usuario del personal'},
     {'code': 'users.permissions.manage', 'module': 'users', 'action': 'manage_permissions', 'description': 'Gestionar permisos de usuarios'},
 
     # Permisos solicitados para flujo operativo
@@ -49,6 +50,7 @@ PERMISSION_CATALOG = [
     {'code': 'distribution.perform', 'module': 'distribution', 'action': 'perform', 'description': 'Hacer la distribución'},
 
     {'code': 'worklist.confirm_execute', 'module': 'worklist', 'action': 'confirm_execute', 'description': 'Confirmar o ejecutar estudios'},
+    {'code': 'worklist.link_missing_images', 'module': 'worklist', 'action': 'link_missing_images', 'description': 'Vincular imágenes faltantes desde la Lista de trabajo'},
 
     {'code': 'patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pacientes'},
     {'code': 'patients.manage', 'module': 'patients', 'action': 'manage', 'description': 'Generar nuevos pacientes / editar pacientes'},
@@ -113,6 +115,10 @@ ROLE_BASED_PERMISSIONS = {
     'administrador': {
         'images.view',
         'images.share_link',
+        'worklist.link_missing_images',
+    },
+    'admin': {
+        'worklist.link_missing_images',
     },
     'tecnico': {
         'tabs.patients.view',
@@ -362,6 +368,70 @@ def user_has_permission_code(user_id, permission_code, connection=None, include_
         include_role_permissions=include_role_permissions,
     )
     return '*' in codes or permission_code in codes
+
+
+def user_has_administrator_role(user_id, connection=None):
+    """Indica si el usuario pertenece a un rol administrativo privilegiado."""
+    own_connection = connection is None
+    if own_connection:
+        config = get_db_config()
+        if not config:
+            return False
+        connection = psycopg2.connect(**config)
+
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT r.description
+                FROM nextris.tbuser u
+                LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+                WHERE u.guid = %s
+                LIMIT 1
+                """,
+                (str(user_id),),
+            )
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        return normalize_role_name(row[0] if row else '') in {'sysadmin', 'admin', 'administrador'}
+    except Exception:
+        return False
+    finally:
+        if own_connection and connection:
+            connection.close()
+
+
+def require_admin_permission(permission_code):
+    """Exige el permiso indicado y además un rol administrativo."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            user_id = get_jwt_identity()
+            if not user_id:
+                return jsonify({'success': False, 'message': 'No autenticado'}), 401
+
+            if not user_has_administrator_role(user_id):
+                return jsonify({
+                    'success': False,
+                    'message': 'Esta acción solo está disponible para administradores',
+                }), 403
+
+            if not user_has_permission_code(
+                user_id,
+                permission_code,
+                include_role_permissions=True,
+            ):
+                return jsonify({
+                    'success': False,
+                    'message': f'No tiene permiso: {permission_code}',
+                }), 403
+
+            return func(*args, **kwargs)
+
+        return wrapper
+    return decorator
 
 
 def replace_user_permissions(user_id, permission_codes, connection=None):

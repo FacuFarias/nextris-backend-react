@@ -485,8 +485,12 @@ def get_my_studies():
                     ELSE 'Pendiente'
                 END as status,
                 COALESCE(ex.isreported, 0) as isreported,
-                CASE 
-                    WHEN ex.studyinstanceuid IS NOT NULL AND ex.studyinstanceuid != '' THEN true
+                CASE
+                    WHEN COALESCE(ex.isimage, 0) = 1
+                         AND ex.studyinstanceuid IS NOT NULL
+                         AND ex.studyinstanceuid != ''
+                         AND ps.pk IS NOT NULL
+                    THEN true
                     ELSE false
                 END as has_images,
                 CONCAT(COALESCE(u_ref.name, ''), ' ', COALESCE(u_ref.surname, '')) as referring_physician,
@@ -652,7 +656,15 @@ def create_patient_case_link(exam_id):
         connection = psycopg2.connect(**get_db_config())
         cursor = connection.cursor()
         cursor.execute("""
-            SELECT ex.guid, ex.studyinstanceuid
+            SELECT ex.guid, ex.studyinstanceuid,
+                   COALESCE(ex.isimage, 0) = 1
+                   AND ex.studyinstanceuid IS NOT NULL
+                   AND ex.studyinstanceuid <> ''
+                   AND EXISTS (
+                       SELECT 1
+                       FROM public.study ps
+                       WHERE ps.study_iuid = ex.studyinstanceuid
+                   ) AS has_images
             FROM nextris.tbuser_patient up
             INNER JOIN nextris.tbexamination ex ON ex.idpatient = up.datapatient_id
             WHERE up.guid = %s
@@ -665,7 +677,7 @@ def create_patient_case_link(exam_id):
         if not study:
             connection.close()
             return jsonify({'success': False, 'message': 'Estudio no encontrado'}), 404
-        if not study[1]:
+        if not study[1] or not study[2]:
             connection.close()
             return jsonify({'success': False, 'message': 'El estudio no tiene imágenes disponibles'}), 400
 
@@ -719,7 +731,15 @@ def download_study_images(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         cursor.execute("""
-            SELECT ex.studyinstanceuid, ex.localacc
+            SELECT ex.studyinstanceuid, ex.localacc,
+                   COALESCE(ex.isimage, 0) = 1
+                   AND ex.studyinstanceuid IS NOT NULL
+                   AND ex.studyinstanceuid <> ''
+                   AND EXISTS (
+                       SELECT 1
+                       FROM public.study ps
+                       WHERE ps.study_iuid = ex.studyinstanceuid
+                   ) AS has_images
             FROM nextris.tbuser_patient up
             INNER JOIN nextris.tbexamination ex ON ex.idpatient = up.datapatient_id
             WHERE up.guid = %s
@@ -730,7 +750,7 @@ def download_study_images(exam_id):
         cursor.close()
         connection.close()
 
-        if not study or not study[0]:
+        if not study or not study[0] or not study[2]:
             return jsonify({'success': False, 'message': 'Imágenes no encontradas para este estudio'}), 404
 
         # Reutiliza la configuración y autenticación PACS ya usada por la carga DICOM.

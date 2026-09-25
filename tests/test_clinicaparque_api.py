@@ -94,7 +94,6 @@ def test_create_order_to_execute_and_read(patient_id=None):
             "procedure_name": "Radiografía de Tórax",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "rad_id": "sysadmin",
             "priority_id": 1,
             "study_reason": "Dolor torácico",
@@ -135,7 +134,6 @@ def test_create_order_patient_temporal():
             "procedure_name": "Radiografía de Tórax",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "rad_id": "sysadmin",
             "priority_id": 1
         }
@@ -178,7 +176,6 @@ def test_create_order_without_optional_fields():
             "procedure_name": "Radiografía de Tórax",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z"
         }
     }
 
@@ -222,7 +219,6 @@ def test_create_order_with_laterality():
             "procedure_name": "Radiografía de Tórax",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "priority_id": 1,
             "laterality_id": laterality_id
         }
@@ -265,7 +261,6 @@ def test_update_existing_order_fields():
         "procedure_name": "Radiografía de Tórax",
         "modality": "CR",
         "AET": "PACS_SERVER",
-        "scheduledTime": "2026-05-14T10:30:00Z",
         "priority_id": 0
     }
 
@@ -304,7 +299,6 @@ def test_create_order_invalid_priority():
             "procedure_name": "Test",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "priority_id": 2
         }
     }
@@ -332,7 +326,6 @@ def test_create_order_invalid_laterality():
             "procedure_name": "Test",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "laterality_id": "not-a-uuid"
         }
     }
@@ -392,7 +385,6 @@ def test_create_order_invalid_patient_type():
             "procedure_name": "Test",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "rad_id": "sysadmin",
             "priority_id": 0
         }

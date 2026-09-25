@@ -7,9 +7,8 @@ Migrado desde examination_controller.py - 19 endpoints REST
 from flask import jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 import psycopg2
-import pytz
-from datetime import datetime, timedelta
 from apps.api import api_blueprint
+from apps.services.timezone_utils import DEFAULT_TIMEZONE, format_local_datetime, to_utc_naive
 from apps.api.permissions import require_permission
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
@@ -711,7 +710,7 @@ def get_orders_ex():
         for row in cursor.fetchall():
             results.append([
                 row[0],  # guid
-                row[1].strftime('%d/%m/%Y %H:%M') if row[1] else '',
+                format_local_datetime(row[1], DEFAULT_TIMEZONE, separator=' ') if row[1] else '',
                 row[2] if row[2] else '',  # apellido
                 row[3] if row[3] else '',  # nombre
                 row[4] if row[4] else '',  # estudio
@@ -1074,18 +1073,11 @@ def create_appointment_equipment():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Zona horaria Argentina
-        tz_argentina = pytz.timezone('America/Argentina/Buenos_Aires')
-        
         for exam in exams:
             try:
-                # Convertir timestamps
-                init_time = datetime.fromisoformat(exam.get('init').replace('Z', '+00:00'))
-                finish_time = datetime.fromisoformat(exam.get('finish').replace('Z', '+00:00'))
-                
-                # Ajustar a zona horaria Argentina
-                init_time = init_time - timedelta(hours=3)
-                finish_time = finish_time - timedelta(hours=3)
+                # El frontend puede enviar ISO con Z o una hora local sin offset.
+                init_time = to_utc_naive(exam.get('init'))
+                finish_time = to_utc_naive(exam.get('finish'))
                 
                 medico_solicitante = exam.get('medico_solicitante')
                 rads = exam.get('rads')
@@ -1159,15 +1151,10 @@ def create_appointment_medico():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        tz_argentina = pytz.timezone('America/Argentina/Buenos_Aires')
-        
         for exam in exams:
             try:
-                init_time = datetime.fromisoformat(exam.get('init').replace('Z', '+00:00'))
-                finish_time = datetime.fromisoformat(exam.get('finish').replace('Z', '+00:00'))
-                
-                init_time = init_time - timedelta(hours=3)
-                finish_time = finish_time - timedelta(hours=3)
+                init_time = to_utc_naive(exam.get('init'))
+                finish_time = to_utc_naive(exam.get('finish'))
                 
                 medico_solicitante = exam.get('medico_solicitante')
                 rads = exam.get('rads')

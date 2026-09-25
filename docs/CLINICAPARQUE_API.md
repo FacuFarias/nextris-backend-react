@@ -20,7 +20,8 @@
    - [5.2 Trigger: Auto-creación de examen](#52-trigger-auto-creación-de-examen)
    - [5.3 Listener de portal (deshabilitado)](#53-listener-de-portal-deshabilitado)
 6. [Códigos de Respuesta](#6-códigos-de-respuesta)
-7. [Ejemplos completos](#7-ejemplos-completos)
+7. [Estados de workflow](#7-estados-de-workflow)
+8. [Ejemplos completos](#8-ejemplos-completos)
 
 ---
 
@@ -397,7 +398,6 @@ Body para paciente Final (F):
     "procedure_name": "DESCRIPCION_DEL_ESTUDIO",
     "modality": "CR",
     "AET": "PACS_SERVER",
-    "scheduledTime": "2026-05-14T10:30:00Z",
     "rad_id": "ID_MEDICO",
     "priority_id": 1,
     "laterality_id": "UUID_LATERALIDAD",
@@ -448,7 +448,6 @@ Body para paciente Temporal (T) o Neonatal (N):
 | `study_description` | String | No* | Descripción del estudio; si `procedure_code` aún no existe en NextRIS, se usa para resolver y actualizar el tipo de estudio del examen |
 | `modality` | String | Sí | Modalidad: `CR`, `CT`, `MR`, `DX`, etc. |
 | `AET` | String | Sí | AE Title del equipo |
-| `scheduledTime` | String | Sí | Fecha/hora programada (ISO 8601) |
 | `rad_id` | String | No | Identificador del radiólogo; si se omite se guarda vacío/`NULL` |
 | `priority_id` | Int | No | Prioridad: `0` (Rutina), `1` (Urgente); por defecto `0` |
 | `laterality_id` | UUID | No | UUID de la lateralidad existente en `islaterality` |
@@ -457,6 +456,17 @@ Body para paciente Temporal (T) o Neonatal (N):
 
 \* Se debe enviar `procedure_name` o `study_description`.
 
+### Fecha de recepción
+
+No es necesario enviar una fecha u hora con la orden. NextRIS registra
+automáticamente el momento en que recibe la petición utilizando `NOW()` en UTC,
+en el campo `tbexamination.createdon`. Al mostrar esa fecha en la interfaz o en
+respuestas para usuarios, debe convertirse a
+`America/Argentina/Buenos_Aires`.
+
+Si un cliente envía una fecha adicional, esta no modifica el momento de
+recepción registrado por NextRIS.
+
 #### Comportamiento
 
 1. **Paciente**: Si no existe, lo crea junto con su usuario (username=`id`, password=últimos 3 dígitos)
@@ -464,6 +474,7 @@ Body para paciente Temporal (T) o Neonatal (N):
    - `isexecuted = 0`
    - `isreported = 0`
    - `status = 'Scheduled'`
+   - `createdon`: momento de recepción generado con `NOW()` en UTC
    - `requestingphysician_name`: valor de `req_doctor`
    - `history`: incluye razón del estudio si se provee
    - `idreferringphysician`: radiólogo resuelto por `rad_id`, o `NULL` si no se informa
@@ -516,7 +527,6 @@ curl -X POST http://<SERVER>:<PORT>/api/clinicaparque/orders_to_execute_and_read
       "procedure_name": "Radiografía de Tórax",
       "modality": "CR",
       "AET": "PACS_SERVER",
-      "scheduledTime": "2026-05-14T10:30:00Z",
       "rad_id": "ID_MEDICO",
       "priority_id": 1,
       "laterality_id": "UUID_LATERALIDAD"
@@ -655,7 +665,7 @@ Crea o actualiza un paciente, examen y reporte en el sistema. Utilizado para sin
 | `procedure_description` | String | No | Descripción o nombre del estudio |
 | `rad_id` | String | No | Identificador del radiólogo (busca por GUID, username o nationalnumber) |
 | `report_type` | String | Sí | Tipo de reporte: `NR` (Nuevo), `NV` (Nueva Versión), `A` (Addenda) |
-| `report_date` | String | No | Fecha del estudio (`YYYY-MM-DD`) |
+| `report_date` | String | No | Fecha calendario asociada al informe (`YYYY-MM-DD`) |
 | `modality` | String | Sí | Modalidad: `RX`, `CT`, `MR`, `DX`, etc. |
 | `priority_id` | Int | No | Prioridad: `0` (Rutina), `1` (Urgente) |
 
@@ -1059,7 +1069,111 @@ Para re-deshabilitar:
 
 ---
 
-## 7. Ejemplos completos
+## 7. Estados de workflow
+
+Info Parque puede notificar estados terminales mediante:
+
+- `POST /api/clinicaparque/cancel-study` o `/api/clinicaparque/orders/{orderId}/cancel`.
+- `POST /api/clinicaparque/already-read` o `/api/clinicaparque/orders/{orderId}/already-read`.
+
+Ambos endpoints usan Bearer Token, aceptan `orderId` o `accessionNumber` y
+registran cada intento en `nextris.communication_logs` sin guardar el token.
+Cancelar requiere un motivo activo del catálogo (`PATIENT_ABSENT`,
+`PATIENT_REFUSAL`, `CLINICAL_CONTRAINDICATION`, `INADEQUATE_PREPARATION`,
+`TECHNICAL_FAILURE`, `DUPLICATE_ORDER`, `INCORRECT_ORDER` u `OTHER`); para
+`OTHER` el detalle es obligatorio. El catálogo se consulta y mantiene con
+`GET/POST /api/config/cancellation-reasons` y `PATCH
+/api/config/cancellation-reasons/{id}`.
+
+### Notificar estudio ya leído
+
+Permite informar que Clínica Parque ya leyó el estudio. El estado de la orden
+pasa de `pending` a `already_read` y queda bloqueada para nuevas modificaciones
+en NextRIS.
+
+> **Importante:** esta llamada no solicita que NextRIS lea el informe ni sirve
+> únicamente para enviar su contenido. Su objetivo principal es notificar que el
+> estudio/informe ya fue leído en Clínica Parque. Al recibirla, NextRIS marca la
+> orden como `already_read`, la deja en solo lectura y registra la fecha y hora
+> de lectura. El objeto `report` es opcional: puede incluir datos del informe,
+> pero no es necesario para cambiar el estado.
+
+| Propiedad | Valor |
+|-----------|-------|
+| **URL** | `/api/clinicaparque/already-read` o `/api/clinicaparque/orders/{orderId}/already-read` |
+| **Método** | `POST` |
+| **Auth** | Bearer Token |
+
+La orden se identifica mediante `orderId` o `accessionNumber`. En la URL con
+`{orderId}`, el `orderId` puede omitirse del cuerpo.
+
+#### Estructura del JSON
+
+```json
+{
+  "orderId": "ORD-2026-001",
+  "accessionNumber": "ACC123456",
+  "read_at": "2026-09-18T15:30:00-03:00",
+  "report": {
+    "rad_id": "RAD-005",
+    "study_reason": "Dolor torácico.",
+    "content": "Campos pulmonares sin infiltrados.",
+    "conclusion": "Sin hallazgos patológicos agudos.",
+    "study_uid": "1.2.840.113619.2.55.3.123"
+  }
+}
+```
+
+#### Campos
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `orderId` | String | Sí* | Número de orden o solicitud |
+| `accessionNumber` | String | Sí* | Número de acceso de la orden |
+| `read_at` | String | No | Fecha y hora en que el estudio fue marcado como leído, en ISO 8601. Se recomienda incluir zona horaria, por ejemplo `-03:00` o `Z`. |
+| `report` | Object | No | Reporte opcional que se guarda como finalizado junto con el estado `already_read`. |
+
+\* Se debe enviar `orderId` o `accessionNumber`.
+
+`read_at` representa la hora del evento de lectura; no es la hora del estudio
+DICOM. Si se omite, NextRIS usa la hora actual del servidor
+(`NOW()`) y la almacena en UTC. La API expone posteriormente ese instante con
+su zona UTC para que los clientes lo conviertan a la hora local.
+
+Si solo se quiere informar que fue leído, puede omitirse `report` y enviar
+únicamente `orderId`/`accessionNumber` y, opcionalmente, `read_at`.
+
+“Ya leído” acepta un `report` opcional. Se admiten los campos canónicos
+`study_reason`, `content`, `conclusion` y los legados `technique(s)`,
+`narrative`, `findings`, `impression(s)`, `conclusions`, además de
+`study_uid` y `rad_id`. Los canónicos prevalecen y los campos
+omitidos no sobrescriben datos. Sin contenido no se crea reporte; con contenido
+parcial se guarda finalizado, consultable y generable a PDF, pero no editable.
+
+#### Respuesta exitosa (200)
+
+```json
+{
+  "success": true,
+  "message": "Estudio marcado como ya leído",
+  "orderId": "ORD-2026-001",
+  "accessionNumber": "ACC123456",
+  "state": "already_read",
+  "idempotent": false
+}
+```
+
+Los reintentos del mismo evento responden `200` con `idempotent: true`.
+Si el estudio ya fue reportado o tiene otro estado terminal, responde `409`
+con `STUDY_ALREADY_READ_IN_INFOPARQUE` o `STUDY_ALREADY_REPORTED`.
+
+Sólo estudios no reportados cambian de `pending` a `cancelled` o
+`already_read`; reintentos idénticos son idempotentes y conflictos responden
+HTTP 409 con `STUDY_CANCELLED` o `STUDY_ALREADY_READ_IN_INFOPARQUE`. Para estos
+nuevos eventos no se genera tráfico saliente NextRIS → Info Parque; URLs,
+autenticación y política de reintentos de esa segunda etapa quedan pendientes.
+
+## 8. Ejemplos completos
 
 ### Flujo completo: Crear orden → Enviar reporte → Anexar addenda
 
@@ -1070,7 +1184,7 @@ curl -X POST http://192.168.0.76:5001/api/clinicaparque/orders_to_execute_and_re
   -H "Content-Type: application/json" \
   -d '{
     "patient": {"id": "PAC-001", "dni": "12345678", "name": "JUAN PEREZ", "birthdate": "1985-05-14", "sex": "M", "patient_type": "F", "healthcard_type": "Particular"},
-    "order": {"orderId": "ORD-001", "accessionNumber": "ACC-001", "procedure_code": "RX-01", "procedure_name": "Radiografía de Tórax", "modality": "CR", "AET": "PACS_SERVER", "scheduledTime": "2026-05-22T10:00:00Z", "rad_id": "RAD-005", "priority_id": 0, "study_reason": "Dolor torácico", "req_doctor": "Dr. García"}
+    "order": {"orderId": "ORD-001", "accessionNumber": "ACC-001", "procedure_code": "RX-01", "procedure_name": "Radiografía de Tórax", "modality": "CR", "AET": "PACS_SERVER", "rad_id": "RAD-005", "priority_id": 0, "study_reason": "Dolor torácico", "req_doctor": "Dr. García"}
   }'
 ```
 
@@ -1123,6 +1237,10 @@ curl -X POST http://192.168.0.76:5001/api/clinicaparque/addenda \
 | `/api/clinicaparque/resetpassword` | POST | Bearer | Resetear contraseña de usuario portal |
 | `/api/clinicaparque/orders` | POST | — | Crear exámenes (batch) |
 | `/api/clinicaparque/orders_to_execute_and_read` | POST | Bearer | Crear orden + worklist |
+| `/api/clinicaparque/cancel-study` | POST | Bearer | Cancelar estudio (orderId o accessionNumber) |
+| `/api/clinicaparque/orders/{orderId}/cancel` | POST | Bearer | Cancelar estudio por orderId |
+| `/api/clinicaparque/already-read` | POST | Bearer | Informar estudio ya leído |
+| `/api/clinicaparque/orders/{orderId}/already-read` | POST | Bearer | Informar ya leído por orderId |
 | `/api/clinicaparque/reports` | POST | Bearer | Recibir reporte finalizado |
 | `/api/clinicaparque/study-open` | POST | Bearer | Notificar apertura de estudio |
 | `/api/clinicaparque/addenda` | POST | Bearer | Anexar addenda a reporte |
@@ -1132,8 +1250,8 @@ curl -X POST http://192.168.0.76:5001/api/clinicaparque/addenda \
 ## Notas importantes
 
 1. **Token**: El token debe enviarse en cada petición en el header `Authorization`
-2. **Fechas**: Todas las fechas deben tener formato `YYYY-MM-DD`
-3. **Timestamps**: En ISO 8601 (`YYYY-MM-DDTHH:mm:ssZ`)
+2. **Fechas**: `birthdate` debe tener formato `YYYY-MM-DD`; `read_at` debe usar ISO 8601 y, preferentemente, incluir zona horaria
+3. **Fecha de recepción de órdenes**: No debe enviarse; NextRIS la genera con `NOW()` en UTC y la muestra en horario argentino
 4. **IDs**: Los identificadores (`id`, `orderId`, `accessionNumber`) deben ser únicos en el sistema origen
 5. **study_uid**: Es el DICOM Study Instance UID y debe ser único por estudio
 6. **Addenda**: Se anexa al reporte existente con tag `[ADDENDA DD/MM/YYYY]`

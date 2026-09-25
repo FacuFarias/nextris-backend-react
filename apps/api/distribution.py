@@ -162,7 +162,7 @@ def get_examinations_for_distribution():
                 e.guid,
                 TO_CHAR(e.createdon, 'DD/MM/YYYY HH24:MI') as fecha,
                 st.description as examen,
-                CONCAT(dp.name, ' ', dp.surname) as paciente,
+                CONCAT_WS(', ', NULLIF(TRIM(dp.surname), ''), NULLIF(TRIM(dp.name), '')) as paciente,
                 COALESCE(dp.email, '') as mail,
                 CASE
                     WHEN EXISTS (

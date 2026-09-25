@@ -9,10 +9,14 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from apps.api import api_blueprint
-from datetime import datetime, timedelta
 import uuid
-import pytz
 from apps.home.services import HL7Service
+from apps.services.timezone_utils import (
+    DEFAULT_TIMEZONE,
+    format_local_datetime,
+    get_timezone,
+    to_utc_naive,
+)
 
 
 def get_db_config():
@@ -101,15 +105,12 @@ def get_calendar_events():
         """
         cursor.execute(query_timezone, (equipment_aetitle,))
         timezone_result = cursor.fetchone()
-        default_tz = 'America/Argentina/Buenos_Aires'
+        default_tz = DEFAULT_TIMEZONE
         timezone = timezone_result[0] if timezone_result and timezone_result[0] else default_tz
 
         # Crear objeto timezone con fallback
-        try:
-            tz = pytz.timezone(timezone)
-        except pytz.exceptions.UnknownTimeZoneError:
-            tz = pytz.timezone(default_tz)
-            timezone = default_tz
+        tz = get_timezone(timezone)
+        timezone = getattr(tz, 'zone', default_tz)
 
         # Obtener eventos del equipo
         query_events = """
@@ -133,22 +134,13 @@ def get_calendar_events():
             end_time = ev[2]
 
             if start_time and end_time:
-                # Convertir de UTC a hora local
                 try:
-                    if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
-                        start_local = start_time.astimezone(tz)
-                    else:
-                        start_local = pytz.UTC.localize(start_time).astimezone(tz)
-                    start_str = start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                    start_str = format_local_datetime(start_time, timezone)
                 except Exception:
                     start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S')
 
                 try:
-                    if hasattr(end_time, 'tzinfo') and end_time.tzinfo is not None:
-                        end_local = end_time.astimezone(tz)
-                    else:
-                        end_local = pytz.UTC.localize(end_time).astimezone(tz)
-                    end_str = end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                    end_str = format_local_datetime(end_time, timezone)
                 except Exception:
                     end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S')
 
@@ -292,7 +284,7 @@ def reschedule_appointment(appointment_id):
             equipment_id = current_equipment_id
         
         # Obtener timezone de la location del equipo
-        timezone_str = 'America/Argentina/Buenos_Aires'  # Default
+        timezone_str = DEFAULT_TIMEZONE
         if equipment_id:
             query_tz = """
                 SELECT COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires')
@@ -307,25 +299,8 @@ def reschedule_appointment(appointment_id):
         
         # Convertir datetimes de local a UTC
         try:
-            # Parsear datetimes locales
-            dt_start_local = datetime.strptime(start_datetime, '%Y-%m-%d %H:%M:%S')
-            dt_end_local = datetime.strptime(end_datetime, '%Y-%m-%d %H:%M:%S')
-
-            # Localizar a la zona horaria de la location (con fallback)
-            try:
-                tz = pytz.timezone(timezone_str)
-            except pytz.exceptions.UnknownTimeZoneError:
-                tz = pytz.timezone('America/Argentina/Buenos_Aires')
-            dt_start_local = tz.localize(dt_start_local)
-            dt_end_local = tz.localize(dt_end_local)
-            
-            # Convertir a UTC
-            dt_start_utc = dt_start_local.astimezone(pytz.UTC)
-            dt_end_utc = dt_end_local.astimezone(pytz.UTC)
-            
-            # Guardar como naive (sin zona horaria)
-            start_to_save = dt_start_utc.replace(tzinfo=None)
-            end_to_save = dt_end_utc.replace(tzinfo=None)
+            start_to_save = to_utc_naive(start_datetime, timezone_str)
+            end_to_save = to_utc_naive(end_datetime, timezone_str)
             
             print(f"[DEBUG RESCHEDULE] appointment_id: {appointment_id}, start: {start_to_save}, end: {end_to_save}, equipment_id: {equipment_id}")
         except Exception as e:
@@ -489,7 +464,7 @@ def create_appointment():
                 equipment_id = event.get('equipment_id')
                 
                 # Obtener timezone de la location del equipo
-                timezone_str = 'America/Argentina/Buenos_Aires'  # Default
+                timezone_str = DEFAULT_TIMEZONE
                 if equipment_id:
                     query_tz = """
                         SELECT COALESCE(tbl.timezone, 'America/Argentina/Buenos_Aires')
@@ -501,47 +476,21 @@ def create_appointment():
                     tz_result = cursor.fetchone()
                     if tz_result:
                         timezone_str = tz_result[0]
+                elif location_id:
+                    cursor.execute(
+                        "SELECT COALESCE(timezone, %s) FROM nextris.tblocation WHERE guid = %s",
+                        (DEFAULT_TIMEZONE, location_id),
+                    )
+                    tz_result = cursor.fetchone()
+                    if tz_result:
+                        timezone_str = tz_result[0]
                 
                 # Convertir datetimes de local a UTC
                 try:
-                    # Parsear datetimes locales (con o sin segundos)
-                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
-                        try:
-                            dt_start_local = datetime.strptime(start_datetime, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        raise ValueError(f'Formato de fecha inválido: {start_datetime}')
-
-                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
-                        try:
-                            dt_end_local = datetime.strptime(end_datetime, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        raise ValueError(f'Formato de fecha inválido: {end_datetime}')
-                    
-                    # Localizar a la zona horaria de la location (con fallback)
-                    try:
-                        tz = pytz.timezone(timezone_str)
-                    except pytz.exceptions.UnknownTimeZoneError:
-                        tz = pytz.timezone('America/Argentina/Buenos_Aires')
-                    dt_start_local = tz.localize(dt_start_local)
-                    dt_end_local = tz.localize(dt_end_local)
-                    
-                    # Convertir a UTC
-                    dt_start_utc = dt_start_local.astimezone(pytz.UTC)
-                    dt_end_utc = dt_end_local.astimezone(pytz.UTC)
-                    
-                    # Guardar como naive (sin zona horaria)
-                    start_datetime_to_save = dt_start_utc.replace(tzinfo=None)
-                    end_datetime_to_save = dt_end_utc.replace(tzinfo=None)
+                    start_datetime_to_save = to_utc_naive(start_datetime, timezone_str)
+                    end_datetime_to_save = to_utc_naive(end_datetime, timezone_str)
                 except Exception as tz_error:
-                    # Si hay error en conversión, guardar como estaba
-                    start_datetime_to_save = start_datetime
-                    end_datetime_to_save = end_datetime
+                    raise ValueError(f'Formato de fecha inválido: {tz_error}') from tz_error
                 
                 # Construir INSERT dinámicamente según campos disponibles
                 columns = ['guid', 'comienzo', 'fin', 'idpatient', 'idexam']
@@ -683,6 +632,8 @@ def get_appointments():
             LEFT JOIN nextris.isstudytype st ON st.guid = tba.idexam
             LEFT JOIN nextris.tbuser med ON med.guid = tba.idmed
             LEFT JOIN nextris.isequipment equip ON equip.guid = tba.idequipment
+            LEFT JOIN nextris.tblocation tbl_event ON tbl_event.guid = tba.location_id
+            LEFT JOIN nextris.tblocation tbl_equip ON tbl_equip.guid = equip.location_id
             WHERE 1=1
         """
         
@@ -718,10 +669,13 @@ def get_appointments():
         # Aplicar filtros a ambas queries
         filter_conditions = ""
         
+        local_timezone_sql = "COALESCE(tbl_equip.timezone, tbl_event.timezone, 'America/Argentina/Buenos_Aires')"
+        local_start_sql = f"((tba.comienzo AT TIME ZONE 'UTC') AT TIME ZONE {local_timezone_sql})"
+
         if today_only:
-            filter_conditions += " AND DATE(tba.comienzo) = CURRENT_DATE"
+            filter_conditions += f" AND DATE({local_start_sql}) = (CURRENT_TIMESTAMP AT TIME ZONE {local_timezone_sql})::date"
         elif date_filter:
-            filter_conditions += " AND DATE(tba.comienzo) = %s"
+            filter_conditions += f" AND DATE({local_start_sql}) = %s"
             params.append(date_filter)
         
         if doctor_id:
@@ -764,7 +718,7 @@ def get_appointments():
         connection.close()
         
         # Timezone por defecto (fallback)
-        default_tz = 'America/Argentina/Buenos_Aires'
+        default_tz = DEFAULT_TIMEZONE
         response_timezone = default_tz
         
         # Formatear resultados
@@ -775,23 +729,15 @@ def get_appointments():
             end_time = row[3]
             row_timezone = row[11] if row[11] else default_tz
 
-            try:
-                tz = pytz.timezone(row_timezone)
-            except pytz.exceptions.UnknownTimeZoneError:
-                tz = pytz.timezone(default_tz)
-                row_timezone = default_tz
+            tz = get_timezone(row_timezone)
+            row_timezone = getattr(tz, 'zone', default_tz)
 
             if response_timezone == default_tz and row_timezone:
                 response_timezone = row_timezone
             
             if start_time:
                 try:
-                    if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
-                        start_local = start_time.astimezone(tz)
-                    else:
-                        start_utc = pytz.UTC.localize(start_time)
-                        start_local = start_utc.astimezone(tz)
-                    start_str = start_local.strftime('%Y-%m-%d %H:%M:%S')
+                    start_str = format_local_datetime(start_time, row_timezone, separator=' ')
                 except Exception:
                     start_str = str(start_time)
             else:
@@ -799,12 +745,7 @@ def get_appointments():
 
             if end_time:
                 try:
-                    if hasattr(end_time, 'tzinfo') and end_time.tzinfo is not None:
-                        end_local = end_time.astimezone(tz)
-                    else:
-                        end_utc = pytz.UTC.localize(end_time)
-                        end_local = end_utc.astimezone(tz)
-                    end_str = end_local.strftime('%Y-%m-%d %H:%M:%S')
+                    end_str = format_local_datetime(end_time, row_timezone, separator=' ')
                 except Exception:
                     end_str = str(end_time)
             else:
@@ -822,7 +763,8 @@ def get_appointments():
                 'is_admitted': bool(row[7]) if row[7] is not None else False,
                 'location_id': row[8] if row[8] else None,
                 'equipment_id': row[9] if row[9] else None,
-                'modality': row[10] if row[10] else None
+                'modality': row[10] if row[10] else None,
+                'timezone': row_timezone
             })
         
         return jsonify({
@@ -1232,4 +1174,3 @@ def get_health_insurances_by_location(location_id=None):
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
-

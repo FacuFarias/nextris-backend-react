@@ -7,11 +7,12 @@ from flask import Blueprint, request, jsonify
 import psycopg2
 import pydicom
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from apps.home.services.database_service import DatabaseService
 from apps.home.services.config_service import ConfigService
 from apps.home.services.hl7_service import HL7Service
 from apps.home.controllers.admin_controller import updatestatus
+from apps.services.timezone_utils import DEFAULT_TIMEZONE, format_local_datetime, to_utc_naive
 
 # Crear blueprint para citas y agenda
 appointment_bp = Blueprint('appointment', __name__, url_prefix='/api')
@@ -52,13 +53,13 @@ def get_events_para_editar():
         
         result = []
         for ev in eventos:
-            start = (ev[1] + timedelta(hours=3)) if ev[1] else None
-            end = (ev[2] + timedelta(hours=3)) if ev[2] else None
+            start = format_local_datetime(ev[1], DEFAULT_TIMEZONE) if ev[1] else None
+            end = format_local_datetime(ev[2], DEFAULT_TIMEZONE) if ev[2] else None
             
             evento = {
                 'guid': str(ev[0]),
-                'start': start.isoformat() if start else '',
-                'end': end.isoformat() if end else '',
+                'start': start or '',
+                'end': end or '',
                 'idmed': ev[3],
                 'exam': ev[4] or 'Sin examen',
                 'idmed_sol': ev[5],
@@ -133,21 +134,9 @@ def actualizar_evento_cita():
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Zona horaria local
-        import pytz
-        local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
-        
-        # Convertir las fechas del frontend
-        init_utc = datetime.fromisoformat(data['start'].replace('Z', '+00:00')).astimezone(pytz.utc)
-        finish_utc = datetime.fromisoformat(data['end'].replace('Z', '+00:00')).astimezone(pytz.utc)
-        
-        # Convertir a zona horaria local y ajustar
-        init_local = init_utc.astimezone(local_tz) - timedelta(hours=5)
-        finish_local = finish_utc.astimezone(local_tz) - timedelta(hours=5)
-        
-        # Convertir a formato para la base de datos
-        init_str_adjusted = init_local.strftime('%Y-%m-%dT%H:%M:%S')
-        finish_str_adjusted = finish_local.strftime('%Y-%m-%dT%H:%M:%S')
+        # El calendario envia instantes ISO; guardar siempre UTC naive.
+        init_str_adjusted = to_utc_naive(data['start'])
+        finish_str_adjusted = to_utc_naive(data['end'])
         
         # Actualizar el evento en la base de datos
         query_events = """
@@ -199,8 +188,8 @@ def insertar_citas_per_med():
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         
-        fecha_inicio = f"{fecha} {hora_inicio}"
-        fecha_fin = f"{fecha} {hora_fin}"
+        fecha_inicio = to_utc_naive(f"{fecha} {hora_inicio}")
+        fecha_fin = to_utc_naive(f"{fecha} {hora_fin}")
         
         cursor.execute(query, (
             new_guid, fecha_inicio, fecha_fin, medico_id, 
@@ -246,8 +235,8 @@ def insertar_citas_per_equip():
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         
-        fecha_inicio = f"{fecha} {hora_inicio}"
-        fecha_fin = f"{fecha} {hora_fin}"
+        fecha_inicio = to_utc_naive(f"{fecha} {hora_inicio}")
+        fecha_fin = to_utc_naive(f"{fecha} {hora_fin}")
         
         cursor.execute(query, (
             new_guid, fecha_inicio, fecha_fin, equipo_id,
@@ -526,7 +515,7 @@ def obtener_agenda():
         
         params = []
         if fecha:
-            query += " AND DATE(tba.comienzo) = %s"
+            query += " AND DATE((tba.comienzo AT TIME ZONE 'UTC') AT TIME ZONE 'America/Argentina/Buenos_Aires') = %s"
             params.append(fecha)
         if medico_id:
             query += " AND tba.idmed = %s"
@@ -547,8 +536,8 @@ def obtener_agenda():
         for row in results:
             agenda.append({
                 'guid': row[0],
-                'comienzo': row[1].isoformat() if row[1] else '',
-                'fin': row[2].isoformat() if row[2] else '',
+                'comienzo': format_local_datetime(row[1], DEFAULT_TIMEZONE, separator=' ') if row[1] else '',
+                'fin': format_local_datetime(row[2], DEFAULT_TIMEZONE, separator=' ') if row[2] else '',
                 'paciente': row[3] or '',
                 'examen': row[4] or '',
                 'medico': row[5] or '',
@@ -645,7 +634,8 @@ def get_citas_for_today():
             LEFT JOIN nextris.tbuser us on tba.idmed=us.guid
             LEFT JOIN nextris.isstudytype ex on tba.idexam=ex.guid
             LEFT JOIN nextris.tblocation loc on tba.location_id=loc.guid
-            WHERE DATE(tba.comienzo) = current_date 
+             WHERE DATE((tba.comienzo AT TIME ZONE 'UTC') AT TIME ZONE COALESCE(loc.timezone, 'America/Argentina/Buenos_Aires')) =
+                   (CURRENT_TIMESTAMP AT TIME ZONE COALESCE(loc.timezone, 'America/Argentina/Buenos_Aires'))::date
               AND isadmitted=false
               AND tba.location_id = ANY(%s)
             ORDER BY tba.comienzo

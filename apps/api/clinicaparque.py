@@ -13,6 +13,7 @@ Autenticación: Bearer Token estático en header Authorization
 
 import uuid
 import os
+import json
 import requests
 from datetime import datetime
 from functools import wraps
@@ -26,6 +27,13 @@ from apps.authentication.util import hash_pass
 from apps.home.services.hl7_service import HL7Service
 from apps.api.viewer_share_service import create_for_exam
 from apps.services.report_fields import canonical_fields_from_row, normalize_report_payload
+from apps.services.clinicaparque_workflow import (
+    WORKFLOW_ALREADY_READ,
+    WORKFLOW_CANCELLED,
+    apply_already_read,
+    apply_cancel,
+    ensure_workflow_schema,
+)
 
 
 CLINICAPARQUE_TOKEN = os.environ.get(
@@ -37,11 +45,30 @@ CLINICAPARQUE_TOKEN = os.environ.get(
 def require_clinicaparque_token(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        workflow_endpoint = None
+        if '/cancel-study' in request.path:
+            workflow_endpoint = '/clinicaparque/cancel-study'
+        elif '/already-read' in request.path:
+            workflow_endpoint = '/clinicaparque/already-read'
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
+            if workflow_endpoint:
+                _log_communication(workflow_endpoint,
+                                   request_body=json.dumps(request.get_json(silent=True), ensure_ascii=False, default=str),
+                                   response_status=401,
+                                   response_body=json.dumps({'success': False, 'message': 'Token de autenticación requerido'}),
+                                   success=False, error_message='Token de autenticación requerido',
+                                   start_time=datetime.now())
             return jsonify({'success': False, 'message': 'Token de autenticación requerido'}), 401
         token = auth_header[7:].strip()
         if token != CLINICAPARQUE_TOKEN:
+            if workflow_endpoint:
+                _log_communication(workflow_endpoint,
+                                   request_body=json.dumps(request.get_json(silent=True), ensure_ascii=False, default=str),
+                                   response_status=401,
+                                   response_body=json.dumps({'success': False, 'message': 'Token de autenticación inválido'}),
+                                   success=False, error_message='Token de autenticación inválido',
+                                   start_time=datetime.now())
             return jsonify({'success': False, 'message': 'Token de autenticación inválido'}), 401
         return f(*args, **kwargs)
     return decorated
@@ -209,6 +236,188 @@ def _find_clinicaparque_order(cursor, order_id=None, accession=None, study_uid=N
     return None
 
 
+def _workflow_callback_response(status, message, code=None):
+    body = {'success': False, 'message': message}
+    if code:
+        body['code'] = code
+    return jsonify(body), status
+
+
+def _clinicaparque_workflow_callback(action, path_order_id=None):
+    """Process a cancellation/already-read callback from Clínica Parque."""
+    start_time = datetime.now()
+    canonical_endpoint = (
+        '/clinicaparque/cancel-study'
+        if action == WORKFLOW_CANCELLED
+        else '/clinicaparque/already-read'
+    )
+    payload = request.get_json(silent=True)
+    request_body = json.dumps(payload, ensure_ascii=False, default=str)
+    order_data = payload.get('order') if isinstance(payload, dict) else {}
+    if not isinstance(order_data, dict):
+        order_data = {}
+    order_id = str(
+        path_order_id
+        or (payload or {}).get('orderId')
+        or (payload or {}).get('order_id')
+        or order_data.get('orderId')
+        or order_data.get('order_id')
+        or ''
+    ).strip() or None
+    accession = str(
+        (payload or {}).get('accessionNumber')
+        or (payload or {}).get('accession_number')
+        or order_data.get('accessionNumber')
+        or order_data.get('accession_number')
+        or ''
+    ).strip() or None
+    connection = None
+    cursor = None
+    patient_id = None
+    patient_name = None
+    try:
+        if not isinstance(payload, dict):
+            _log_communication(canonical_endpoint, order_id=order_id,
+                               accession_number=accession, request_body=request_body,
+                               response_status=400, response_body=json.dumps({'success': False}),
+                               success=False, error_message='JSON inválido o vacío',
+                               start_time=start_time)
+            return _workflow_callback_response(400, 'JSON inválido o vacío')
+        if not order_id and not accession:
+            _log_communication(canonical_endpoint, request_body=request_body,
+                               response_status=400, response_body=json.dumps({'success': False}),
+                               success=False, error_message='orderId o accessionNumber es requerido',
+                               start_time=start_time)
+            return _workflow_callback_response(400, 'orderId o accessionNumber es requerido')
+
+        connection = psycopg2.connect(**get_db_config())
+        cursor = connection.cursor()
+        ensure_workflow_schema(connection)
+        _ensure_clinicaparque_order_links(cursor)
+        order_row = _find_clinicaparque_order(cursor, order_id=order_id, accession=accession)
+        if not order_row:
+            _log_communication(canonical_endpoint, accession_number=accession, order_id=order_id,
+                               request_body=request_body, response_status=404,
+                               response_body=json.dumps({'success': False}), success=False,
+                               error_message='No se encontró la orden', start_time=start_time)
+            return _workflow_callback_response(404, 'No se encontró la orden')
+        exam_id = order_row[0]
+        cursor.execute(
+            """
+            SELECT dp.patientid,
+                   CONCAT_WS(', ', NULLIF(TRIM(dp.surname), ''), NULLIF(TRIM(dp.name), '')),
+                   e.localacc
+            FROM nextris.tbexamination e
+            LEFT JOIN nextris.datapatient dp ON dp.guid = e.idpatient
+            WHERE e.guid = %s
+            LIMIT 1
+            """,
+            (exam_id,),
+        )
+        exam_data = cursor.fetchone()
+        if exam_data:
+            patient_id, patient_name, accession = exam_data[0], exam_data[1], accession or exam_data[2]
+
+        if action == WORKFLOW_CANCELLED:
+            cancellation = payload.get('cancellation')
+            if not isinstance(cancellation, dict):
+                cancellation = payload
+            result = apply_cancel(
+                connection,
+                exam_id,
+                cancellation.get('reason_code') or cancellation.get('cancellation_reason_code'),
+                cancellation.get('detail') or cancellation.get('cancellation_reason_detail'),
+                source='clinicaparque_api',
+            )
+        else:
+            report = payload.get('report')
+            report = report if isinstance(report, dict) else None
+            rad_id = payload.get('rad_id') or (report or {}).get('rad_id')
+            read_at = payload.get('read_at') or payload.get('readAt')
+            result = apply_already_read(
+                connection,
+                exam_id,
+                report_payload=report,
+                rad_id=rad_id,
+                read_at=read_at,
+                source='clinicaparque_api',
+            )
+        connection.commit()
+        response = {
+            'success': True,
+            'message': ('Estudio cancelado correctamente'
+                        if action == WORKFLOW_CANCELLED
+                        else 'Estudio marcado como ya leído'),
+            'orderId': order_id,
+            'accessionNumber': accession,
+            'state': result['state'],
+            'idempotent': result['idempotent'],
+        }
+        _log_communication(canonical_endpoint, patient_id=patient_id,
+                           patient_name=patient_name, accession_number=accession,
+                           order_id=order_id, request_body=request_body,
+                           response_status=200,
+                           response_body=json.dumps(response, ensure_ascii=False),
+                           success=True, start_time=start_time)
+        return jsonify(response), 200
+    except LookupError as error:
+        if connection:
+            connection.rollback()
+        _log_communication(canonical_endpoint, patient_id=patient_id,
+                           patient_name=patient_name, accession_number=accession,
+                           order_id=order_id, request_body=request_body,
+                           response_status=404, response_body=json.dumps({'success': False}),
+                           success=False, error_message=str(error), start_time=start_time)
+        return _workflow_callback_response(404, str(error))
+    except PermissionError as error:
+        if connection:
+            connection.rollback()
+        code = 'STUDY_CANCELLED' if action == WORKFLOW_CANCELLED else 'STUDY_ALREADY_READ_IN_INFOPARQUE'
+        _log_communication(canonical_endpoint, patient_id=patient_id,
+                           patient_name=patient_name, accession_number=accession,
+                           order_id=order_id, request_body=request_body,
+                           response_status=409, response_body=json.dumps({'success': False, 'code': code}),
+                           success=False, error_message=str(error), start_time=start_time)
+        return _workflow_callback_response(409, str(error), code)
+    except (ValueError, TypeError) as error:
+        if connection:
+            connection.rollback()
+        _log_communication(canonical_endpoint, patient_id=patient_id,
+                           patient_name=patient_name, accession_number=accession,
+                           order_id=order_id, request_body=request_body,
+                           response_status=400, response_body=json.dumps({'success': False}),
+                           success=False, error_message=str(error), start_time=start_time)
+        return _workflow_callback_response(400, str(error))
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        _log_communication(canonical_endpoint, patient_id=patient_id,
+                           patient_name=patient_name, accession_number=accession,
+                           order_id=order_id, request_body=request_body,
+                           response_status=500, response_body=json.dumps({'success': False}),
+                           success=False, error_message=str(error), start_time=start_time)
+        return _workflow_callback_response(500, 'Error procesando la notificación')
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/clinicaparque/cancel-study', methods=['POST'])
+@api_blueprint.route('/clinicaparque/orders/<order_id>/cancel', methods=['POST'])
+@require_clinicaparque_token
+def clinicaparque_cancel_study(order_id=None):
+    return _clinicaparque_workflow_callback(WORKFLOW_CANCELLED, order_id)
+
+
+@api_blueprint.route('/clinicaparque/already-read', methods=['POST'])
+@api_blueprint.route('/clinicaparque/orders/<order_id>/already-read', methods=['POST'])
+@require_clinicaparque_token
+def clinicaparque_already_read(order_id=None):
+    return _clinicaparque_workflow_callback(WORKFLOW_ALREADY_READ, order_id)
+
+
 def _resolve_external_laterality(cursor, value):
     """Resolve a description/code supplied by the external system."""
     if value is None or str(value).strip() == '':
@@ -305,7 +514,10 @@ def _communication_direction(endpoint):
 def _serialize_communication_log(row, include_body=False):
     data = {
         'guid': row[0],
-        'received_at': row[1].isoformat() if row[1] else None,
+        # communication_logs.received_at is stored as UTC without timezone.
+        # The suffix makes the contract explicit so clients can render it in
+        # America/Argentina/Buenos_Aires instead of using browser local time.
+        'received_at': f'{row[1].isoformat()}Z' if row[1] else None,
         'api_endpoint': row[2],
         'http_method': row[3],
         'patient_id': row[4],
@@ -384,7 +596,11 @@ def clinicaparque_communication_logs():
             ORDER BY api_endpoint
             """
         )
-        available_endpoints = [row[0] for row in cursor.fetchall()]
+        available_endpoints = sorted({
+            *(row[0] for row in cursor.fetchall()),
+            '/clinicaparque/cancel-study',
+            '/clinicaparque/already-read',
+        })
         cursor.execute(f"SELECT COUNT(*) FROM nextris.communication_logs {where_clause}", params)
         total = cursor.fetchone()[0]
 
@@ -2457,7 +2673,6 @@ def clinicaparque_orders_to_execute_and_read():
             "procedure_name": "DESCRIPCION_DEL_ESTUDIO",
             "modality": "CR",
             "AET": "PACS_SERVER",
-            "scheduledTime": "2026-05-14T10:30:00Z",
             "rad_id": "ID_MEDICO",
             "priority_id": 1
         }
@@ -2495,12 +2710,15 @@ def clinicaparque_orders_to_execute_and_read():
                                           existe en el catálogo de NextRIS
       - modality             (requerido) - Modalidad (CR, CT, MR, DX, etc.)
       - AET                  (requerido) - AE Title del equipo
-      - scheduledTime        (requerido) - Fecha/hora programada (ISO 8601)
       - rad_id               (opcional) - Identificador del radiólogo; si se omite se guarda vacío/NULL
       - priority_id          (opcional) - Prioridad: 0=Rutina, 1=Urgente (por defecto 0)
       - lateralidad          (opcional) - Descripción externa de la lateralidad
       - study_reason         (opcional) - Razón o motivo del estudio
       - req_doctor           (opcional) - Nombre del médico referente
+
+    La fecha de recepción del examen se genera internamente con NOW() en UTC.
+    No es necesario enviar una fecha externa; los clientes antiguos que aún
+    envíen scheduledTime serán compatibles, pero el campo se ignora.
     """
     try:
         start_time = datetime.now()
@@ -2538,7 +2756,7 @@ def clinicaparque_orders_to_execute_and_read():
             patient_required = patient_required_base + complex_fields
 
         order_required = ['orderId', 'accessionNumber', 'procedure_code',
-                         'modality', 'AET', 'scheduledTime']
+                         'modality', 'AET']
 
         missing = []
         for f in patient_required:
@@ -2799,18 +3017,6 @@ def clinicaparque_orders_to_execute_and_read():
 
         next_adm = _next_sequence(cursor, 'ADM', 'admisionnumber')
         adm_number = f'ADM{next_adm:06d}'
-
-        # === PARSEAR FECHA PROGRAMADA ===
-        scheduled_time_str = order_data.get('scheduledTime', '').strip()
-        scheduled_time = None
-        if scheduled_time_str:
-            try:
-                scheduled_time = datetime.fromisoformat(scheduled_time_str.replace('Z', '+00:00'))
-            except ValueError:
-                try:
-                    scheduled_time = datetime.strptime(scheduled_time_str[:19], '%Y-%m-%dT%H:%M:%S')
-                except ValueError:
-                    scheduled_time = None
 
         # === CREAR EXAMEN ===
         exam_guid = str(uuid.uuid4())

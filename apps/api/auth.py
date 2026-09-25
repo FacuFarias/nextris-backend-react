@@ -8,7 +8,9 @@ from flask_jwt_extended import (
     create_access_token, 
     create_refresh_token, 
     jwt_required, 
-    get_jwt_identity
+    get_jwt_identity,
+    get_jwt,
+    decode_token,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -24,7 +26,8 @@ import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from apps.api import api_blueprint
-from apps.api.permissions import get_user_permission_codes, get_default_permissions_for_role, replace_user_permissions
+from apps.api.permissions import get_user_permission_codes, get_default_permissions_for_role, replace_user_permissions, require_admin_permission
+from apps.services.impersonation import is_token_revoked, revoke_jwt
 from apps.authentication.models import Users, PatientUser
 from apps import db
 
@@ -394,7 +397,8 @@ def api_login():
         
         additional_claims = {
             'user_type': user_data['user_type'],
-            'username': user_data['username']
+            'username': user_data['username'],
+            'auth_session_id': str(uuid.uuid4()),
         }
         
         access_token = create_access_token(
@@ -422,6 +426,132 @@ def api_login():
             'success': False,
             'message': f'Error en el servidor: {str(e)}'
         }), 500
+
+
+@api_blueprint.route('/auth/impersonation-targets', methods=['GET'])
+@jwt_required()
+@require_admin_permission('users.impersonate')
+def impersonation_targets():
+    """Lista mínima de cuentas del personal activas para conexión delegada."""
+    if get_jwt().get('impersonation_id'):
+        return jsonify({'success': False, 'message': 'No se permite cambiar de usuario durante una sesión asumida'}), 403
+    current_user = str(get_jwt_identity())
+    users = Users.query.filter_by(is_active=1).order_by(Users.username).all()
+    return jsonify({
+        'success': True,
+        'data': [
+            {
+                'guid': user.id,
+                'username': user.username,
+                'name': user.name or '',
+                'surname': user.surname or '',
+                'role': user.user_type,
+            }
+            for user in users if str(user.id) != current_user
+        ],
+    }), 200
+
+
+@api_blueprint.route('/auth/impersonate', methods=['POST'])
+@jwt_required()
+@require_admin_permission('users.impersonate')
+def impersonate_user():
+    """Termina la sesión actual y emite una sesión del usuario seleccionado."""
+    access_claims = get_jwt()
+    if access_claims.get('impersonation_id'):
+        return jsonify({'success': False, 'message': 'No se permite cambiar de usuario durante una sesión asumida'}), 403
+
+    body = request.get_json(silent=True) or {}
+    target_id = str(body.get('target_user_id') or '').strip()
+    refresh_token = body.get('refresh_token')
+    if not target_id or not isinstance(refresh_token, str):
+        return jsonify({'success': False, 'message': 'Se requieren el usuario y el token de renovación actuales'}), 400
+
+    actor_id = str(get_jwt_identity())
+    if target_id == actor_id:
+        return jsonify({'success': False, 'message': 'Seleccione otro usuario'}), 400
+
+    try:
+        refresh_claims = decode_token(refresh_token)
+    except Exception:
+        return jsonify({'success': False, 'message': 'La sesión actual no se pudo validar'}), 401
+    if (refresh_claims.get('type') != 'refresh'
+            or str(refresh_claims.get('sub')) != actor_id
+            or refresh_claims.get('impersonation_id')
+            or refresh_claims.get('auth_session_id') != access_claims.get('auth_session_id')
+            or is_token_revoked(refresh_claims)):
+        return jsonify({'success': False, 'message': 'El token de renovación no pertenece a la sesión actual'}), 401
+
+    target = Users.query.filter_by(id=target_id, is_active=1).first()
+    if not target:
+        return jsonify({'success': False, 'message': 'Usuario del personal no encontrado o inactivo'}), 404
+    actor = Users.query.filter_by(id=actor_id, is_active=1).first()
+    if not actor:
+        return jsonify({'success': False, 'message': 'Administrador no encontrado o inactivo'}), 403
+
+    impersonation_id = str(uuid.uuid4())
+    target_type = target.user_type
+    target_user_data = {
+        'id': target.id,
+        'username': target.username,
+        'name': target.name or target.username,
+        'surname': target.surname or '',
+        'email': target.email or '',
+        'user_type': target_type,
+        'role_id': target.role_id,
+        'role_name': target_type.lower(),
+        'permissions': get_user_permission_codes(target.id, include_role_permissions=True),
+        'requires_password_change': bool(target.first_login),
+        'impersonation': {
+            'actor_id': actor.id,
+            'actor_username': actor.username,
+            'session_id': impersonation_id,
+        },
+    }
+    claims = {
+        'user_type': target_type,
+        'username': target.username,
+        'impersonation_id': impersonation_id,
+        'impersonator_id': actor.id,
+        'impersonator_username': actor.username,
+    }
+    target_access = create_access_token(identity=target.id, additional_claims=claims)
+    target_refresh = create_refresh_token(identity=target.id, additional_claims=claims)
+
+    connection = None
+    try:
+        connection = psycopg2.connect(**_get_db_config())
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM nextris.tb_revoked_jwt WHERE expires_at < NOW()")
+            cursor.execute(
+                """
+                INSERT INTO nextris.tb_impersonation_session
+                    (id, actor_guid, actor_username, target_guid, target_username, ip_address, user_agent)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (impersonation_id, actor.id, actor.username, target.id, target.username,
+                 request.remote_addr, request.headers.get('User-Agent', '')),
+            )
+            revoke_jwt(cursor, access_claims)
+            revoke_jwt(cursor, refresh_claims)
+        connection.commit()
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        print(f'[IMPERSONATION] No se pudo crear la sesión: {error}')
+        return jsonify({'success': False, 'message': 'No se pudo iniciar la sesión del usuario seleccionado'}), 500
+    finally:
+        if connection:
+            connection.close()
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'access_token': target_access,
+            'refresh_token': target_refresh,
+            'user': target_user_data,
+        },
+    }), 200
 
 
 @api_blueprint.route('/auth/me', methods=['GET'])
@@ -603,6 +733,14 @@ def refresh():
             'user_type': claims.get('user_type', 'staff'),
             'username': claims.get('username', '')
         }
+        if claims.get('auth_session_id'):
+            additional_claims['auth_session_id'] = claims['auth_session_id']
+        if claims.get('impersonation_id'):
+            additional_claims.update({
+                'impersonation_id': claims['impersonation_id'],
+                'impersonator_id': claims.get('impersonator_id'),
+                'impersonator_username': claims.get('impersonator_username'),
+            })
         
         access_token = create_access_token(
             identity=user_id,
@@ -636,6 +774,29 @@ def logout():
         "message": "Logout exitoso"
     }
     """
+    impersonation_id = get_jwt().get('impersonation_id')
+    if impersonation_id:
+        connection = None
+        try:
+            connection = psycopg2.connect(**_get_db_config())
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE nextris.tb_impersonation_session
+                    SET ended_at = NOW()
+                    WHERE id = %s AND target_guid = %s AND ended_at IS NULL
+                    """,
+                    (impersonation_id, str(get_jwt_identity())),
+                )
+            connection.commit()
+        except Exception as error:
+            if connection:
+                connection.rollback()
+            print(f'[IMPERSONATION] No se pudo cerrar la sesión: {error}')
+            return jsonify({'success': False, 'message': 'No se pudo cerrar la sesión asumida'}), 500
+        finally:
+            if connection:
+                connection.close()
     return jsonify({
         'success': True,
         'message': 'Logout exitoso'

@@ -22,6 +22,11 @@ def register_extensions(app):
     login_manager.init_app(app)
     jwt.init_app(app)
 
+    @jwt.token_in_blocklist_loader
+    def is_revoked(_jwt_header, jwt_payload):
+        from apps.services.impersonation import is_token_revoked
+        return is_token_revoked(jwt_payload)
+
 
 def register_context_processors(app):
     """Registra funciones globales para usar en templates"""
@@ -71,6 +76,13 @@ def setup_analytics_middleware(app):
 
     @app.after_request
     def _analytics_after(response):
+        try:
+            from flask_jwt_extended import get_jwt
+            from apps.services.impersonation import record_impersonated_request
+            record_impersonated_request(get_jwt(), flask_request.path,
+                                        flask_request.method, response.status_code)
+        except Exception:
+            pass
         try:
             _record_request_event(app, flask_request, response, g)
         except Exception:
@@ -146,6 +158,19 @@ def _record_request_event(app, req, response, g_ctx) -> None:
 
     # User / facility from JWT
     user_id, facility_id = _get_jwt_user_id(req)
+    impersonation_details = None
+    if user_id:
+        try:
+            from flask_jwt_extended import get_jwt
+            claims = get_jwt()
+            if claims.get('impersonation_id'):
+                impersonation_details = {
+                    'impersonation_id': claims['impersonation_id'],
+                    'actor_user_id': claims.get('impersonator_id'),
+                    'effective_user_id': user_id,
+                }
+        except Exception:
+            pass
 
     user_agent = req.headers.get("User-Agent", "")
 
@@ -161,6 +186,7 @@ def _record_request_event(app, req, response, g_ctx) -> None:
         duration_ms=duration_ms,
         ip_address=ip,
         user_agent=user_agent,
+        extra_data=impersonation_details,
         run_geo_async=app.config.get("ANALYTICS_GEO_LOOKUP", True),
     )
 
