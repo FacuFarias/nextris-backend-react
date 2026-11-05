@@ -1110,6 +1110,14 @@ def firmar_reporte():
             print(f"[WARNING] No se pudo actualizar la ruta del PDF o médico firmante: {str(pdf_error)}")
         
         print("[INFO] Reporte firmado exitosamente")
+
+        # HL7 ORU: enviar reporte firmado si la facility lo tiene habilitado
+        try:
+            from apps.api.integration.hl7_oru import send_report_hl7
+            send_report_hl7(exam_id)
+        except Exception as hl7_err:
+            print(f"[HL7_ORU] Error enviando ORU: {hl7_err}")
+
         return jsonify({
             'success': True, 
             'message': 'Reporte firmado exitosamente',

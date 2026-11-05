@@ -16,7 +16,11 @@ except Exception:
     Anthropic = None
 
 
-NEXI_DIRECTIVES_PATH = Path('/var/www/nexi/NEXI_DIRECTIVES.md')
+# Keep directives portable when restoring NextRIS on another server.
+NEXI_DIRECTIVES_PATH = Path(os.environ.get(
+    'NEXI_DIRECTIVES_PATH',
+    str(Path(__file__).with_name('nexi') / 'NEXI_DIRECTIVES.md'),
+))
 
 DEFAULT_NEXI_DIRECTIVES = """
 Sos Nexi, un asistente medico de NextRIS para orientacion clinica general.

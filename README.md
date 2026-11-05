@@ -32,7 +32,7 @@ Ver [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) para documentación completa.
 
 ### Variables de Entorno
 
-Crear archivo `.env` basado en `env.sample`:
+Crear archivo `.env` basado en `.env.example`:
 
 ```bash
 # Base de datos
@@ -201,3 +201,9 @@ El backend está diseñado para trabajar con el frontend React ubicado en:
 ## 📝 Licencia
 
 Proyecto propietario - NextRIS Medical Imaging System
+
+## Directivas de Nexi
+
+Las directivas vigentes están versionadas en `apps/api/nexi/NEXI_DIRECTIVES.md` y el backend las carga desde esa ubicación por defecto. La variable opcional `NEXI_DIRECTIVES_PATH` permite seleccionar otro archivo. Al restaurar desde GitHub ya no es necesario conservar la carpeta externa `/var/www/nexi`.
+
+El archivo `.env` local se excluye del control de versiones; completar `.env.example` con las credenciales del nuevo entorno.

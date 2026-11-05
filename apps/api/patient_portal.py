@@ -478,7 +478,7 @@ def get_my_studies():
                 END as status,
                 COALESCE(ex.isreported, 0) as isreported,
                 CASE 
-                    WHEN ex.studyinstanceuid IS NOT NULL AND ex.studyinstanceuid != '' THEN true
+                    WHEN COALESCE(ex.isimage, 0) = 1 THEN true
                     ELSE false
                 END as has_images,
                 rp.description as referring_physician,
@@ -494,7 +494,7 @@ def get_my_studies():
             LEFT JOIN nextris.isrequestingphysician rp ON ex.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
                         LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+                        LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(ex.location_id, eq.location_id)
             WHERE ex.idpatient = %s
                             AND EXISTS (
                                         SELECT 1
@@ -612,7 +612,7 @@ def get_patient_report(exam_id):
             FROM nextris.tbexamination ex
             INNER JOIN nextris.tbreport r ON r.idexamination = ex.guid
                         LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-                        LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+                        LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(ex.location_id, eq.location_id)
                         WHERE ex.guid = %s
                             AND ex.idpatient = %s
                             AND ex.isreported = 1
@@ -727,7 +727,7 @@ def share_examination(exam_id):
             LEFT JOIN nextris.isstudytype st ON ex.studytype_id = st.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
             LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
-            LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
+            LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(ex.location_id, eq.location_id)
             LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
                         WHERE ex.guid = %s
                             AND ex.idpatient = %s

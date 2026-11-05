@@ -2887,10 +2887,11 @@ def get_facilities():
                      f.id_patientdomain, pd.description,
                        smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                        db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-                       whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                                             whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
-                                             p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
-                                             COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
+                        whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                                              whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                                              hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode,
+                                              p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
+                                              COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
                  FROM nextris.tbfacility f
                  LEFT JOIN nextris.ispatientdomain pd ON pd.guid = f.id_patientdomain
                                  LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
@@ -2906,12 +2907,13 @@ def get_facilities():
                                 SELECT f.guid, f.name, f.code, f.email, f.contact_person, f.status,
                        smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                        db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
-                       whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                                             whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
-                                             p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
-                                             COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
-                                FROM nextris.tbfacility f
-                                LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
+                        whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
+                                              whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                                              hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode,
+                                              p.code, p.name, p.max_receive_monthly, p.max_distribute_monthly, p.max_users,
+                                              COALESCE(u.received_count, 0), COALESCE(u.read_count, 0), COALESCE(u.distributed_count, 0), COALESCE(u.users_count_snapshot, 0)
+                                 FROM nextris.tbfacility f
+                                 LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
                                 LEFT JOIN nextris.facility_plan_usage_monthly u
                                     ON u.facility_id = f.guid
                                  AND u.usage_year = EXTRACT(YEAR FROM NOW())::INT
@@ -2963,18 +2965,24 @@ def get_facilities():
                     'webhook_verify_token': row[24 + domain_offset],
                     'is_active': row[25 + domain_offset]
                 },
+                'hl7_config': {
+                    'hl7_enable_orm': row[26 + domain_offset],
+                    'hl7_bearer_token_orm': row[27 + domain_offset] or '',
+                    'hl7_enable_report_sending': row[28 + domain_offset],
+                    'hl7_report_send_mode': row[29 + domain_offset] or 'pdf'
+                },
                 'plan': {
-                    'code': row[26 + domain_offset],
-                    'name': row[27 + domain_offset],
-                    'max_receive_monthly': row[28 + domain_offset],
-                    'max_distribute_monthly': row[29 + domain_offset],
-                    'max_users': row[30 + domain_offset],
+                    'code': row[30 + domain_offset],
+                    'name': row[31 + domain_offset],
+                    'max_receive_monthly': row[32 + domain_offset],
+                    'max_distribute_monthly': row[33 + domain_offset],
+                    'max_users': row[34 + domain_offset],
                 },
                 'usage_monthly': {
-                    'received_count': int(row[31 + domain_offset] or 0),
-                    'read_count': int(row[32 + domain_offset] or 0),
-                    'distributed_count': int(row[33 + domain_offset] or 0),
-                    'users_count_snapshot': int(row[34 + domain_offset] or 0),
+                    'received_count': int(row[35 + domain_offset] or 0),
+                    'read_count': int(row[36 + domain_offset] or 0),
+                    'distributed_count': int(row[37 + domain_offset] or 0),
+                    'users_count_snapshot': int(row[38 + domain_offset] or 0),
                 },
             })
         
@@ -3002,11 +3010,6 @@ def create_facility():
         "code": "string" (required),
         "email": "string" (optional),
         "contact_person": "string" (optional),
-        "description": "string" (optional),
-        "address": "string" (optional),
-        "city": "string" (optional),
-        "country": "string" (optional),
-        "phone": "string" (optional),
         "status": "string" (optional, default: "Active")
     }
     
@@ -3040,11 +3043,6 @@ def create_facility():
         
         email = data.get('email', '')
         contact_person = data.get('contact_person', '')
-        description = data.get('description', '')
-        address = data.get('address', '')
-        city = data.get('city', '')
-        country = data.get('country', '')
-        phone = data.get('phone', '')
         status = data.get('status', 'Active')
         id_patientdomain = data.get('id_patientdomain') or data.get('patientdomain_id')
         plan_code = (data.get('plan_code') or data.get('plan_type') or 'free').strip().lower()
@@ -3075,6 +3073,12 @@ def create_facility():
         whatsapp_business_account_id = data.get('whatsapp_business_account_id')
         whatsapp_webhook_verify_token = data.get('whatsapp_webhook_verify_token')
         whatsapp_is_active = data.get('whatsapp_is_active', False)
+        
+        # Configuración HL7 (opcional)
+        hl7_enable_orm = data.get('hl7_enable_orm', False)
+        hl7_bearer_token_orm = data.get('hl7_bearer_token_orm', '')
+        hl7_enable_report_sending = data.get('hl7_enable_report_sending', False)
+        hl7_report_send_mode = data.get('hl7_report_send_mode', 'pdf')
         
         config = get_db_config()
         if not config:
@@ -3107,52 +3111,54 @@ def create_facility():
         if has_facility_domain_column:
             query = """
                 INSERT INTO nextris.tbfacility(
-                    guid, name, code, email, contact_person, description,
-                    address, city, country, phone, status, id_patientdomain,
+                    guid, name, code, email, contact_person, status, id_patientdomain,
                     plan_id,
                     smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                     db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                     whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                    hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s)
             """
             params = (
-                new_guid, name, code, email, contact_person, description,
-                address, city, country, phone, status, id_patientdomain,
+                new_guid, name, code, email, contact_person, status, id_patientdomain,
                 plan_id,
                 smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                 db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                 whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode
             )
         else:
             query = """
                 INSERT INTO nextris.tbfacility(
-                    guid, name, code, email, contact_person, description,
-                    address, city, country, phone, status,
+                    guid, name, code, email, contact_person, status,
                     plan_id,
                     smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                     db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                     whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                    whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                    hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                VALUES (%s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s)
             """
             params = (
-                new_guid, name, code, email, contact_person, description,
-                address, city, country, phone, status,
+                new_guid, name, code, email, contact_person, status,
                 plan_id,
                 smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_from_name, use_tls,
                 db_user, db_password, db_host, db_port, db_name, base_folder, ipserver,
                 whatsapp_api_url, whatsapp_api_token, whatsapp_phone_number_id,
-                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active
+                whatsapp_business_account_id, whatsapp_webhook_verify_token, whatsapp_is_active,
+                hl7_enable_orm, hl7_bearer_token_orm, hl7_enable_report_sending, hl7_report_send_mode
             )
 
         cursor.execute(query, params)
@@ -4216,11 +4222,6 @@ def update_facility(facility_id):
         "code": "string",
         "email": "string",
         "contact_person": "string",
-        "description": "string",
-        "address": "string",
-        "city": "string",
-        "country": "string",
-        "phone": "string",
         "status": "string"
     }
     
@@ -4283,21 +4284,6 @@ def update_facility(facility_id):
         if 'contact_person' in data:
             updates.append("contact_person = %s")
             params.append(data['contact_person'])
-        if 'description' in data:
-            updates.append("description = %s")
-            params.append(data['description'])
-        if 'address' in data:
-            updates.append("address = %s")
-            params.append(data['address'])
-        if 'city' in data:
-            updates.append("city = %s")
-            params.append(data['city'])
-        if 'country' in data:
-            updates.append("country = %s")
-            params.append(data['country'])
-        if 'phone' in data:
-            updates.append("phone = %s")
-            params.append(data['phone'])
         next_status = previous_status
         if 'status' in data:
             updates.append("status = %s")
@@ -4396,6 +4382,20 @@ def update_facility(facility_id):
         if 'whatsapp_is_active' in data:
             updates.append("whatsapp_is_active = %s")
             params.append(data['whatsapp_is_active'])
+        
+        # Configuración HL7
+        if 'hl7_enable_orm' in data:
+            updates.append("hl7_enable_orm = %s")
+            params.append(data['hl7_enable_orm'])
+        if 'hl7_bearer_token_orm' in data:
+            updates.append("hl7_bearer_token_orm = %s")
+            params.append(data['hl7_bearer_token_orm'])
+        if 'hl7_enable_report_sending' in data:
+            updates.append("hl7_enable_report_sending = %s")
+            params.append(data['hl7_enable_report_sending'])
+        if 'hl7_report_send_mode' in data:
+            updates.append("hl7_report_send_mode = %s")
+            params.append(data['hl7_report_send_mode'])
         
         if not updates:
             cursor.close()
@@ -5799,6 +5799,14 @@ def save_user_medical_data(user_id):
                 'message': 'Usuario no encontrado'
             }), 404
 
+        # Verificar si ya tiene firma guardada para auto-habilitar después
+        cursor.execute(
+            "SELECT firma_digital FROM nextris.tbuser_medical_data WHERE user_id = %s",
+            (user_id,)
+        )
+        existing_record = cursor.fetchone()
+        existing_firma = existing_record[0] if existing_record else None
+
         firma_filename = None
         if 'firma_digital' in request.files:
             file = request.files['firma_digital']
@@ -5880,6 +5888,15 @@ def save_user_medical_data(user_id):
                 """,
                 (user_id, aclaracion_firma, matricula_nacional, firma_filename, firma_habilitada),
             )
+
+        # Auto-habilitar firma si tiene aclaración, matrícula y firma digital
+        has_firma = bool(firma_filename) or bool(existing_firma)
+        if aclaracion_firma and matricula_nacional and has_firma and not firma_habilitada:
+            cursor.execute("""
+                UPDATE nextris.tbuser_medical_data
+                SET firma_habilitada = true
+                WHERE user_id = %s AND firma_habilitada = false
+            """, (user_id,))
 
         connection.commit()
         cursor.close()

@@ -144,3 +144,125 @@ class HL7Service:
         except Exception as e:
             print(f"Error al enviar mensaje de cancelación HL7 para {study_instance_uid}: {e}")
             return False
+
+    @staticmethod
+    def _escape_hl7(text):
+        """Escapa caracteres especiales HL7 en un texto."""
+        if not text:
+            return ''
+        text = str(text)
+        text = text.replace('\\', '\\\\')
+        text = text.replace('\r\n', '\n')
+        text = text.replace('\r', '\n')
+        text = text.replace('\n', '\\.br\\')
+        text = text.replace('|', '\\E\\')
+        text = text.replace('^', '\\S\\')
+        text = text.replace('&', '\\T\\')
+        text = text.replace('~', '\\R\\')
+        return text
+
+    @staticmethod
+    def create_oru_message(patient_data, exam_data, report_data, facility_name,
+                           location_name, message_control_id=None):
+        """
+        Crea un mensaje HL7 ORU^R01 (Observation Result) para envío de reportes firmados.
+
+        Args:
+            patient_data: dict con patientid, name, surname, birthdate, sexcode
+            exam_data: dict con localacc, studyinstanceuid, study_description, referring_physician
+            report_data: dict con findings, impressions, techniques, conclusions, pdfpath
+            facility_name: nombre de la facility (MSH-4 Sending Facility)
+            location_name: nombre de la ubicación (PV1-3)
+            message_control_id: ID de control del mensaje (auto-generado si no se provee)
+        """
+        import datetime
+        import uuid
+
+        current_time = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+
+        if message_control_id is None:
+            message_control_id = str(uuid.uuid4())[:8]
+
+        escape = HL7Service._escape_hl7
+
+        def _format_hl7_date(dt):
+            if dt is None:
+                return ''
+            if isinstance(dt, str):
+                try:
+                    dt = datetime.datetime.strptime(dt[:10], '%Y-%m-%d')
+                except (ValueError, IndexError):
+                    return ''
+            return dt.strftime('%Y%m%d')
+
+        patient_id = patient_data.get('patientid', '') or ''
+        surname = escape(patient_data.get('surname', '') or '')
+        name = escape(patient_data.get('name', '') or '')
+        birthdate = _format_hl7_date(patient_data.get('birthdate'))
+        sex = patient_data.get('sexcode', '') or ''
+
+        accession = exam_data.get('localacc', '') or ''
+        study_desc = escape(exam_data.get('study_description', '') or '')
+        referring = escape(exam_data.get('referring_physician', '') or '')
+
+        findings = escape(report_data.get('findings', '') or '')
+        impressions = escape(report_data.get('impressions', '') or '')
+        techniques = escape(report_data.get('techniques', '') or '')
+        conclusions = escape(report_data.get('conclusions', '') or '')
+        pdfpath = escape(report_data.get('pdfpath', '') or '')
+
+        message = (
+            f"MSH|^~\\&|RIS|{facility_name}|PACS|Radiology|{current_time}||ORU^R01|{message_control_id}|P|2.3\r"
+            f"PID|||{patient_id}||{surname}^{name}||{birthdate}|{sex}\r"
+            f"PV1|||{location_name}\r"
+            f"OBR|1||{accession}||{study_desc}||||||{referring}\r"
+            f"OBX|1|TX|FINDINGS||{findings}||||||F\r"
+            f"OBX|2|TX|IMPRESSIONS||{impressions}||||||F\r"
+            f"OBX|3|TX|TECHNIQUES||{techniques}||||||F\r"
+            f"OBX|4|TX|CONCLUSIONS||{conclusions}||||||F\r"
+            f"OBX|5|TX|ACCESSION_NUMBER||{accession}||||||F\r"
+            f"OBX|6|TX|PDF_PATH||{pdfpath}||||||F\r"
+        )
+
+        return message
+
+    @staticmethod
+    def send_report_oru(patient_data, exam_data, report_data, facility_name,
+                        location_name, host=None, port=9193, retries=3, delay=1):
+        """
+        Envía un reporte firmado como mensaje ORU^R01 con reintentos.
+
+        Args:
+            patient_data: dict con datos del paciente
+            exam_data: dict con datos del examen
+            report_data: dict con datos del reporte
+            facility_name: nombre de la facility
+            location_name: nombre de la ubicación
+            host: destino HL7 (default: ConfigService.get_ipserver())
+            port: puerto HL7 (default: 2575)
+            retries: cantidad de reintentos (default: 3)
+            delay: segundos entre reintentos (default: 1)
+
+        Returns:
+            tuple: (message_str, success_bool)
+        """
+        message = HL7Service.create_oru_message(
+            patient_data, exam_data, report_data, facility_name, location_name
+        )
+
+        for attempt in range(retries):
+            try:
+                response = HL7Service.send_hl7_message(message, host, port)
+
+                if response:
+                    print(f"[HL7_ORU] ORU enviado exitosamente (intento {attempt + 1})")
+                    return message, True
+
+            except Exception as e:
+                print(f"[HL7_ORU] Intento {attempt + 1} falló: {e}")
+
+            if attempt < retries - 1:
+                time.sleep(delay)
+
+        print(f"[HL7_ORU] Todos los reintentos agotados")
+        return message, False

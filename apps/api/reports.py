@@ -2823,6 +2823,44 @@ def sign_report(exam_id):
         
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
+
+        # Verificar que el médico tenga firma habilitada antes de permitir firmar
+        cursor.execute("""
+            SELECT firma_habilitada, aclaracion_firma, matricula_nacional
+            FROM nextris.tbuser_medical_data
+            WHERE user_id = %s
+        """, (reporter_physician_id,))
+        medical_data = cursor.fetchone()
+
+        if not medical_data:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'No se encontraron datos médicos para el usuario. Complete su perfil con aclaración de firma y matrícula antes de firmar.',
+                'error_code': 'MEDICAL_DATA_MISSING'
+            }), 400
+
+        firma_habilitada, aclaracion_firma, matricula_nacional = medical_data
+
+        if not firma_habilitada:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Su firma digital no está habilitada. Habilite su firma en Configuración > Datos Médicos antes de firmar reportes.',
+                'error_code': 'SIGNATURE_NOT_ENABLED'
+            }), 400
+
+        if not aclaracion_firma or not matricula_nacional:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Faltan datos de firma (aclaración o matrícula). Complete su perfil médico antes de firmar.',
+                'error_code': 'SIGNATURE_DATA_INCOMPLETE'
+            }), 400
+
         ensure_location_report_execution_column(connection)
         ensure_plan_management_schema(connection)
         
@@ -2974,6 +3012,13 @@ def sign_report(exam_id):
             increment_usage_counter(connection, usage_facility_id, 'read', 1)
 
         connection.commit()
+
+        # HL7 ORU: enviar reporte firmado si la facility lo tiene habilitado
+        try:
+            from apps.api.integration.hl7_oru import send_report_hl7
+            send_report_hl7(exam_id)
+        except Exception as hl7_err:
+            print(f"[HL7_ORU] Error enviando ORU: {hl7_err}")
 
         # Actualizar estado (si existe la función)
         try:

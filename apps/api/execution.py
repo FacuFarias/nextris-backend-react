@@ -85,13 +85,14 @@ def get_execution_orders():
                 st.Description as study_type,
                 e.Status,
                 eq.Description as equipment,
-                e.admisionnumber, e.LocalAcc
+                e.admisionnumber, e.LocalAcc,
+                e.studytype_id
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             WHERE e.IsExecuted = 0
-            AND eq.location_id IN ({location_placeholders})
+            AND COALESCE(eq.location_id, e.location_id) IN ({location_placeholders})
             ORDER BY e.CreatedOn DESC
         """
         
@@ -108,7 +109,8 @@ def get_execution_orders():
                 'status': row[5] or '',
                 'equipment': row[6] or '',
                 'admission_number': row[7] or '',
-                'accession_number': row[8] or ''
+                'accession_number': row[8] or '',
+                'study_type_id': str(row[9]) if row[9] else None
             })
         
         cursor.close()
@@ -312,7 +314,14 @@ def execute_examination_order(exam_guid):
         
         # Actualizar status (letra E)
         update_examination_status(exam_guid)
-        
+
+        # Enviar HL7 ORU^R01 si la facility tiene habilitado el envío
+        try:
+            from apps.api.integration.hl7_execution import send_execution_hl7
+            send_execution_hl7(exam_guid)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': 'Examen ejecutado exitosamente'
@@ -377,6 +386,100 @@ def cancel_examination_execution_order(exam_guid):
         return jsonify({
             'success': True,
             'message': 'Examen cancelado exitosamente'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/executions/examination/<exam_guid>/study-type', methods=['PATCH'])
+@jwt_required()
+def update_examination_study_type(exam_guid):
+    """
+    Actualiza el tipo de estudio de un examen
+    
+    Path Parameters:
+    - exam_guid: GUID del examen
+    
+    Body JSON:
+    {
+        "study_type_id": "uuid"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Tipo de estudio actualizado"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or not data.get('study_type_id'):
+            return jsonify({
+                'success': False,
+                'message': 'El campo study_type_id es requerido'
+            }), 400
+        
+        study_type_id = data.get('study_type_id')
+        
+        db_config = get_db_config()
+        if not db_config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+        
+        connection = psycopg2.connect(**db_config)
+        cursor = connection.cursor()
+        
+        # Verificar que el examen existe
+        cursor.execute(
+            "SELECT Guid FROM nextris.tbexamination WHERE Guid = %s",
+            (exam_guid,)
+        )
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+        
+        # Verificar que el study type existe
+        cursor.execute(
+            "SELECT Guid, Description FROM nextris.isstudytype WHERE Guid = %s",
+            (study_type_id,)
+        )
+        study_type_row = cursor.fetchone()
+        if not study_type_row:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Tipo de estudio no encontrado'
+            }), 404
+        
+        # Actualizar el study type
+        cursor.execute(
+            "UPDATE nextris.tbexamination SET studytype_id = %s WHERE Guid = %s",
+            (study_type_id, exam_guid)
+        )
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tipo de estudio actualizado exitosamente',
+            'data': {
+                'study_type_id': study_type_id,
+                'study_type': study_type_row[1]
+            }
         }), 200
         
     except Exception as e:
