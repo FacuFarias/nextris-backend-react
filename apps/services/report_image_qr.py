@@ -44,7 +44,7 @@ def qr_block(link, title_style, caption_style):
     until = link['expires_at'].strftime('%d/%m/%Y')
     block = Table([[_QrCode(link['share_url'])],
                    [Paragraph('Imágenes del estudio', title_style)],
-                   [Paragraph(escape(f'Escanee el código para verlas. Disponible hasta el {until}.'), caption_style)]],
+                   [Paragraph(escape(f"Escanee el código para verlas. Enlace válido por {link['valid_days']} días, hasta el {until}."), caption_style)]],
                   colWidths=[BLOCK_WIDTH])
     block.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
                                ('RIGHTPADDING', (0, 0), (-1, -1), 0), ('TOPPADDING', (0, 0), (-1, -1), 0),

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 import psycopg2
 from flask import current_app, has_request_context, request
 
+REPORT_LINK_DAYS = 15
+
 
 def db_config():
     from apps.home.services import ConfigService
@@ -56,7 +58,7 @@ def client_ip():
     return forwarded.split(",")[0].strip() if forwarded else request.remote_addr
 
 
-def create_for_exam(examination_id, created_by=None, connection=None, share_type="image_share"):
+def create_for_exam(examination_id, created_by=None, connection=None, share_type="image_share", expires_hours=None):
     """Create a new link and return its raw URL while it is still in memory.
 
     The raw token is never written to PostgreSQL. Existing active links for the
@@ -64,6 +66,7 @@ def create_for_exam(examination_id, created_by=None, connection=None, share_type
     """
     if share_type not in ("case_link", "image_share"):
         raise ValueError("Tipo de enlace compartido inválido")
+    expires_hours = expires_hours or default_expiration_hours()
 
     owns_connection = connection is None
     connection = connection or psycopg2.connect(**db_config())
@@ -104,7 +107,7 @@ def create_for_exam(examination_id, created_by=None, connection=None, share_type
 
         raw_token = secrets.token_urlsafe(32)
         short_code = secrets.token_urlsafe(7)
-        expires_at = datetime.utcnow() + timedelta(hours=default_expiration_hours())
+        expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
         guid = str(uuid.uuid4())
         cursor.execute(
             """
@@ -146,7 +149,7 @@ def create_for_exam(examination_id, created_by=None, connection=None, share_type
             "guid": guid,
             "study_iuid": study_iuid,
             "expires_at": expires_at,
-            "expires_hours": default_expiration_hours(),
+            "expires_hours": expires_hours,
             "share_type": share_type,
             "short_code": str(stored_short_code[0]),
             "share_url": short_share_url(str(stored_short_code[0])),
@@ -161,13 +164,14 @@ def create_for_exam(examination_id, created_by=None, connection=None, share_type
 
 
 def report_image_link(examination_id):
-    """Image link to print on a report PDF, or None when the study must not offer one.
+    """Image link printed on a report PDF, valid for REPORT_LINK_DAYS from this rendering.
 
-    Reuses the active link, so regenerating a PDF keeps earlier copies working.
-    A study whose latest link was revoked gets no new one: replaced links always
-    have a newer sibling, so that state means someone cut off access on purpose.
-    Portal links are short viewer sessions tied to an account, so they are ignored.
+    The active link is renewed rather than replaced, because creating another
+    would revoke it and break the QR on copies already handed out. Links lasting
+    longer, such as one shared by hand, keep their date. Portal links are short
+    viewer sessions tied to an account, so they are ignored. None without images.
     """
+    until = datetime.utcnow() + timedelta(days=REPORT_LINK_DAYS)
     connection = psycopg2.connect(**db_config())
     try:
         with connection.cursor() as cursor:
@@ -189,7 +193,7 @@ def report_image_link(examination_id):
             cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(study[0]),))
             cursor.execute(
                 """
-                SELECT short_code, expires_at, revoked
+                SELECT guid, short_code, expires_at, revoked
                 FROM nextris.tbviewer_share_link
                 WHERE study_iuid = %s
                   AND share_type = 'image_share'
@@ -200,13 +204,18 @@ def report_image_link(examination_id):
                 (str(study[0]),),
             )
             latest = cursor.fetchone()
-        if latest and latest[2]:
-            return None
-        if latest and latest[0] and latest[1] > datetime.utcnow():
-            return {"share_url": short_share_url(str(latest[0])), "expires_at": latest[1]}
-        link = create_for_exam(examination_id, connection=connection)
+            if latest and latest[1] and not latest[3] and latest[2] > datetime.utcnow():
+                cursor.execute(
+                    "UPDATE nextris.tbviewer_share_link SET expires_at = GREATEST(expires_at, %s) WHERE guid = %s",
+                    (until, latest[0]),
+                )
+                url = short_share_url(str(latest[1]))
+            else:
+                url = create_for_exam(
+                    examination_id, connection=connection, expires_hours=REPORT_LINK_DAYS * 24,
+                )["share_url"]
         connection.commit()
-        return link
+        return {"share_url": url, "expires_at": until, "valid_days": REPORT_LINK_DAYS}
     finally:
         connection.close()
 

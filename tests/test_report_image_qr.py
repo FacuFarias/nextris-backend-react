@@ -19,7 +19,7 @@ from apps.services.report_view_service import plain_report_text
 
 LETTERHEAD = ROOT / 'apps/static/assets/img/report/cdivet-letterhead.png'
 URL = 'https://cdivet.cloud/api/s/AbCdEfGhIj'
-LINK = {'share_url': URL, 'expires_at': datetime(2026, 12, 6)}
+LINK = {'share_url': URL, 'expires_at': datetime(2026, 12, 6), 'valid_days': 15}
 
 
 def view(paragraphs=1, signatures=1):
@@ -81,6 +81,7 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual(links(result[-1]), [URL])
                 text = result[-1].extract_text()
                 self.assertIn('Imágenes del estudio', text)
+                self.assertIn('válido por 15 días', ' '.join(text.split()))
                 self.assertIn('06/12/2026', text)
                 if signatures:
                     self.assertIn('Profesional 0', text)
@@ -102,7 +103,7 @@ class LinkRulesTests(unittest.TestCase):
         app = Flask(__name__)
         app.config['PUBLIC_API_URL'] = 'https://cdivet.cloud'
         with app.app_context(), mock.patch.object(shares.psycopg2, 'connect', return_value=connection), \
-                mock.patch.object(shares, 'create_for_exam', return_value='NEW') as create:
+                mock.patch.object(shares, 'create_for_exam', return_value={'share_url': 'https://cdivet.cloud/api/s/new'}) as create:
             return shares.report_image_link('exam-1'), create, connection
 
     def test_no_images_no_link(self):
@@ -111,23 +112,23 @@ class LinkRulesTests(unittest.TestCase):
         create.assert_not_called()
         self.assertTrue(connection.closed)
 
-    def test_active_link_is_reused_so_printed_copies_keep_working(self):
-        expires = datetime.utcnow() + timedelta(days=3)
-        result, create, _ = self.resolve('1.2.3', ('code', expires, False))
-        self.assertEqual(result, {'share_url': 'https://cdivet.cloud/api/s/code', 'expires_at': expires})
+    def test_active_link_is_renewed_so_printed_copies_keep_working(self):
+        result, create, connection = self.resolve('1.2.3', ('guid-1', 'code', datetime.utcnow() + timedelta(days=3), False))
+        self.assertEqual(result['share_url'], 'https://cdivet.cloud/api/s/code')
+        self.assertEqual(result['valid_days'], 15)
+        self.assertAlmostEqual(result['expires_at'], datetime.utcnow() + timedelta(days=15), delta=timedelta(minutes=1))
         create.assert_not_called()
+        self.assertIn('GREATEST(expires_at', connection.sql[-1])
+        self.assertTrue(connection.committed)
 
-    def test_revoked_link_is_not_replaced(self):
-        result, create, _ = self.resolve('1.2.3', ('code', datetime.utcnow() + timedelta(days=3), True))
-        self.assertIsNone(result)
-        create.assert_not_called()
-
-    def test_expired_or_missing_link_is_created_and_committed(self):
-        for latest in (('code', datetime.utcnow() - timedelta(days=1), False), None):
+    def test_revoked_expired_or_missing_link_gets_a_new_one_for_15_days(self):
+        for latest in (('guid-1', 'code', datetime.utcnow() + timedelta(days=3), True),
+                       ('guid-1', 'code', datetime.utcnow() - timedelta(days=1), False), None):
             with self.subTest(latest=latest):
                 result, create, connection = self.resolve('1.2.3', latest)
-                self.assertEqual(result, 'NEW')
-                create.assert_called_once()
+                self.assertEqual(result['share_url'], 'https://cdivet.cloud/api/s/new')
+                self.assertEqual(result['valid_days'], 15)
+                self.assertEqual(create.call_args.kwargs['expires_hours'], 360)
                 self.assertTrue(connection.committed)
 
     def test_portal_sessions_are_excluded_and_creation_is_serialized(self):
