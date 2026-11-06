@@ -119,7 +119,7 @@ def _signature(signature, name_style, small_style):
     return block
 
 
-def render(view, background, plain_report_text):
+def render(view, background, plain_report_text, *, title=None):
     _fonts()
     report, document = view['report'], view['document']
     context = document.get('veterinary') or {}
@@ -160,7 +160,7 @@ def render(view, background, plain_report_text):
         canvas.drawImage(image, 0, 0, width=A4[0], height=A4[1])
 
     output = BytesIO()
-    pdf = BaseDocTemplate(output, pagesize=A4, title='Informe veterinario' if context else 'Informe médico',
+    pdf = BaseDocTemplate(output, pagesize=A4, title=title or ('Informe veterinario' if context else 'Informe médico'),
                           author=document['institution'].get('name') or 'NextRIS')
     frame = Frame(LEFT, BOTTOM, WIDTH, A4[1] - TOP - BOTTOM, leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     pdf.addPageTemplates(PageTemplate(id='letterhead', frames=[frame], onPage=page))

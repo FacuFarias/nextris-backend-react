@@ -919,24 +919,6 @@ def download_study_images(exam_id):
 # VER INFORME - Consulta del informe del paciente en NextRIS
 # ====================================================================
 
-@api_blueprint.route('/patient-portal/examinations/<exam_id>/report/pdf', methods=['GET'])
-@jwt_required()
-def get_patient_report_pdf(exam_id):
-    """PDF del informe; aplica el mismo control de propiedad que la consulta del informe."""
-    from io import BytesIO
-    from apps.services.patient_report_document import resolve_patient_report_view
-    from apps.services.report_pdf_service import render_report_pdf
-    from apps.services.report_view_service import ReportViewUnavailable
-
-    try:
-        pdf = render_report_pdf(exam_id, view=resolve_patient_report_view(exam_id, get_jwt_identity()))
-    except ReportViewUnavailable as error:
-        return jsonify({'success': False, 'message': str(error), 'code': error.code}), error.status
-    response = send_file(BytesIO(pdf.content), mimetype='application/pdf', download_name=pdf.filename)
-    response.headers['Cache-Control'] = 'no-store'
-    return response
-
-
 @api_blueprint.route('/patient-portal/examinations/<exam_id>/report', methods=['GET'])
 @jwt_required()
 def get_patient_report(exam_id):

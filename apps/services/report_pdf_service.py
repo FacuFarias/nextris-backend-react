@@ -15,6 +15,25 @@ class RenderedReportPdf:
     filename: str
 
 
+def report_filename(view):
+    """Animal - Responsable - Fecha.pdf for veterinary reports; None otherwise."""
+    document = view['document']
+    context = document.get('veterinary')
+    if not context:
+        return None
+    from datetime import datetime
+    responsibles = context.get('responsibles') or []
+    moment = document.get('study', {}).get('date') or view['report'].get('fecha')
+    try:
+        day = datetime.fromisoformat(str(moment).replace('Z', '+00:00')).strftime('%d-%m-%Y') if moment else None
+    except ValueError:
+        day = None
+    parts = [document['patient'].get('name'), responsibles[0].get('name') if responsibles else None, day]
+    # Sin separadores de ruta ni caracteres no válidos en nombres de archivo.
+    clean = [' '.join(''.join(' ' if c in '\\/:*?"<>|' or ord(c) < 32 else c for c in str(part)).split()) for part in parts if part]
+    return (' - '.join(item for item in clean if item) or 'Informe')[:180] + '.pdf'
+
+
 def render_report_pdf(exam_id, *, filename=None, view=None):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, KeepTogether
     from reportlab.lib.styles import getSampleStyleSheet
@@ -28,7 +47,8 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     background = letterhead_path()
     if background:
         accession = ''.join(c for c in str(view['report'].get('accession_number') or '') if c.isalnum() or c in '-_')
-        return RenderedReportPdf(render_letterhead(view, background, plain_report_text), filename or f'informe_{accession or safe_id}.pdf')
+        name = filename or report_filename(view) or f'informe_{accession or safe_id}.pdf'
+        return RenderedReportPdf(render_letterhead(view, background, plain_report_text, title=name.removesuffix('.pdf')), name)
     report, document = view['report'], view['document']
     styles = getSampleStyleSheet()
     output = BytesIO()
@@ -74,4 +94,4 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     if footer:
         story += [Spacer(1, 8*mm), paragraph(footer)]
     pdf.build(story)
-    return RenderedReportPdf(output.getvalue(), filename or f'informe_{safe_id}.pdf')
+    return RenderedReportPdf(output.getvalue(), filename or report_filename(view) or f'informe_{safe_id}.pdf')

@@ -95,6 +95,13 @@ class VeterinaryApiTests(unittest.TestCase):
         for pdf_path,pdf_headers in [('/s/'+code+'/report.pdf',{}),('/reports/'+exam+'/pdf',None)]:
             document=self.call('GET',pdf_path,headers=pdf_headers);self.assertEqual(document.status_code,200,document.text[:200]);self.assertTrue(document.content.startswith(b'%PDF-'))
         self.assertEqual(self.call('GET','/s/'+uuid.uuid4().hex[:12]+'/report.pdf',headers={}).status_code,404)
+        for link_path,link_headers in [('/reports/'+exam+'/pdf-link',None),('/veterinary/portal/reports/'+exam+'/pdf-link',owner)]:
+            link=self.call('POST',link_path,{},headers=link_headers);self.assertEqual(link.status_code,200,link.text)
+            url=link.json()['data']['url'];opened=self.call('GET',url,headers={});self.assertEqual(opened.status_code,200,opened.text[:200]);self.assertTrue(opened.content.startswith(b'%PDF-'))
+            disposition=opened.headers['Content-Disposition'];self.assertIn('inline',disposition);self.assertIn('Synthetic animal - Synthetic Responsible - ',disposition)
+            self.assertEqual(self.call('GET',url.replace('/report-files/','/report-files/x'),headers={}).status_code,404)
+        self.assertEqual(self.call('POST','/reports/'+exam+'/pdf-link',{},headers={}).status_code,401)
+        self.assertEqual(self.call('POST','/veterinary/portal/reports/'+exam+'/pdf-link',{},headers={}).status_code,401)
         card=self.call('GET','/s/'+code+'/case',headers={});self.assertEqual(card.status_code,200,card.text)
         self.assertEqual(card.json()['data']['responsibles'],[{'name':'Synthetic Responsible','role':'owner','phone':None,'email':'synthetic@example.invalid'}])
         pdf=self.call('GET','/veterinary/portal/reports/'+exam+'/pdf',headers=owner);self.assertEqual(pdf.status_code,200,pdf.text[:200]);self.assertTrue(pdf.content.startswith(b'%PDF-'))

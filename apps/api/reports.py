@@ -4118,6 +4118,41 @@ def get_report_pdf(exam_id):
     return _render_report_pdf_response(exam_id)
 
 
+@api_blueprint.route('/reports/<exam_id>/pdf-link', methods=['POST'])
+@jwt_required()
+def create_report_pdf_link(exam_id):
+    """Autoriza al usuario y entrega una URL firmada que abre el PDF con su nombre de archivo."""
+    from apps.services.report_pdf_links import issue_link
+    from apps.services.report_pdf_service import report_filename
+    from apps.services.report_view_service import ReportViewUnavailable, resolve_authorized_report_view
+    try:
+        view = resolve_authorized_report_view(exam_id)
+    except ReportViewUnavailable as error:
+        return jsonify(success=False, message=str(error), code=error.code), error.status
+    return jsonify(success=True, data={'url': issue_link(exam_id, report_filename(view) or 'informe.pdf')})
+
+
+@api_blueprint.route('/report-files/<token>/<path:_name>', methods=['GET'])
+def open_report_pdf_link(token, _name):
+    """Sin JWT: una pestaña no puede enviarlo. La firma limita el acceso a un examen y a 15 minutos."""
+    from io import BytesIO
+    from apps.services.report_pdf_links import resolve_link
+    from apps.services.report_pdf_service import render_report_pdf
+    from apps.services.report_view_service import ReportViewUnavailable, resolve_report_view
+    exam_id = resolve_link(token)
+    if not exam_id:
+        return jsonify(success=False, message='El enlace del informe venció. Vuelva a abrirlo desde el sistema.'), 404
+    try:
+        pdf = render_report_pdf(exam_id, view=resolve_report_view(exam_id))
+    except ReportViewUnavailable as error:
+        return jsonify(success=False, message=str(error), code=error.code), error.status
+    response = send_file(BytesIO(pdf.content), mimetype='application/pdf', download_name=pdf.filename)
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Robots-Tag'] = 'noindex'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
+
+
 @api_blueprint.route('/pdfs/by-exam/<exam_id>', methods=['GET'])
 @jwt_required()
 def serve_pdf_by_exam(exam_id):

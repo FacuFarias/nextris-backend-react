@@ -367,6 +367,17 @@ def my_report(exam_id):
         return reply(data)
 
 
+@blueprint.route('/portal/reports/<exam_id>/pdf-link',methods=['POST'])
+@portal
+def my_report_link(exam_id):
+    from apps.services.report_pdf_links import issue_link
+    from apps.services.report_pdf_service import report_filename
+    from apps.services.report_view_service import resolve_report_view
+    with vet.database() as c,c.cursor(cursor_factory=RealDictCursor) as q:
+        vet.assert_portal_exam(q,get_jwt_identity(),exam_id)
+        return reply({'url':issue_link(exam_id,report_filename(resolve_report_view(exam_id,connection=c)) or 'informe.pdf')})
+
+
 @blueprint.route('/portal/images/<exam_id>',methods=['POST'])
 @portal
 def my_images(exam_id):
