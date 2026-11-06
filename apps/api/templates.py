@@ -36,6 +36,40 @@ def _template_fields(row):
     return {**fields, **legacy_aliases(fields)}
 
 
+def _veterinary_mode():
+    from apps.services.veterinary import mode
+    return mode() == 'veterinary'
+
+
+def _veterinary_species(cur, data):
+    """Valida la especie enviada; vacío significa que aplica a todas."""
+    value = str(data.get('species_id') or '').strip()
+    if not value:
+        return None
+    cur.execute("SELECT id FROM nextris.veterinary_species WHERE id::text = %s", (value,))
+    row = cur.fetchone()
+    if not row:
+        raise ValueError('La especie no existe')
+    return str(row[0])
+
+
+def _species_sql(veterinary):
+    """Columnas de especie; las instalaciones humanas pueden no tener esas tablas."""
+    if veterinary:
+        return (
+            "ip.species_id::text, tpl_species.name",
+            "LEFT JOIN nextris.veterinary_species tpl_species ON tpl_species.id = ip.species_id",
+        )
+    return "NULL, NULL", ""
+
+
+def _species_fields(row):
+    return {
+        'species_id': row[24],
+        'species_name': row[25] or '',
+    } if _veterinary_mode() else {}
+
+
 def _study_type_label(description, applies_to_all):
     return 'Todos los tipos de estudio' if applies_to_all else (description or '')
 
@@ -392,9 +426,12 @@ def get_templates():
 
         user_id = _get_current_user_id()
         is_admin = _is_sysadmin_templates(conn, user_id)
+        veterinary = _veterinary_mode()
+        species_columns, species_join = _species_sql(veterinary)
+        species_id = request.args.get('species_id') if veterinary else None
 
         # Construir query con filtros dinámicos
-        query = """
+        query = f"""
             SELECT 
                 ip.guid, 
                 ip.tittle, 
@@ -429,15 +466,24 @@ def get_templates():
                 ip.study_reason,
                 ip.content,
                 ip.conclusion,
-                ip.applies_to_all
+                ip.applies_to_all,
+                {species_columns}
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
             LEFT JOIN nextris.isanatomicalpart iap ON ist.bodypart_id = iap.guid
+            {species_join}
             WHERE 1=1
         """
         
         params = [user_id]  # primer param para is_user_default
+
+        if veterinary:
+            query += " AND ip.patient_kind IN ('animal', 'any')"
+        if species_id:
+            # Una plantilla sin especie sirve para cualquier animal.
+            query += " AND (ip.species_id::text = %s OR ip.species_id IS NULL)"
+            params.append(species_id)
 
         # Filtro de visibilidad: sistema + propias (sysadmin ve todo)
         if not is_admin:
@@ -460,7 +506,12 @@ def get_templates():
             query += " AND COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = %s"
             params.append(report_type)
         
-        query += " ORDER BY ip.applies_to_all ASC, ip.tittle ASC" if study_type_id else " ORDER BY ip.tittle ASC"
+        order = ["ip.tittle ASC"]
+        if species_id:
+            order.insert(0, "(ip.species_id IS NULL) ASC")
+        if study_type_id:
+            order.insert(0, "ip.applies_to_all ASC")
+        query += " ORDER BY " + ", ".join(order)
         
         cur.execute(query, params)
         
@@ -473,7 +524,7 @@ def get_templates():
             fields = _template_fields(row)
             owner_id = row[14] or 'nextris'
             can_edit = is_admin or owner_id == user_id
-            can_delete = is_admin or owner_id == user_id
+            can_delete = (is_admin or owner_id == user_id) and not row[23]
             is_user_default = bool(row[15])
             is_system_default = bool(row[16]) if row[16] is not None else False
             if simple:
@@ -492,6 +543,7 @@ def get_templates():
                     'is_system_default': is_system_default,
                     'structured_variables': row[18] or '',
                     'criteria': row[19] or '',
+                    **_species_fields(row),
                 })
             else:
                 templates.append({
@@ -515,6 +567,7 @@ def get_templates():
                     'is_system_default': is_system_default,
                     'structured_variables': row[18] or '',
                     'criteria': row[19] or '',
+                    **_species_fields(row),
                 })
         
         return jsonify({
@@ -579,8 +632,10 @@ def get_template(template_id):
 
         user_id = _get_current_user_id()
         is_admin = _is_sysadmin_templates(conn, user_id)
+        veterinary = _veterinary_mode()
+        species_columns, species_join = _species_sql(veterinary)
 
-        query = """
+        query = f"""
             SELECT 
                 ip.guid, 
                 ip.tittle, 
@@ -615,15 +670,19 @@ def get_template(template_id):
                 ip.study_reason,
                 ip.content,
                 ip.conclusion,
-                ip.applies_to_all
+                ip.applies_to_all,
+                {species_columns}
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
             LEFT JOIN nextris.isanatomicalpart iap ON ist.bodypart_id = iap.guid
+            {species_join}
             WHERE ip.guid = %s
         """
 
         params = [user_id, template_id]
+        if veterinary:
+            query += " AND ip.patient_kind IN ('animal', 'any')"
         if not is_admin:
             query += " AND (ip.owner_id = 'nextris' OR ip.owner_id = %s)"
             params.append(user_id)
@@ -637,7 +696,7 @@ def get_template(template_id):
             fields = _template_fields(result)
             owner_id = result[14] or 'nextris'
             can_edit = is_admin or owner_id == user_id
-            can_delete = is_admin or owner_id == user_id
+            can_delete = (is_admin or owner_id == user_id) and not result[23]
             is_user_default = bool(result[15])
             is_system_default = bool(result[16]) if result[16] is not None else False
             template = {
@@ -661,6 +720,7 @@ def get_template(template_id):
                 'is_system_default': is_system_default,
                 'structured_variables': result[18] or '',
                 'criteria': result[19] or '',
+                **_species_fields(result),
             }
             
             return jsonify({
@@ -775,6 +835,19 @@ def create_template():
         owner_id = _get_current_user_id()
         is_admin = _is_sysadmin_templates(conn, owner_id)
 
+        veterinary = _veterinary_mode()
+        species_id = None
+        if veterinary:
+            try:
+                species_id = _veterinary_species(cur, data)
+            except ValueError as validation_error:
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': str(validation_error)
+                }), 400
+
         # Insertar plantilla
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
@@ -796,6 +869,12 @@ def create_template():
             structured_variables,
             criteria
         ))
+
+        if veterinary:
+            cur.execute(
+                "UPDATE nextris.tbinfpredef SET patient_kind = 'animal', species_id = %s WHERE guid = %s",
+                (species_id, new_guid)
+            )
 
         sync_template_locations(
             conn,
@@ -951,6 +1030,19 @@ def edit_template(template_id):
                 'message': 'report_type invalido. Valores permitidos: simple, inteligente'
             }), 400
         
+        update_species = _veterinary_mode() and 'species_id' in data and not applies_to_all
+        species_id = None
+        if update_species:
+            try:
+                species_id = _veterinary_species(cur, data)
+            except ValueError as validation_error:
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'message': str(validation_error)
+                }), 400
+
         # Actualizar plantilla
         update_query = """
             UPDATE nextris.tbinfpredef 
@@ -976,6 +1068,12 @@ def edit_template(template_id):
             criteria,
             template_id
         ))
+
+        if update_species:
+            cur.execute(
+                "UPDATE nextris.tbinfpredef SET species_id = %s WHERE guid = %s",
+                (species_id, template_id)
+            )
 
         if is_default is not None:
             if is_admin:
@@ -1093,7 +1191,7 @@ def delete_template(template_id):
         is_admin = _is_sysadmin_templates(conn, user_id)
 
         # Verificar que la plantilla existe y obtener su owner
-        check_query = "SELECT guid, COALESCE(owner_id, 'nextris') FROM nextris.tbinfpredef WHERE guid = %s"
+        check_query = "SELECT guid, COALESCE(owner_id, 'nextris'), applies_to_all FROM nextris.tbinfpredef WHERE guid = %s"
         cur.execute(check_query, (template_id,))
         existing = cur.fetchone()
         
@@ -1104,6 +1202,14 @@ def delete_template(template_id):
                 'success': False,
                 'message': 'Plantilla no encontrada'
             }), 404
+
+        if existing[2]:
+            cur.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': 'La plantilla general se aplica a todos los estudios y no se puede eliminar'
+            }), 409
 
         template_owner_id = existing[1]
 

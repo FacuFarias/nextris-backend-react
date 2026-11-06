@@ -1,12 +1,17 @@
 """Shared veterinary domain services. Existing patient/examination identity remains authoritative."""
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from html import escape
 
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
+
+
+_ANIMAL_FIELD_RE = re.compile(r'\{\{\s*([^{}<>]+?)\s*\}\}')
 
 
 class VeterinaryError(ValueError):
@@ -282,6 +287,70 @@ def protocol_context(cursor, patient_id, protocol_id=None, study_type_id=None):
                 raise VeterinaryError('El peso no es compatible con el protocolo')
         context['protocol']=plain(dict(protocol))
     return context
+
+
+def _birth_date(value):
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def _age_text(born, estimated):
+    today = date.today()
+    months = (today.year - born.year) * 12 + today.month - born.month - (today.day < born.day)
+    if months < 0:
+        return None
+    years, months = divmod(months, 12)
+    parts = []
+    if years:
+        parts.append(f"{years} {'año' if years == 1 else 'años'}")
+    if months:
+        parts.append(f"{months} {'mes' if months == 1 else 'meses'}")
+    if not parts:
+        days = (today - born).days
+        parts.append(f"{days} {'día' if days == 1 else 'días'}")
+    return ('aprox. ' if estimated else '') + ' y '.join(parts)
+
+
+def animal_fields(context):
+    """Values for the template fields; None marks a datum the animal does not have."""
+    context = context or {}
+    gender = context.get('gender')
+    ending = {'M': 'o', 'F': 'a'}.get(gender, 'o/a')
+    reproductive = {'intact': f'Enter{ending}', 'neutered': f'Castrad{ending}'}.get(context.get('reproductive_status'))
+    born = _birth_date(context.get('birthdate'))
+    estimated = bool(context.get('birthdate_estimated'))
+    birth_text = born.strftime('%d/%m/%Y') + (' (estimada)' if estimated else '') if born else None
+    weight_kg = context.get('weight_kg')
+    weight_text = f"{float(weight_kg):g} kg".replace('.', ',') if weight_kg is not None else None
+    responsibles = ', '.join(r['name'] for r in context.get('responsibles') or [] if r.get('name'))
+    name = ' '.join(part for part in (context.get('name'), context.get('surname')) if part)
+    return {
+        'Nombre': name or None,
+        'ID animal': context.get('patientid') or None,
+        'Especie': context.get('species_name') or None,
+        'Raza': context.get('breed_name') or None,
+        'Sexo': {'M': 'Macho', 'F': 'Hembra'}.get(gender),
+        'Estado reproductivo': reproductive,
+        'Fecha de nacimiento': birth_text,
+        'Edad': _age_text(born, estimated) if born else None,
+        'Peso': weight_text,
+        'Responsable': responsibles or None,
+    }
+
+
+def fill_animal_fields(html, fields):
+    """Replace {{Campo}} in a template. A missing datum becomes [[ ]]: the editor jumps to it and signing is blocked."""
+    if not html or '{{' not in html:
+        return html
+    by_name = {key.lower(): value for key, value in fields.items()}
+    def replace(match):
+        key = ' '.join(match.group(1).split()).lower()
+        if key not in by_name:
+            return match.group(0)
+        return escape(by_name[key], quote=False) if by_name[key] else '[[ ]]'
+    return _ANIMAL_FIELD_RE.sub(replace, html)
 
 
 def report_context(connection, exam_id, *, freeze=False):

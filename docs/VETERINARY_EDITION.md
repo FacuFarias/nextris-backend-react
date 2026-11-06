@@ -58,6 +58,8 @@ erDiagram
   protocol snapshot. Later master-data or owner changes do not alter that signed veterinary context.
 - Templates reuse `tbinfpredef`: human/animal/any scope, optional species, existing study type for
   modality/body region, and the normal simple report sections. The structured-report engine remains off.
+  `/api/templates` stores and filters by `species_id` in veterinary mode. `animal_fields` and
+  `fill_animal_fields` replace `{{Campo}}` tokens when a report opens or is saved; a missing datum becomes `[[ ]]`.
 
 ## HTTP interfaces
 

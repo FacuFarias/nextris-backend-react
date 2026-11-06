@@ -182,6 +182,54 @@ class VeterinaryApiTests(unittest.TestCase):
         self.assertEqual(self.call('PUT','/examinations/'+exam+'/report',{'template_id':incompatible}).status_code,400)
         self.assertTrue(self.call('GET','/veterinary/patients/'+a['guid']+'/history').json()['data'])
 
+    def test_11_species_templates_and_animal_fields(self):
+        study=str(uuid.uuid4())
+        with self.db.cursor() as q:
+            q.execute("INSERT INTO nextris.isstudytype(guid,description,code) VALUES(%s,'Synthetic species study',%s)",(study,study[:8]))
+        self.db.commit()
+        body='<p>{{Nombre}} {{Especie}} {{ raza }} {{Sexo}} {{Estado reproductivo}} {{Peso}} {{Responsable}} {{Otro}}</p>'
+        base={'study_type_id':study,'study_reason':'<p>{{Edad}}</p>','content':body,'conclusion':'<p>Fin</p>','report_type':'simple'}
+        r=self.call('POST','/templates',{**base,'title':'Synthetic dog','species_id':self.dog});self.assertEqual(r.status_code,201,r.text);dog=r.json()['data']['guid']
+        cat=self.call('POST','/templates',{**base,'title':'Synthetic cat','species_id':self.cat}).json()['data']['guid']
+        anyone=self.call('POST','/templates',{**base,'title':'Synthetic any'}).json()['data']['guid']
+        self.assertEqual(self.call('POST','/templates',{**base,'title':'Bad','species_id':str(uuid.uuid4())}).status_code,400)
+        detail=self.call('GET','/templates/'+dog).json()['data'];self.assertEqual((detail['species_id'],detail['species_name']),(self.dog,'Canino'))
+        with self.db.cursor() as q:
+            q.execute('SELECT patient_kind FROM nextris.tbinfpredef WHERE guid=%s',(anyone,));self.assertEqual(q.fetchone()[0],'animal')
+        self.db.rollback()
+        listed=[t['guid'] for t in self.call('GET','/templates?study_type_id='+study+'&species_id='+self.dog).json()['data'] if not t['applies_to_all']]
+        self.assertEqual(listed,[dog,anyone])
+        r=self.call('PUT','/templates/'+anyone,{**base,'title':'Synthetic any','species_id':self.cat});self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(self.call('GET','/templates/'+anyone).json()['data']['species_id'],self.cat)
+        r=self.call('PUT','/templates/'+anyone,{**base,'title':'Synthetic any','species_id':None});self.assertEqual(r.status_code,200,r.text)
+        self.assertIsNone(self.call('GET','/templates/'+anyone).json()['data']['species_id'])
+        # The species-specific template wins, its fields are filled, and missing data becomes [[ ]].
+        a=self.new_animal(name='Firulais <b>',gender='F',birthdate='2020-01-01',veterinary={'species_id':self.dog,'weight_kg':8.5,'reproductive_status':'neutered'})
+        r=self.call('POST','/veterinary/patients/'+a['guid']+'/orders',{'study_type_id':study});self.assertEqual(r.status_code,201,r.text);exam=r.json()['data']['guid']
+        data=self.call('GET','/examinations/'+exam+'/report').json()['data']
+        self.assertEqual(data['applied_template_id'],dog)
+        self.assertEqual(data['content'],'<p>Firulais &lt;b&gt; Canino [[ ]] Hembra Castrada 8,5 kg [[ ]] {{Otro}}</p>')
+        self.assertIn('años',data['study_reason']);self.assertNotIn('{{',data['study_reason'])
+        self.assertEqual(data['animal_fields']['Peso'],'8,5 kg');self.assertIsNone(data['animal_fields']['Raza'])
+        # Applying from the worklist saves without the editor: the server fills the fields too.
+        r=self.call('PUT','/examinations/'+exam+'/report',{'study_reason':'<p>{{Edad}}</p>','content':'<p>{{Especie}}</p>','conclusion':'<p>Fin</p>','template_id':anyone});self.assertEqual(r.status_code,200,r.text)
+        with self.db.cursor() as q:
+            q.execute('SELECT content,study_reason FROM nextris.tbreport WHERE idexamination=%s',(exam,));saved=q.fetchone()
+        self.db.rollback()
+        self.assertEqual(saved[0],'<p>Canino</p>');self.assertNotIn('{{',saved[1])
+        self.assertEqual(self.call('PUT','/examinations/'+exam+'/report',{'template_id':cat}).status_code,400)
+        rows=self.call('GET','/examinations/for-reporting?search='+a['patientid']+'&include_without_images=true').json()['data']['data']
+        match=[row for row in rows if row['guid']==exam]
+        if match:
+            self.assertEqual(match[0]['species_id'],self.dog);self.assertEqual(match[0]['applied_template_id'],anyone)
+        # The global template stays editable but cannot be deleted.
+        with self.db.cursor() as q:
+            q.execute('SELECT guid FROM nextris.tbinfpredef WHERE applies_to_all');found=q.fetchone()
+        self.db.rollback()
+        if found:
+            self.assertFalse(self.call('GET','/templates/'+found[0]).json()['data']['can_delete'])
+            self.assertEqual(self.call('DELETE','/templates/'+found[0]).status_code,409)
+
     def test_04_serialization_manual_validation_and_disabled_mwl(self):
         from apps.services.veterinary_integration import veterinary_dataset,send_veterinary_worklist,read_veterinary_metadata,prepare_manual_upload
         from apps.services.veterinary import VeterinaryError

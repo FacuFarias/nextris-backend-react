@@ -1456,6 +1456,9 @@ def get_examinations_for_reporting():
             FROM nextris.patient_responsibility pr JOIN nextris.responsible_party r ON r.id=pr.responsible_id
             WHERE pr.patient_id=dp.guid AND pr.valid_from<=now()
             AND (pr.valid_to IS NULL OR pr.valid_to>now())), '')""" if veterinary_mode else "''::text"
+        species_expression = "dp.species_id::text" if veterinary_mode else "NULL::text"
+        template_species_filter = "AND (ip.guid = rep.applied_template_id OR ip.species_id IS NULL OR ip.species_id = dp.species_id)" if veterinary_mode else ""
+        template_species_order = "ip.species_id IS NULL," if veterinary_mode else ""
         base_query = f"""
             SELECT e.Guid, 
                    CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
@@ -1545,6 +1548,7 @@ def get_examinations_for_reporting():
                    ,ps.study_time AS study_time
                    ,ps.created_time AS arrival_time
                    ,{responsible_expression} AS responsible_name
+                   ,{species_expression} AS species_id
              FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -1573,6 +1577,7 @@ def get_examinations_for_reporting():
                       ip.guid = rep.applied_template_id
                       OR COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
                   )
+                  {template_species_filter}
                 ORDER BY
                     CASE
                         WHEN rep.applied_template_id = ip.guid THEN 0
@@ -1588,6 +1593,7 @@ def get_examinations_for_reporting():
                         WHEN ip.isdefault = 1 THEN 3
                         ELSE 4
                     END,
+                    {template_species_order}
                     ip.tittle ASC
                 LIMIT 1
             ) resolved_template ON TRUE
@@ -1817,7 +1823,7 @@ def get_examinations_for_reporting():
                 'study_date': row[50] or None,
                 'study_time': row[51] or None,
                 'arrival_time': row[52].isoformat() if row[52] else None,
-                **({'responsible_name': row[53] or ''} if veterinary_mode else {}),
+                **({'responsible_name': row[53] or '', 'species_id': row[54]} if veterinary_mode else {}),
              })
         
         cursor.close()
@@ -2411,11 +2417,17 @@ def get_examination_report(exam_id):
         cursor.close()
         connection.close()
 
-        from apps.services.veterinary import mode as patient_mode, database as veterinary_database, report_context
+        from apps.services.veterinary import mode as patient_mode, database as veterinary_database, report_context, animal_fields, fill_animal_fields
         veterinary_context = None
+        template_animal_fields = None
         if patient_mode() == 'veterinary':
             with veterinary_database() as veterinary_connection:
                 veterinary_context=report_context(veterinary_connection,exam_id)
+            template_animal_fields = animal_fields(veterinary_context)
+            if not is_reported:
+                study_reason = fill_animal_fields(study_reason, template_animal_fields)
+                content = fill_animal_fields(content, template_animal_fields)
+                conclusion = fill_animal_fields(conclusion, template_animal_fields)
         response_payload = {
             'success': True,
             'data': {
@@ -2431,6 +2443,7 @@ def get_examination_report(exam_id):
                 'facility_id': str(facility_id) if facility_id else None,
                 'structured_reports_enabled': bool(structured_enabled),
                 'veterinary_context': veterinary_context,
+                'animal_fields': template_animal_fields,
                 'applied_template_id': selected_template_id,
                 'applied_template_name': selected_template_name,
                 'applied_template_report_type': selected_template_report_type,
@@ -2572,6 +2585,18 @@ def update_examination_report(exam_id):
         if mark_as_reported:
             cleaned = remove_indicative_brackets(normalized)
             normalized = {key: cleaned[key] for key in normalized}
+            study_reason = normalized.get('study_reason')
+            content = normalized.get('content')
+            conclusion = normalized.get('conclusion')
+        from apps.services.veterinary import mode as patient_mode
+        if patient_mode() == 'veterinary' and any('{{' in str(value or '') for value in (study_reason, content, conclusion)):
+            # El cambio de plantilla desde la lista guarda sin pasar por el redactor.
+            from apps.services.veterinary import database as veterinary_database, report_context, animal_fields, fill_animal_fields
+            with veterinary_database() as veterinary_connection:
+                template_animal_fields = animal_fields(report_context(veterinary_connection, exam_id))
+            for key in ('study_reason', 'content', 'conclusion'):
+                if key in normalized:
+                    normalized[key] = fill_animal_fields(normalized[key], template_animal_fields)
             study_reason = normalized.get('study_reason')
             content = normalized.get('content')
             conclusion = normalized.get('conclusion')
