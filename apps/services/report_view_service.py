@@ -2,6 +2,7 @@
 
 from html import escape
 from html.parser import HTMLParser
+import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from apps.services.report_fields import canonical_fields_from_row, has_value
@@ -94,7 +95,7 @@ def resolve_report_view(exam_id, *, connection=None):
             reason_fallback=row['clinicalquestion'] or row['history'])
         if not any(has_value(fields[key]) for key in ('content', 'conclusion')):
             raise ReportViewUnavailable('El informe no contiene texto disponible')
-        author = ' '.join(filter(None, [row['author_name'], row['author_surname']]))
+        author = ' '.join(filter(None, [row['author_name'], row['author_surname']])) or row['aclaracion_firma']
         signatures = []
         if author:
             image = inline_image(row['firma_digital'], signature=True) if row['firma_habilitada'] else None
@@ -114,7 +115,7 @@ def resolve_report_view(exam_id, *, connection=None):
             study=dict(description=row['study_type'], accession_number=row['localacc'],
                 date=row['createdon'].isoformat() if row['createdon'] else None),
             institution=dict(name=row['institution_name'], address=row['address'], phone=row['phone'],
-                email=row['mail'], logo=inline_image(row['logo_path'])), signatures=signatures)
+                email=row['mail'], logo=inline_image(row['logo_path'] or os.getenv('NEXTRIS_INSTITUTION_LOGO'))), signatures=signatures)
         from apps.services.veterinary import mode as patient_mode, report_context
         if patient_mode() == 'veterinary':
             context = report_context(connection, exam_id)
