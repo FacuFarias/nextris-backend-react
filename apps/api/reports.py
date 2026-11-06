@@ -2452,6 +2452,7 @@ def get_examination_report(exam_id):
                 }),
                 'was_saved': was_saved,
                 'report_available': report_available,
+                'is_reported': is_reported,
                 'workflow_state': workflow_state,
                 'workflow_state_at': _serialize_utc_datetime(workflow_state_at),
                 'workflow_state_source': workflow_state_source,
@@ -2552,6 +2553,7 @@ def update_examination_report(exam_id):
                    COALESCE(e.workflow_state, 'pending') AS workflow_state
             FROM nextris.tbexamination e
             WHERE e.Guid = %s
+            FOR UPDATE
         """, (exam_id,))
         
         exam = cursor.fetchone()
@@ -2567,7 +2569,7 @@ def update_examination_report(exam_id):
         admission_number = exam[1]
         already_reported = bool(exam[2])
         workflow_state = exam[3] or 'pending'
-        if already_reported or mark_as_reported:
+        if mark_as_reported:
             cleaned = remove_indicative_brackets(normalized)
             normalized = {key: cleaned[key] for key in normalized}
             study_reason = normalized.get('study_reason')
@@ -2580,6 +2582,14 @@ def update_examination_report(exam_id):
                 'success': False,
                 'message': 'El estudio está cancelado y no puede redactarse',
                 'code': 'STUDY_CANCELLED',
+            }), 409
+        if already_reported:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El informe está firmado. Quite la firma para modificarlo.',
+                'code': 'REPORT_SIGNED',
             }), 409
         
         # Verificar si ya existe un reporte
@@ -3464,6 +3474,7 @@ def save_report(exam_id):
             """
             SELECT COALESCE(workflow_state, 'pending'), COALESCE(isreported, 0)
             FROM nextris.tbexamination WHERE guid = %s
+            FOR UPDATE
             """,
             (exam_id,),
         )
@@ -3478,10 +3489,13 @@ def save_report(exam_id):
             return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
 
         if workflow[1]:
-            normalized = remove_indicative_brackets(normalized)
-            study_reason = normalized['study_reason']
-            content = normalized['content']
-            conclusion = normalized['conclusion']
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El informe está firmado. Quite la firma para modificarlo.',
+                'code': 'REPORT_SIGNED',
+            }), 409
         
         query = """
             UPDATE nextris.tbreport 
@@ -3779,6 +3793,7 @@ def sign_report(exam_id):
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
             WHERE e.Guid = %s
+            FOR UPDATE OF e
         """, (exam_id,))
         
         exam_data = cursor.fetchone()
@@ -3795,7 +3810,15 @@ def sign_report(exam_id):
             cursor.close()
             connection.close()
             return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
-        already_reported = bool(is_reported)
+        if is_reported:
+            # Volver a firmar reemplazaría al firmante y la fecha sin que nadie lo pida.
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'El informe ya está firmado.',
+                'code': 'REPORT_ALREADY_SIGNED',
+            }), 409
         
         # Verificar si existe el reporte, si no, crearlo.
         cursor.execute("SELECT guid FROM nextris.tbreport WHERE idexamination = %s", (exam_id,))
@@ -4057,10 +4080,16 @@ def unsign_report(exam_id):
             WHERE guid = %s
         """
         cursor.execute(query, (exam_id,))
+        found = cursor.rowcount > 0
         
         connection.commit()
         cursor.close()
         connection.close()
+        if not found:
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
         
         # Actualizar estado (si existe la función)
         try:

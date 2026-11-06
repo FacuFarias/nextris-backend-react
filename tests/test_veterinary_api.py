@@ -205,6 +205,32 @@ class VeterinaryApiTests(unittest.TestCase):
         self.assertEqual(str(updated.PatientID),a['patientid']);self.assertEqual(str(updated.PatientName),a['name']);self.assertEqual(len(updated.OriginalAttributesSequence),1)
         self.assertEqual(float(updated.PatientWeight),7.75);self.assertEqual(str(updated.PatientSexNeutered),'UNALTERED')
 
+    def test_09_signed_reports_are_locked_until_unsigned(self):
+        a=self.new_animal(name='Synthetic Signed Animal',veterinary={'species_id':self.dog,'weight_kg':5})
+        r=self.call('POST','/veterinary/patients/'+a['guid']+'/orders',{'study_type_id':self.study_type});self.assertEqual(r.status_code,201,r.text);exam=r.json()['data']['guid']
+        report={'study_reason':'Synthetic reason','content':'Original findings','conclusion':'Synthetic conclusion'}
+        self.assertEqual(self.call('PUT','/examinations/'+exam+'/report',report).status_code,200)
+        state=lambda:self.call('GET','/examinations/'+exam+'/report').json()['data']
+        self.assertFalse(state()['is_reported'])
+        self.assertEqual(self.call('POST','/reports/'+exam+'/sign',{}).status_code,200)
+        self.assertTrue(state()['is_reported'])
+        changed={**report,'content':'Changed after signing'}
+        for method,path in (('PUT','/examinations/'+exam+'/report'),('PATCH','/examinations/'+exam+'/report'),('PUT','/reports/'+exam),('PATCH','/reports/'+exam)):
+            r=self.call(method,path,changed);self.assertEqual(r.status_code,409,method+' '+path);self.assertEqual(r.json()['code'],'REPORT_SIGNED')
+        self.assertIn('Original findings',state()['content'])
+        r=self.call('POST','/reports/'+exam+'/sign',{});self.assertEqual(r.status_code,409);self.assertEqual(r.json()['code'],'REPORT_ALREADY_SIGNED')
+        self.assertEqual(self.call('POST','/reports/'+exam+'/unsign',{}).status_code,200)
+        self.assertFalse(state()['is_reported'])
+        self.assertEqual(self.call('PUT','/examinations/'+exam+'/report',changed).status_code,200)
+        self.assertIn('Changed after signing',state()['content'])
+        self.assertEqual(self.call('POST','/reports/'+exam+'/sign',{}).status_code,200)
+        self.assertEqual(self.call('POST','/reports/'+str(uuid.uuid4())+'/unsign',{}).status_code,404)
+
+    def test_10_legacy_key_image_routes_are_gone(self):
+        for method,path in (('GET','/images/study/1.2.3'),('GET','/images/study/1.2.3/file/a.png'),('DELETE','/images/study/1.2.3/file/a.png'),('GET','/images/study/1.2.3/thumbnail/a.png')):
+            self.assertEqual(self.call(method,path).status_code,404,path)
+            self.assertEqual(self.call(method,path,headers={}).status_code,404,path)
+
     def test_08_worklist_responsible_search_filter_and_revocation(self):
         prefix='Worklist-'+uuid.uuid4().hex[:10]
         a=self.new_animal(name=prefix+' Animal A');b=self.new_animal(name=prefix+' Animal B')
