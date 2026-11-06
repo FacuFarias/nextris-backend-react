@@ -160,6 +160,12 @@ def ensure_applied_template_schema(connection):
             ON nextris.tbreport (applied_template_id)
             """
         )
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tbinfpredef
+            ADD COLUMN IF NOT EXISTS applies_to_all BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
         connection.commit()
         _schema_applied_template_ensured = True
     finally:
@@ -338,10 +344,10 @@ def _select_predefined_template_for_exam(
         exam_id = (request.view_args or {}).get('exam_id')
         cursor.execute("""SELECT ip.guid,ip.study_reason,ip.content,ip.conclusion,ip.technique,ip.findings,ip.impression
             FROM nextris.tbinfpredef ip
-            WHERE ip.patient_kind IN ('animal','any') AND ip.studytype_id=%s AND ip.report_type='simple'
+            WHERE ip.patient_kind IN ('animal','any') AND (ip.studytype_id=%s OR ip.applies_to_all) AND ip.report_type='simple'
             AND (ip.species_id IS NULL OR ip.species_id=(SELECT p.species_id FROM nextris.tbexamination e
                 JOIN nextris.datapatient p ON p.guid=e.idpatient WHERE e.guid=%s))
-            ORDER BY (ip.species_id IS NOT NULL) DESC,ip.isdefault DESC,ip.tittle LIMIT 1""",(study_type_id,exam_id))
+            ORDER BY ip.applies_to_all ASC,(ip.species_id IS NOT NULL) DESC,ip.isdefault DESC,ip.tittle LIMIT 1""",(study_type_id,exam_id))
         row=cursor.fetchone()
         return _serialize_template_candidate(row,'simple') if row else None
     if not study_type_id:
@@ -1561,7 +1567,7 @@ def get_examinations_for_reporting():
                         ELSE 'Por defecto'
                     END AS template_source
                 FROM nextris.tbinfpredef ip
-                WHERE ip.studytype_id = e.studytype_id
+                WHERE (ip.studytype_id = e.studytype_id OR (ip.applies_to_all AND e.studytype_id IS NOT NULL))
                   AND (
                       ip.guid = rep.applied_template_id
                       OR COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
@@ -1577,6 +1583,7 @@ def get_examinations_for_reporting():
                               AND user_default.template_id = ip.guid
                         ) THEN 1
                         WHEN ip.guid = st.default_predef_id THEN 2
+                        WHEN ip.applies_to_all THEN 5
                         WHEN ip.isdefault = 1 THEN 3
                         ELSE 4
                     END,

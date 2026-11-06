@@ -36,6 +36,10 @@ def _template_fields(row):
     return {**fields, **legacy_aliases(fields)}
 
 
+def _study_type_label(description, applies_to_all):
+    return 'Todos los tipos de estudio' if applies_to_all else (description or '')
+
+
 def normalize_report_type(value, default='simple'):
     """Normaliza el tipo de informe a un valor permitido."""
     normalized = (value or default).strip().lower()
@@ -103,6 +107,27 @@ def ensure_report_type_schema(conn):
                 cur.execute(
                     f"ALTER TABLE nextris.tbinfpredef ADD COLUMN {column_name} TEXT NOT NULL DEFAULT ''"
                 )
+
+        # Marca explícita: studytype_id también queda NULL al borrar un tipo de
+        # estudio, y eso no debe convertir una plantilla en global.
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbinfpredef'
+                  AND column_name = 'applies_to_all'
+            )
+            """
+        )
+        if not cur.fetchone()[0]:
+            cur.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN applies_to_all BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
 
         # Backfill y saneamiento para plantillas existentes.
         cur.execute(
@@ -397,13 +422,14 @@ def get_templates():
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1 OR ip.applies_to_all) AS is_system_default,
                 ist.code AS study_type_code,
                 ip.structured_variables,
                 ip.criteria,
                 ip.study_reason,
                 ip.content,
-                ip.conclusion
+                ip.conclusion,
+                ip.applies_to_all
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -419,7 +445,7 @@ def get_templates():
             params.append(user_id)
         
         if study_type_id:
-            query += " AND ip.studytype_id = %s"
+            query += " AND (ip.studytype_id = %s OR ip.applies_to_all)"
             params.append(study_type_id)
         
         if modality_id:
@@ -434,7 +460,7 @@ def get_templates():
             query += " AND COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = %s"
             params.append(report_type)
         
-        query += " ORDER BY ip.tittle ASC"
+        query += " ORDER BY ip.applies_to_all ASC, ip.tittle ASC" if study_type_id else " ORDER BY ip.tittle ASC"
         
         cur.execute(query, params)
         
@@ -454,7 +480,8 @@ def get_templates():
                 templates.append({
                     'guid': row[0],
                     'title': row[1] or '',
-                    'study_type_description': row[3] or '',
+                    'study_type_description': _study_type_label(row[3], row[23]),
+                    'applies_to_all': bool(row[23]),
                     'study_type_code': row[17] or '',
                     'report_type': row[12] or 'simple',
                     'location_ids': row[13] or [],
@@ -471,7 +498,8 @@ def get_templates():
                     'guid': row[0],
                     'title': row[1] or '',
                     'study_type_id': row[2],
-                    'study_type_description': row[3] or '',
+                    'study_type_description': _study_type_label(row[3], row[23]),
+                    'applies_to_all': bool(row[23]),
                     'study_type_code': row[17] or '',
                     'modality_id': row[4],
                     'modality_description': row[5] or '',
@@ -580,13 +608,14 @@ def get_template(template_id):
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1 OR ip.applies_to_all) AS is_system_default,
                 ist.code AS study_type_code,
                 ip.structured_variables,
                 ip.criteria,
                 ip.study_reason,
                 ip.content,
-                ip.conclusion
+                ip.conclusion,
+                ip.applies_to_all
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -615,7 +644,8 @@ def get_template(template_id):
                 'guid': result[0],
                 'title': result[1] or '',
                 'study_type_id': result[2],
-                'study_type_description': result[3] or '',
+                'study_type_description': _study_type_label(result[3], result[23]),
+                'applies_to_all': bool(result[23]),
                 'study_type_code': result[17] or '',
                 'modality_id': result[4],
                 'modality_description': result[5] or '',
@@ -866,7 +896,7 @@ def edit_template(template_id):
         user_id = _get_current_user_id()
         is_admin = _is_sysadmin_templates(conn, user_id)
 
-        check_query = "SELECT guid, COALESCE(owner_id, 'nextris') FROM nextris.tbinfpredef WHERE guid = %s"
+        check_query = "SELECT guid, COALESCE(owner_id, 'nextris'), applies_to_all FROM nextris.tbinfpredef WHERE guid = %s"
         cur.execute(check_query, (template_id,))
         existing = cur.fetchone()
         
@@ -879,6 +909,7 @@ def edit_template(template_id):
             }), 404
 
         template_owner_id = existing[1]
+        applies_to_all = bool(existing[2])
 
         # Control de permisos: solo el dueño o sysadmin puede editar
         if not is_admin and template_owner_id != user_id:
@@ -899,6 +930,10 @@ def edit_template(template_id):
         report_type_raw = data.get('report_type')
         report_type = normalize_report_type(report_type_raw) if report_type_raw is not None else None
         is_default = data.get('is_default')
+        if applies_to_all:
+            # La plantilla global no pertenece a un tipo y siempre es la predeterminada.
+            study_type_id = None
+            is_default = None
         structured_variables = data.get('structured_variables', '').strip()
         criteria = data.get('criteria', '').strip()
 

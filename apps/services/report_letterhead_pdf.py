@@ -16,6 +16,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Flowable, Frame, Image, PageTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.platypus.flowables import TopPadder
 
+from apps.services.report_view_service import ReportTextParser
+
 ROOT = Path(__file__).resolve().parents[2]
 HEADING = HexColor('#435f73')
 MUTED = '#969696'
@@ -39,6 +41,40 @@ def _fonts():
     for name, filename in (('Carlito', 'Carlito-Regular.ttf'), ('Carlito-Bold', 'Carlito-Bold.ttf')):
         if name not in pdfmetrics.getRegisteredFontNames():
             pdfmetrics.registerFont(TTFont(name, str(folder / filename)))
+    pdfmetrics.registerFontFamily('Carlito', normal='Carlito', bold='Carlito-Bold', italic='Carlito', boldItalic='Carlito-Bold')
+
+
+class _BoldTextParser(ReportTextParser):
+    """Report text as Paragraph markup: keeps bold, always balanced, so section titles survive."""
+    BOLD = ('strong', 'b')
+
+    def __init__(self):
+        super().__init__()
+        self.bold = 0
+
+    def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
+        if tag in self.BOLD and not self.hidden:
+            if not self.bold:
+                self.parts.append('<b>')
+            self.bold += 1
+
+    def handle_endtag(self, tag):
+        super().handle_endtag(tag)
+        if tag in self.BOLD and self.bold and not self.hidden:
+            self.bold -= 1
+            if not self.bold:
+                self.parts.append('</b>')
+
+    def handle_data(self, data):
+        super().handle_data(escape(data))
+
+
+def _report_markup(value):
+    parser = _BoldTextParser()
+    parser.feed(str(value or ''))
+    parser.close()
+    return (''.join(parser.parts) + ('</b>' if parser.bold else '')).strip().replace('\n', '<br/>')
 
 
 class SectionHeading(Flowable):
@@ -146,11 +182,10 @@ def render(view, background, plain_report_text, *, title=None):
         Spacer(1, 15),
     ]
     for key, section in report.get('textos', {}).items():
-        content = plain_report_text(section.get('contenido'))
-        if not (content or '').strip():
+        if not (plain_report_text(section.get('contenido')) or '').strip():
             continue
         story += [SectionHeading((section.get('as') or key).upper()), Spacer(1, 8),
-                  Paragraph(escape(content).replace('\n', '<br/>'), text), Spacer(1, 17)]
+                  Paragraph(_report_markup(section.get('contenido')), text), Spacer(1, 17)]
     for signature in document.get('signatures', []):
         story.append(TopPadder(_signature(signature, name, small)))
 

@@ -132,6 +132,35 @@ class VeterinaryApiTests(unittest.TestCase):
         # No identity or examination is reassigned by a transfer.
         self.assertEqual(self.call('GET','/patients/'+a['guid']).json()['data']['patientid'],a['patientid'])
 
+    def test_09_global_default_template(self):
+        content='<p><strong>Técnica</strong></p><p></p><p><strong>Estudio realizado</strong></p><p></p><p><strong>Descripción</strong></p><p></p>'
+        global_id=str(uuid.uuid4())
+        other_type=str(uuid.uuid4())
+        with self.db.cursor() as q:
+            q.execute("UPDATE nextris.tbinfpredef SET applies_to_all=FALSE WHERE applies_to_all")
+            q.execute("INSERT INTO nextris.isstudytype(guid,description,code) VALUES(%s,'Synthetic global template type',%s)",(other_type,other_type[:8]))
+            q.execute("INSERT INTO nextris.tbinfpredef(guid,tittle,content,patient_kind,report_type,isdefault,applies_to_all) VALUES(%s,'Synthetic global',%s,'animal','simple',1,TRUE)",(global_id,content))
+        self.db.commit()
+        a=self.new_animal()
+        order=self.call('POST','/veterinary/patients/'+a['guid']+'/orders',{'study_type_id':other_type});self.assertEqual(order.status_code,201,order.text);exam=order.json()['data']['guid']
+        report=self.call('GET','/examinations/'+exam+'/report').json()['data']
+        self.assertEqual(report['content'],content);self.assertEqual(report['selected_template_id'] if 'selected_template_id' in report else global_id,global_id)
+        listed=self.call('GET','/templates?report_type=simple&study_type_id='+other_type).json()['data']
+        self.assertEqual([(t['guid'],t['is_system_default'],t['applies_to_all'],t['study_type_description']) for t in listed],[(global_id,True,True,'Todos los tipos de estudio')])
+        self.assertEqual(self.call('PUT','/examinations/'+exam+'/report',{'template_id':global_id}).status_code,200)
+        self.assertNotIn(global_id,[t['guid'] for t in self.call('GET','/veterinary/templates').json()['data']])
+        self.assertEqual(self.call('PUT','/veterinary/templates/'+global_id,{'title':'x','study_type_id':other_type}).status_code,404)
+        edited=self.call('PUT','/templates/'+global_id,{'title':'Synthetic global edited','study_type_id':other_type,'content':content,'is_default':False});self.assertEqual(edited.status_code,200,edited.text)
+        with self.db.cursor() as q:
+            q.execute('SELECT studytype_id,isdefault,applies_to_all FROM nextris.tbinfpredef WHERE guid=%s',(global_id,));self.assertEqual(q.fetchone(),(None,1,True))
+            q.execute("INSERT INTO nextris.tbinfpredef(guid,tittle,studytype_id,content,patient_kind,report_type) VALUES(%s,'Synthetic specific',%s,'Specific','animal','simple')",(str(uuid.uuid4()),other_type))
+            q.execute("INSERT INTO nextris.tbinfpredef(guid,tittle,content,patient_kind,report_type,isdefault) VALUES(%s,'Synthetic orphan','Orphan','animal','simple',1)",(str(uuid.uuid4()),))
+        self.db.commit()
+        specific=self.call('POST','/veterinary/patients/'+a['guid']+'/orders',{'study_type_id':other_type,'scheduled_start':'2031-01-01T10:00','scheduled_end':'2031-01-01T10:30'});self.assertEqual(specific.status_code,201,specific.text)
+        self.assertEqual(self.call('GET','/examinations/'+specific.json()['data']['guid']+'/report').json()['data']['content'],'Specific')
+        listed=self.call('GET','/templates?report_type=simple&study_type_id='+other_type).json()['data']
+        self.assertEqual([t['title'] for t in listed],['Synthetic specific','Synthetic global edited'])
+
     def test_03_protocol_history_agenda_templates_and_snapshot(self):
         a=self.new_animal(veterinary={'species_id':self.dog,'weight_kg':12.5,'birthdate_estimated':True},birthdate='2020-01-01')
         p=self.call('POST','/veterinary/protocols',{'name':'Synthetic protocol','species_id':self.dog,'study_type_id':self.study_type,'min_weight_kg':10,'max_weight_kg':15,'preparation':'Synthetic preparation','checklist':['Synthetic step']});self.assertEqual(p.status_code,201,p.text);protocol=p.json()['data']

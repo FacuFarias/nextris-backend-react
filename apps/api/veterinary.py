@@ -306,14 +306,14 @@ def profile():
 def templates(template_id=None):
     with vet.database() as c,c.cursor(cursor_factory=RealDictCursor) as q:
         if request.method=='GET':
-            q.execute("SELECT guid,tittle AS title,studytype_id AS study_type_id,species_id,study_reason,content,conclusion FROM nextris.tbinfpredef WHERE patient_kind IN ('animal','any') ORDER BY tittle")
+            q.execute("SELECT guid,tittle AS title,studytype_id AS study_type_id,species_id,study_reason,content,conclusion FROM nextris.tbinfpredef WHERE patient_kind IN ('animal','any') AND NOT applies_to_all ORDER BY tittle")
             return reply(q.fetchall())
         d=request.get_json(silent=True) or {};title=str(d.get('title','')).strip()
         if not title or not d.get('study_type_id'):raise vet.VeterinaryError('Título y tipo de estudio requeridos')
         key=template_id or str(uuid.uuid4())
         values=(title,d['study_type_id'],d.get('species_id') or None,str(d.get('study_reason','')),str(d.get('content','')),str(d.get('conclusion','')))
         if template_id:
-            q.execute("UPDATE nextris.tbinfpredef SET tittle=%s,studytype_id=%s,species_id=%s,study_reason=%s,content=%s,conclusion=%s WHERE guid=%s AND patient_kind IN ('animal','any') RETURNING guid",values+(key,))
+            q.execute("UPDATE nextris.tbinfpredef SET tittle=%s,studytype_id=%s,species_id=%s,study_reason=%s,content=%s,conclusion=%s WHERE guid=%s AND patient_kind IN ('animal','any') AND NOT applies_to_all RETURNING guid",values+(key,))
             if not q.fetchone():raise vet.VeterinaryError('Plantilla no encontrada',404)
         else:
             q.execute("INSERT INTO nextris.tbinfpredef(tittle,studytype_id,species_id,study_reason,content,conclusion,guid,patient_kind,report_type) VALUES(%s,%s,%s,%s,%s,%s,%s,'animal','simple')",values+(key,))
