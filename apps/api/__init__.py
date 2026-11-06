@@ -53,3 +53,4 @@ if 'nexi' not in DISABLED_MODULES:
     from apps.api import nexi
 from apps.api.integration import orders, hl7_oru
 from apps.api import presentation_states
+from apps.api import key_images

@@ -50,7 +50,9 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     if background:
         accession = ''.join(c for c in str(view['report'].get('accession_number') or '') if c.isalnum() or c in '-_')
         name = filename or report_filename(view) or f'informe_{accession or safe_id}.pdf'
-        return RenderedReportPdf(render_letterhead(view, background, plain_report_text, title=name.removesuffix('.pdf'), image_link=image_link), name)
+        from apps.services.key_images import key_images_for_report
+        return RenderedReportPdf(render_letterhead(view, background, plain_report_text, title=name.removesuffix('.pdf'), image_link=image_link,
+                                                   key_images=key_images_for_report(view)), name)
     report, document = view['report'], view['document']
     styles = getSampleStyleSheet()
     output = BytesIO()

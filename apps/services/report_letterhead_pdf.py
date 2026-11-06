@@ -1,5 +1,6 @@
 """Report PDF over an institution letterhead image (NEXTRIS_REPORT_LETTERHEAD)."""
 import base64
+import logging
 from datetime import date, datetime
 from html import escape
 from io import BytesIO
@@ -19,12 +20,14 @@ from reportlab.platypus.flowables import TopPadder
 from apps.services.report_image_qr import qr_block
 from apps.services.report_view_service import ReportTextParser
 
+logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 HEADING = HexColor('#435f73')
 MUTED = '#969696'
 LEFT, RIGHT, TOP, BOTTOM = 42.5, 552.8, 150, 82
 WIDTH = RIGHT - LEFT
 COLUMNS = [186, 152, WIDTH - 338]
+KEY_IMAGE_MAX_HEIGHT = 300
 SEX = {'M': 'Macho', 'F': 'Hembra', 'O': 'Desconocido'}
 REPRODUCTIVE = {'intact': 'No esterilizado', 'neutered': 'Esterilizado'}
 
@@ -52,9 +55,21 @@ class _BoldTextParser(ReportTextParser):
     def __init__(self):
         super().__init__()
         self.bold = 0
+        self.blocks = []
+
+    def flush_text(self):
+        markup = ''.join(self.parts) + ('</b>' if self.bold else '')
+        self.parts = ['<b>'] if self.bold else []
+        markup = markup.strip().replace('\n', '<br/>')
+        if markup and markup != '<b></b>':
+            self.blocks.append(('text', markup))
 
     def handle_starttag(self, tag, attrs):
         super().handle_starttag(tag, attrs)
+        image_id = dict(attrs).get('data-key-image-id') if tag == 'img' and not self.hidden else None
+        if image_id:
+            self.flush_text()
+            self.blocks.append(('image', image_id))
         if tag in self.BOLD and not self.hidden:
             if not self.bold:
                 self.parts.append('<b>')
@@ -71,11 +86,35 @@ class _BoldTextParser(ReportTextParser):
         super().handle_data(escape(data))
 
 
-def _report_markup(value):
+def _report_blocks(value):
+    """Report field as ordered text and key image blocks, so images stay where they were placed."""
     parser = _BoldTextParser()
     parser.feed(str(value or ''))
     parser.close()
-    return (''.join(parser.parts) + ('</b>' if parser.bold else '')).strip().replace('\n', '<br/>')
+    parser.flush_text()
+    return parser.blocks
+
+
+def _key_image(image_id, key_images, text_style):
+    path = (key_images or {}).get(image_id)
+    try:
+        if not path:
+            raise FileNotFoundError(image_id)
+        width, height = ImageReader(str(path)).getSize()
+        scale = min(WIDTH / width, KEY_IMAGE_MAX_HEIGHT / height)
+        image = Image(str(path), width=width * scale, height=height * scale)
+        image.hAlign = 'CENTER'
+        return image
+    except OSError:
+        logger.warning('Imagen clave no disponible en el informe: %s', image_id)
+        return Paragraph('[imagen no disponible]', text_style)
+
+
+def _section_flowables(value, key_images, text_style):
+    flowables = []
+    for kind, content in _report_blocks(value):
+        flowables += [Paragraph(content, text_style) if kind == 'text' else _key_image(content, key_images, text_style), Spacer(1, 6)]
+    return flowables
 
 
 class SectionHeading(Flowable):
@@ -156,7 +195,7 @@ def _signature(signature, name_style, small_style):
     return block
 
 
-def render(view, background, plain_report_text, *, title=None, image_link=None):
+def render(view, background, plain_report_text, *, title=None, image_link=None, key_images=None):
     _fonts()
     report, document = view['report'], view['document']
     context = document.get('veterinary') or {}
@@ -183,10 +222,10 @@ def render(view, background, plain_report_text, *, title=None, image_link=None):
         Spacer(1, 15),
     ]
     for key, section in report.get('textos', {}).items():
-        if not (plain_report_text(section.get('contenido')) or '').strip():
+        flowables = _section_flowables(section.get('contenido'), key_images, text)
+        if not flowables:
             continue
-        story += [SectionHeading((section.get('as') or key).upper()), Spacer(1, 8),
-                  Paragraph(_report_markup(section.get('contenido')), text), Spacer(1, 17)]
+        story += [SectionHeading((section.get('as') or key).upper()), Spacer(1, 8), *flowables, Spacer(1, 11)]
     closing = [_signature(signature, name, small) for signature in document.get('signatures', [])]
     if image_link:
         # Junto a la última firma: TopPadder ocupa el resto de la página y un bloque aparte saltaría a otra hoja.
