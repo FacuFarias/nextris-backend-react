@@ -215,3 +215,16 @@ NEXTRIS_VETERINARY_TESTS=1 VETERINARY_BROWSER_FIXTURES=/tmp/veterinary-fixtures.
 The frontend's `test:veterinary:browser` consumes that private synthetic fixture file and only permits
 a localhost target. It exercises actual staff/owner login, registration, ordering, writing, password
 change, report access and profile navigation. Never publish fixture credentials or database dumps.
+
+## Directory filtering
+
+`GET /api/patients` in veterinary mode accepts `page`, `per_page`, `search`, `species_id`,
+`breed_id`, `gender`, `responsible_status=linked|pending`, `sort_column`, `sort_direction`, and
+`filter_<column>` for supported table columns. The response remains the existing paginated data
+object. These filters apply before pagination; owner search uses the current relationship.
+
+`GET /api/veterinary/responsibles?paginated=true` returns the same pagination envelope and
+accepts search (name/document/email/phone), `kind`, `is_active`, supported column filters and
+sorting. Without `paginated=true`, the original list contract used by relationship selectors remains
+unchanged. SQL filter values are parameterized and sortable/filterable identifiers are allowlisted.
+No schema migration or permission changes are required for this directory update.

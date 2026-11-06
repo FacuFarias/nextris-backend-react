@@ -118,6 +118,9 @@ def catalog(table,record_id=None):
 def responsibles(party_id=None):
     with vet.database() as c,c.cursor(cursor_factory=RealDictCursor) as q:
         if request.method=='GET':
+            if request.args.get('paginated')=='true':
+                from apps.services.veterinary_directory import responsible_directory
+                return reply(responsible_directory(q, request.args))
             search='%'+request.args.get('search','').strip()+'%'
             q.execute('SELECT * FROM nextris.responsible_party WHERE name ILIKE %s OR document ILIKE %s ORDER BY name LIMIT 200',(search,search))
             return reply(q.fetchall())
@@ -422,12 +425,5 @@ def patient_dispatch():
             result=vet.save_animal(q,request.get_json(silent=True),get_jwt_identity(),patient_id)
             return reply(result,'Animal actualizado' if patient_id else 'Animal creado',200 if patient_id else 201)
         if patient_id:return reply(vet.animal_dict(q,patient_id))
-        term='%'+request.args.get('search','').strip()+'%'
-        try:page=max(1,int(request.args.get('page',1)));per=min(100,max(1,int(request.args.get('per_page',10))))
-        except ValueError:raise vet.VeterinaryError('Paginación inválida')
-        query="FROM nextris.datapatient p WHERE patient_kind='animal' AND (p.name ILIKE %s OR p.patientid ILIKE %s OR EXISTS(SELECT 1 FROM nextris.patient_responsibility pr JOIN nextris.responsible_party rp ON rp.id=pr.responsible_id WHERE pr.patient_id=p.guid AND pr.valid_to IS NULL AND (rp.name ILIKE %s OR rp.document ILIKE %s)))"
-        args=(term,term,term,term)
-        q.execute('SELECT count(*) AS count '+query,args);total=q.fetchone()['count']
-        q.execute('SELECT p.guid '+query+' ORDER BY p.name,p.guid LIMIT %s OFFSET %s',args+(per,(page-1)*per))
-        ids=[r['guid'] for r in q.fetchall()]
-        return reply({'data':[vet.animal_dict(q,key) for key in ids],'page':page,'per_page':per,'total':total})
+        from apps.services.veterinary_directory import animal_directory
+        return reply(animal_directory(q, request.args))

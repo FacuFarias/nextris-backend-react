@@ -164,6 +164,24 @@ class VeterinaryApiTests(unittest.TestCase):
         self.assertEqual(str(updated.PatientID),a['patientid']);self.assertEqual(str(updated.PatientName),a['name']);self.assertEqual(len(updated.OriginalAttributesSequence),1)
         self.assertEqual(float(updated.PatientWeight),7.75);self.assertEqual(str(updated.PatientSexNeutered),'UNALTERED')
 
+    def test_07_patient_and_responsible_directory_filters(self):
+        prefix='Directory-'+uuid.uuid4().hex[:10]
+        dog=self.new_animal(name=prefix+' Alpha',veterinary={'species_id':self.dog})
+        cat=self.new_animal(name=prefix+' Beta',veterinary={'species_id':self.cat})
+        owner=self.call('POST','/veterinary/responsibles',{'name':prefix+' Owner','kind':'person','email':prefix.lower()+'@example.invalid'}).json()['data']
+        self.assertEqual(self.call('POST','/veterinary/patients/'+dog['guid']+'/responsibles',{'responsible_id':owner['id'],'role':'owner'}).status_code,201)
+        result=self.call('GET','/patients?search='+prefix+'&per_page=1&sort_column=name&sort_direction=desc').json()['data']
+        self.assertEqual(result['total'],2);self.assertEqual(result['data'][0]['guid'],cat['guid'])
+        page2=self.call('GET','/patients?search='+prefix+'&per_page=1&page=2&sort_column=name&sort_direction=desc').json()['data']
+        self.assertEqual(page2['data'][0]['guid'],dog['guid'])
+        for query,expected in [('species_id='+self.dog,dog),('responsible_status=pending',cat),('responsible_status=linked',dog),('filter_name=Beta',cat),('filter_responsible_names=Owner',dog)]:
+            result=self.call('GET','/patients?search='+prefix+'&'+query).json()['data']
+            self.assertEqual(result['total'],1);self.assertEqual(result['data'][0]['guid'],expected['guid'])
+        result=self.call('GET','/veterinary/responsibles?paginated=true&search='+prefix.lower()+'@example.invalid&kind=person&is_active=true').json()['data']
+        self.assertEqual(result['total'],1);self.assertEqual(result['data'][0]['id'],owner['id'])
+        self.assertIsInstance(self.call('GET','/veterinary/responsibles?search='+prefix).json()['data'],list)
+        self.assertEqual(self.call('GET','/patients?page=invalid').status_code,400)
+
     def test_06_saved_permissions_are_required(self):
         key=str(uuid.uuid4());username='vet-readonly-'+key;password=uuid.uuid4().hex
         with self.db.cursor() as q:
