@@ -66,7 +66,7 @@ def get_institutional_info(location_id=None):
 
         if location_id:
             query = """
-                SELECT guid, name, mail, address, phone, logo_path, COALESCE(require_signature_password, TRUE) as require_signature_password
+                SELECT guid, name, mail, address, phone, logo_path
                 FROM nextris.tblocation
                 WHERE guid = %s
             """
@@ -75,7 +75,7 @@ def get_institutional_info(location_id=None):
             from flask_jwt_extended import get_jwt_identity
             user_id = normalize_user_id(get_jwt_identity())
             query = """
-                SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path, COALESCE(l.require_signature_password, TRUE) as require_signature_password
+                SELECT l.guid, l.name, l.mail, l.address, l.phone, l.logo_path
                 FROM nextris.tblocation l
                 INNER JOIN nextris.rel_user_location rul ON l.guid = rul.location_id
                 WHERE rul.user_id = %s
@@ -85,6 +85,10 @@ def get_institutional_info(location_id=None):
             cursor.execute(query, (user_id,))
 
         result = cursor.fetchone()
+        if not result:
+            # Instalación sin sedes: la cabecera usa los datos de la institución, igual que el informe.
+            cursor.execute("SELECT NULL, name, email, address, phone, NULL FROM nextris.app_config WHERE id = 1")
+            result = cursor.fetchone()
 
         cursor.close()
         connection.close()
