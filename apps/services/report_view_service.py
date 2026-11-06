@@ -55,7 +55,7 @@ def resolve_report_view(exam_id, *, connection=None):
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute('''
                 SELECT e.guid, e.isreported, e.status, e.workflow_state, e.localacc,
-                       e.createdon, e.reportdate, e.clinicalquestion, e.history,
+                       e.createdon, e.reportdate, e.clinicalquestion, e.history, e.requestingphysician_name,
                        dp.name, dp.surname, dp.patientid, dp.nationalcode,
                        st.description AS study_type, m.externalcode AS modality,
                        r.study_reason, r.content, r.conclusion,
@@ -113,7 +113,8 @@ def resolve_report_view(exam_id, *, connection=None):
             patient=dict(name=' '.join(filter(None, [row['surname'], row['name']])),
                 identifier=row['patientid'], national_code=row['nationalcode']),
             study=dict(description=row['study_type'], accession_number=row['localacc'],
-                date=row['createdon'].isoformat() if row['createdon'] else None),
+                date=row['createdon'].isoformat() if row['createdon'] else None,
+                referring=row['requestingphysician_name']),
             institution=dict(name=row['institution_name'], address=row['address'], phone=row['phone'],
                 email=row['mail'], logo=inline_image(row['logo_path'] or os.getenv('NEXTRIS_INSTITUTION_LOGO'))), signatures=signatures)
         from apps.services.veterinary import mode as patient_mode, report_context

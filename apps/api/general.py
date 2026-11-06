@@ -3,7 +3,7 @@
 API General - Endpoints REST generales del sistema
 """
 
-from flask import jsonify, request, render_template_string, Response, redirect, current_app
+from flask import jsonify, request, render_template_string, Response, redirect, current_app, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import psycopg2
 import requests
@@ -1700,6 +1700,27 @@ def open_public_case_viewer(short_code):
         'share_token': short_code,
     })
     return redirect(f'{_get_viewer_base_url()}/viewer?{viewer_params}', code=302)
+
+
+@api_blueprint.route('/s/<short_code>/report.pdf', methods=['GET'])
+def get_public_case_report_pdf(short_code):
+    """PDF del informe compartido, limitado al estudio del enlace."""
+    from io import BytesIO
+    from apps.services.patient_report_document import resolve_case_report_view
+    from apps.services.report_pdf_service import render_report_pdf
+    from apps.services.report_view_service import ReportViewUnavailable
+
+    scope = _get_public_case_scope(short_code)
+    if not scope:
+        return jsonify({'success': False, 'message': 'Enlace inválido o expirado'}), 404
+    try:
+        view = resolve_case_report_view(scope['study_iuid'])
+        pdf = render_report_pdf(view['report'].get('id_informe') or short_code, view=view)
+    except ReportViewUnavailable as error:
+        return jsonify({'success': False, 'message': str(error), 'code': error.code}), error.status
+    response = send_file(BytesIO(pdf.content), mimetype='application/pdf', download_name=pdf.filename)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @api_blueprint.route('/s/<short_code>/report', methods=['GET'])

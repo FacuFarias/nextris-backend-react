@@ -23,6 +23,12 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     import base64
 
     view = view or resolve_report_view(exam_id)
+    safe_id = ''.join(c for c in str(exam_id) if c.isalnum() or c in '-_')
+    from apps.services.report_letterhead_pdf import letterhead_path, render as render_letterhead
+    background = letterhead_path()
+    if background:
+        accession = ''.join(c for c in str(view['report'].get('accession_number') or '') if c.isalnum() or c in '-_')
+        return RenderedReportPdf(render_letterhead(view, background, plain_report_text), filename or f'informe_{accession or safe_id}.pdf')
     report, document = view['report'], view['document']
     styles = getSampleStyleSheet()
     output = BytesIO()
@@ -68,5 +74,4 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     if footer:
         story += [Spacer(1, 8*mm), paragraph(footer)]
     pdf.build(story)
-    safe_id = ''.join(c for c in str(exam_id) if c.isalnum() or c in '-_')
     return RenderedReportPdf(output.getvalue(), filename or f'informe_{safe_id}.pdf')
