@@ -180,7 +180,7 @@ def update_app_config(data):
     for key in ('hl7_enable_orm', 'hl7_enable_report_sending', 'use_tls'):
         if key in data and not isinstance(data[key], bool):
             raise ValueError(f'{key} debe ser booleano')
-    if 'smtp_port' in data and (isinstance(data['smtp_port'], bool) or not isinstance(data['smtp_port'], int) or not 1 <= data['smtp_port'] <= 65535):
+    if 'smtp_port' in data and data['smtp_port'] is not None and (isinstance(data['smtp_port'], bool) or not isinstance(data['smtp_port'], int) or not 1 <= data['smtp_port'] <= 65535):
         raise ValueError('El puerto SMTP debe estar entre 1 y 65535')
     db_config = get_db_config()
     connection = psycopg2.connect(**db_config)

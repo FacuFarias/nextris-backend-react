@@ -150,7 +150,7 @@ class GeneralEditionTests(unittest.TestCase):
         response = self.client.put('/api/app-config',headers=self.staff_headers,json={'hl7_enable_orm':'invalid'})
         self.assertEqual(response.status_code,400,response.get_json())
         response = self.client.put('/api/app-config',headers=self.staff_headers,json={
-            'name':'Synthetic Institution','hl7_enable_orm':True,'hl7_enable_report_sending':True,
+            'name':'Synthetic Institution','smtp_port':None,'hl7_enable_orm':True,'hl7_enable_report_sending':True,
             'hl7_bearer_token_orm':'synthetic-machine-token','smtp_password':'synthetic-smtp-password'})
         self.assertEqual(response.status_code,200,response.get_json())
         public = self.client.get('/api/app-config').get_json()['data']
