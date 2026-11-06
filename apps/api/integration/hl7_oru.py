@@ -4,6 +4,7 @@ Integración HL7 ORU - Envío de reportes firmados como mensajes ORU^R01
 Se ejecuta como hook post-firma en los endpoints de firma de reportes.
 """
 
+import os
 import psycopg2
 from apps.home.services import HL7Service
 
@@ -34,14 +35,14 @@ def send_report_hl7(exam_id):
         try:
             cursor.execute("""
                 SELECT
-                    l.facility_id,
+                    '1'::text AS facility_id,
                     f.name AS facility_name,
                     l.name AS location_name,
                     f.hl7_enable_report_sending
                 FROM nextris.tbexamination e
                 LEFT JOIN nextris.isequipment eq ON e.idequipment = eq.guid
                 LEFT JOIN nextris.tblocation l ON COALESCE(e.location_id, eq.location_id) = l.guid
-                LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+                LEFT JOIN nextris.app_config f ON f.id = 1
                 WHERE e.guid = %s
             """, (exam_id,))
 
@@ -67,11 +68,11 @@ def send_report_hl7(exam_id):
                     e.studyinstanceuid,
                     st.description AS study_description,
                     COALESCE(u_ref.username, '') AS referring_physician,
-                    rep.findings,
-                    rep.impressions,
+                    COALESCE(NULLIF(rep.content, ''), rep.findings),
+                    COALESCE(NULLIF(rep.study_reason, ''), rep.impressions),
                     rep.techniques,
-                    rep.conclusions,
-                    rep.pdfpath
+                    COALESCE(NULLIF(rep.conclusion, ''), rep.conclusions),
+                    NULL::text AS pdfpath
                 FROM nextris.tbexamination e
                 LEFT JOIN nextris.datapatient p ON e.idpatient = p.guid
                 LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
@@ -126,6 +127,8 @@ def send_report_hl7(exam_id):
                 report_data=report_data,
                 facility_name=facility_name or 'Unknown',
                 location_name=location_name or 'Unknown',
+                host=os.getenv('HL7_HOST', '127.0.0.1'),
+                port=int(os.getenv('HL7_REPORT_PORT', '9193')),
             )
 
             if success:

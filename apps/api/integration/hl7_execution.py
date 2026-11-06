@@ -5,6 +5,7 @@ Envía un ORU^R01 al puerto 9195 cuando se ejecuta una imagen,
 si la facility tiene hl7_enable_report_sending activado.
 """
 
+import os
 import psycopg2
 from apps.home.services import HL7Service
 
@@ -35,14 +36,14 @@ def send_execution_hl7(exam_id):
         try:
             cursor.execute("""
                 SELECT
-                    l.facility_id,
+                    '1'::text AS facility_id,
                     f.name AS facility_name,
                     l.name AS location_name,
                     f.hl7_enable_report_sending
                 FROM nextris.tbexamination e
                 LEFT JOIN nextris.isequipment eq ON e.idequipment = eq.guid
                 LEFT JOIN nextris.tblocation l ON COALESCE(e.location_id, eq.location_id) = l.guid
-                LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+                LEFT JOIN nextris.app_config f ON f.id = 1
                 WHERE e.guid = %s
             """, (exam_id,))
 
@@ -74,7 +75,7 @@ def send_execution_hl7(exam_id):
                     e.stat,
                     e.numberofviews,
                     e.othersdetails,
-                    e.executiondate
+                    e.executedon
                 FROM nextris.tbexamination e
                 LEFT JOIN nextris.datapatient p ON e.idpatient = p.guid
                 LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
@@ -119,7 +120,7 @@ def send_execution_hl7(exam_id):
 
             print(f"[HL7_EXEC] Enviando ORU de ejecución para examen {exam_id}, facility: {facility_name}, location: {location_name}")
 
-            success = HL7Service.send_hl7_message(message, port=9195)
+            success = HL7Service.send_hl7_message(message, host=os.getenv('HL7_HOST', '127.0.0.1'), port=int(os.getenv('HL7_EXECUTION_PORT', '9195')))
 
             if success:
                 print(f"[HL7_EXEC] ORU de ejecución enviado exitosamente para examen {exam_id}")

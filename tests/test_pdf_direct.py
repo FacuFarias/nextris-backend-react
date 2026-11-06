@@ -6,7 +6,6 @@ Sin pasar por el API REST
 """
 
 import sys
-import os
 
 # Agregar el directorio raíz al path
 sys.path.insert(0, '/var/www/nextris-dev-react')
@@ -21,7 +20,7 @@ def test_direct_pdf_generation():
     # Importar la función
     print("\n[1] Importando función...")
     try:
-        from apps.home.controllers.report_controller import generate_report_pdf_with_signature
+        from apps.services.report_pdf_service import render_report_pdf
         print("  ✓ Función importada correctamente")
     except Exception as e:
         print(f"  ✗ Error al importar: {e}")
@@ -29,29 +28,34 @@ def test_direct_pdf_generation():
         traceback.print_exc()
         return False
     
-    # ID del examen de prueba
-    exam_id = "646bed76-a9ab-41f4-b9b2-deb6660df876"
-    pdf_filename = "TEST_MANUAL.pdf"
-    
+    from run import app
+    from apps.home.services.config_service import ConfigService
+    import psycopg2
+    with app.app_context():
+        conn = psycopg2.connect(**ConfigService.get_db_config())
+        cur = conn.cursor()
+        cur.execute("SELECT guid FROM nextris.tbexamination WHERE COALESCE(isreported, 0) = 1 LIMIT 1")
+        exam_id = str(cur.fetchone()[0])
+        cur.close()
+        conn.close()
     print(f"\n[2] Generando PDF para examen: {exam_id}")
-    print(f"    Nombre de archivo: {pdf_filename}")
     
     try:
-        result = generate_report_pdf_with_signature(exam_id, pdf_filename=pdf_filename)
+        with app.app_context():
+            result = render_report_pdf(exam_id)
         
         print(f"\n[3] Resultado de la función:")
-        print(f"    Valor retornado: {result}")
-        print(f"    Tipo: {type(result)}")
+        print(f"    Valor retornado: {type(result).__name__}")
+        print(f"    Tipo de contenido: {type(result.content).__name__}")
         
         if result:
-            print(f"\n[4] Verificando archivo...")
-            if os.path.exists(result):
-                size = os.path.getsize(result)
-                print(f"  ✓ Archivo existe: {result}")
-                print(f"  ✓ Tamaño: {size} bytes")
+            print(f"\n[4] Verificando bytes...")
+            if result.content.startswith(b'%PDF'):
+                print(f"  ✓ PDF válido: {result.filename}")
+                print(f"  ✓ Tamaño: {len(result.content)} bytes")
                 return True
             else:
-                print(f"  ✗ El archivo NO existe: {result}")
+                print("  ✗ Los bytes no contienen un PDF válido")
                 return False
         else:
             print("\n  ✗ La función retornó None")

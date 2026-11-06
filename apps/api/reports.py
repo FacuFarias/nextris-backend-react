@@ -5,20 +5,37 @@ Endpoints para CRUD de reportes, plantillas y generación de PDFs
 """
 
 from flask import request, jsonify, send_file
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
+from apps.api.permissions import get_user_permission_codes, require_permission
 import uuid
 import os
 import re
 import html
+import json
 from decimal import Decimal, InvalidOperation
-from apps.api.facility_plan_usage import ensure_plan_management_schema, increment_usage_counter, check_limit_before_action
+from datetime import timezone
+from apps.services.report_fields import (
+    canonical_fields_from_row,
+    fields_are_complete,
+    legacy_aliases,
+    merge_template_study_reason,
+    normalize_report_payload,
+    remove_indicative_brackets,
+)
+from apps.services.study_workflow import (
+    WORKFLOW_CANCELLED,
+    apply_cancel,
+    ensure_workflow_schema,
+)
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
 
 # Flags para ejecutar migraciones de esquema solo una vez por ciclo de vida del proceso
 _schema_report_type_ensured = False
 _schema_template_location_ensured = False
+_schema_user_default_ensured = False
+_schema_applied_template_ensured = False
 
 
 def get_db_config():
@@ -31,82 +48,123 @@ def get_db_config():
         return None
 
 
-def get_user_locations(user_id, connection):
-    """Obtener ubicaciones del usuario"""
-    cursor = connection.cursor()
-    cursor.execute(
-        "SELECT location_id FROM nextris.rel_user_location WHERE user_id = %s",
-        (user_id,)
-    )
-    locations = [row[0] for row in cursor.fetchall()]
-    cursor.close()
-    return locations
+def normalize_user_id(identity):
+    if isinstance(identity, dict):
+        return identity.get('id') or identity.get('guid') or identity.get('user_id')
+    return identity
 
 
-def resolve_facility_id_for_usage(connection, exam_facility_id, requested_facility_id, user_id):
-    """Resolve facility for plan usage counters with safe fallbacks."""
-    if exam_facility_id:
-        return str(exam_facility_id)
-
-    cursor = connection.cursor()
-    try:
-        requested = str(requested_facility_id or '').strip()
-        if requested:
-            cursor.execute(
-                "SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
-                (requested,),
-            )
-            if cursor.fetchone():
-                return requested
-
-        user_locations = get_user_locations(user_id, connection)
-        if user_locations:
-            cursor.execute(
-                """
-                SELECT facility_id
-                FROM nextris.tblocation
-                WHERE guid = ANY(%s)
-                  AND facility_id IS NOT NULL
-                LIMIT 1
-                """,
-                (user_locations,),
-            )
-            row = cursor.fetchone()
-            if row and row[0]:
-                return str(row[0])
-    finally:
-        cursor.close()
-
-    return None
+def parse_filter_values(value):
+    """Parsea un valor simple o una lista separada por comas para filtros."""
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(',') if item.strip()]
 
 
-def ensure_location_report_execution_column(connection):
-    """Ensure workflow execution requirement flag exists on locations."""
+def _serialize_utc_datetime(value):
+    """Expose UTC-naive database timestamps with an explicit UTC offset."""
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _serialize_examination_note(row):
+    """Convert a database note row to the public API shape."""
+    return {
+        'id': str(row[0]),
+        'author_id': str(row[1]) if row[1] else '',
+        'author_username': row[2] or '',
+        'author_display_name': row[3] or row[2] or '',
+        'message': row[4] or '',
+        'created_on': row[5].isoformat() if row[5] else None,
+    }
+
+
+def _resolve_examination_note_author(cursor):
+    """Resolve the authenticated author from the JWT and identity tables."""
+    identity = normalize_user_id(get_jwt_identity())
+    claims = get_jwt()
+    user_type = claims.get('user_type', 'staff')
+    username = claims.get('username', '')
+    display_name = username or str(identity or '')
+
+    if user_type == 'patient':
+        cursor.execute("""
+            SELECT up.guid, up.username, COALESCE(dp.name, ''), COALESCE(dp.surname, '')
+            FROM nextris.tbuser_patient up
+            LEFT JOIN nextris.datapatient dp ON up.datapatient_id = dp.guid
+            WHERE up.guid = %s
+        """, (identity,))
+    else:
+        cursor.execute("""
+            SELECT guid, username, COALESCE(name, ''), COALESCE(surname, '')
+            FROM nextris.tbuser
+            WHERE guid = %s
+        """, (identity,))
+
+    author = cursor.fetchone()
+    if author:
+        author_id, db_username, first_name, surname = author
+        username = db_username or username or str(identity or '')
+        display_name = ' '.join(part for part in (first_name, surname) if part).strip()
+        display_name = display_name or username
+        return str(author_id), username, display_name
+
+    return str(identity or ''), username or str(identity or ''), display_name
+
+
+def ensure_user_default_schema(connection):
+    """Garantiza la tabla de defaults personales antes de leerla en el redactor."""
+    global _schema_user_default_ensured
+    if _schema_user_default_ensured:
+        return
+
     cursor = connection.cursor()
     try:
         cursor.execute(
             """
-            ALTER TABLE nextris.tblocation
-            ADD COLUMN IF NOT EXISTS require_execution_before_reporting BOOLEAN NOT NULL DEFAULT TRUE
+            CREATE TABLE IF NOT EXISTS nextris.tbinfpredef_user_default (
+                user_id       VARCHAR(45) NOT NULL,
+                template_id   VARCHAR(45) NOT NULL,
+                study_type_id VARCHAR(45) NOT NULL,
+                created_on    TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, study_type_id)
+            )
             """
         )
         connection.commit()
+        _schema_user_default_ensured = True
     finally:
         cursor.close()
 
 
-def can_edit_or_sign_report(is_executed, requires_execution):
-    """Validate if report actions are allowed based on location workflow settings."""
-    return (not requires_execution) or bool(is_executed)
+def ensure_applied_template_schema(connection):
+    """Garantiza que el reporte pueda conservar la plantilla aplicada."""
+    global _schema_applied_template_ensured
+    if _schema_applied_template_ensured:
+        return
 
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE nextris.tbreport
+            ADD COLUMN IF NOT EXISTS applied_template_id VARCHAR(45)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tbreport_applied_template_id
+            ON nextris.tbreport (applied_template_id)
+            """
+        )
+        connection.commit()
+        _schema_applied_template_ensured = True
+    finally:
+        cursor.close()
 
-def workflow_execution_error_response():
-    """Standard workflow validation error payload."""
-    return {
-        'success': False,
-        'message': 'La ubicación requiere ejecución previa del examen antes de redactar o firmar el reporte.',
-        'code': 'WORKFLOW_EXECUTION_REQUIRED',
-    }
 
 def ensure_report_type_schema(connection):
     """Garantiza columna report_type y normaliza datos historicos. Solo corre una vez por proceso."""
@@ -133,6 +191,25 @@ def ensure_report_type_schema(connection):
                 """
                 ALTER TABLE nextris.tbinfpredef
                 ADD COLUMN report_type VARCHAR(20) NOT NULL DEFAULT 'simple'
+                """
+            )
+
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbinfpredef'
+                  AND column_name = 'isdefault'
+            )
+            """
+        )
+        if not cursor.fetchone()[0]:
+            cursor.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN isdefault SMALLINT NOT NULL DEFAULT 0
                 """
             )
 
@@ -185,25 +262,17 @@ def ensure_template_location_schema(connection):
     finally:
         cursor.close()
 
-def _is_structured_reports_enabled(cursor, facility_id):
-    """Indica si la facility tiene habilitado el modulo structured_reports."""
-    if not facility_id:
+def _is_structured_reports_enabled(cursor, facility_id=None):
+    from apps.permission_policy import DISABLED_MODULES
+    if 'structured_reports' in DISABLED_MODULES:
         return False
-
-    cursor.execute(
-        """
-        SELECT 1
-        FROM nextris.rel_facility_module rel
-        INNER JOIN nextris.ismodule mod ON mod.guid = rel.module_id
-        WHERE rel.facility_id = %s
-          AND rel.is_active = TRUE
-          AND mod.is_active = TRUE
-          AND mod.code = 'structured_reports'
-        LIMIT 1
-        """,
-        (facility_id,),
-    )
-    return bool(cursor.fetchone())
+    cursor.execute("""
+        SELECT COALESCE(am.is_active, true) AND m.is_active
+        FROM nextris.ismodule m LEFT JOIN nextris.app_modules am ON am.module_id=m.guid
+        WHERE m.code='structured_reports'
+    """)
+    row = cursor.fetchone()
+    return bool(row and row[0])
 
 def _fetch_template_content(cursor, template_id):
     """Obtiene el contenido base de una plantilla por ID."""
@@ -211,10 +280,12 @@ def _fetch_template_content(cursor, template_id):
         """
         SELECT
             ip.guid,
+            ip.study_reason,
+            ip.content,
+            ip.conclusion,
             ip.findings,
             ip.impression,
             ip.technique,
-            ip.conclusion,
             COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') AS report_type
         FROM nextris.tbinfpredef ip
         WHERE ip.guid = %s
@@ -226,17 +297,41 @@ def _fetch_template_content(cursor, template_id):
     if not row:
         return None
 
-    report_type = row[5] if row[5] in VALID_REPORT_TYPES else 'simple'
+    report_type = row[7] if row[7] in VALID_REPORT_TYPES else 'simple'
+    fields = canonical_fields_from_row(
+        row[1], row[2], row[3],
+        legacy_findings=row[4], legacy_impressions=row[5],
+        legacy_technique=row[6], legacy_conclusion=row[3],
+    )
     return {
         'template_id': str(row[0]),
-        'findings': row[1] or '',
-        'impressions': row[2] or '',
-        'techniques': row[3] or '',
-        'conclusions': row[4] or '',
+        **fields,
+        **legacy_aliases(fields),
         'report_type': report_type,
     }
 
-def _select_predefined_template_for_exam(cursor, study_type_id, location_id, structured_enabled, default_predef_id=None):
+
+def _serialize_template_candidate(row, report_type):
+    fields = canonical_fields_from_row(
+        row[1], row[2], row[3],
+        legacy_technique=row[4], legacy_findings=row[5],
+        legacy_impressions=row[6], legacy_conclusion=row[3],
+    )
+    return {
+        'template_id': str(row[0]),
+        **fields,
+        **legacy_aliases(fields),
+        'report_type': report_type,
+    }
+
+def _select_predefined_template_for_exam(
+    cursor,
+    study_type_id,
+    location_id,
+    structured_enabled,
+    default_predef_id=None,
+    user_id=None,
+):
     """Selecciona plantilla siguiendo la regla inteligente/simple por facility."""
     if not study_type_id:
         return None
@@ -247,10 +342,12 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
                 """
                 SELECT
                     ip.guid,
+                    ip.study_reason,
+                    ip.content,
+                    ip.conclusion,
+                    ip.technique,
                     ip.findings,
                     ip.impression,
-                    ip.technique,
-                    ip.conclusion,
                     'inteligente' AS report_type
                 FROM nextris.tbinfpredef ip
                 WHERE ip.studytype_id = %s
@@ -288,10 +385,12 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
                 """
                 SELECT
                     ip.guid,
+                    ip.study_reason,
+                    ip.content,
+                    ip.conclusion,
+                    ip.technique,
                     ip.findings,
                     ip.impression,
-                    ip.technique,
-                    ip.conclusion,
                     'inteligente' AS report_type
                 FROM nextris.tbinfpredef ip
                 WHERE ip.studytype_id = %s
@@ -304,25 +403,47 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
 
         intelligent = cursor.fetchone()
         if intelligent:
-            return {
-                'template_id': str(intelligent[0]),
-                'findings': intelligent[1] or '',
-                'impressions': intelligent[2] or '',
-                'techniques': intelligent[3] or '',
-                'conclusions': intelligent[4] or '',
-                'report_type': 'inteligente',
-            }
+            return _serialize_template_candidate(intelligent, 'inteligente')
 
     # Fallback simple (siempre, con o sin modulo structured_reports).
+    # El default personal tiene prioridad sobre el default del tipo de estudio.
+    if user_id:
+        cursor.execute(
+            """
+            SELECT
+                ip.guid,
+                ip.study_reason,
+                ip.content,
+                ip.conclusion,
+                ip.technique,
+                ip.findings,
+                ip.impression,
+                'simple' AS report_type
+            FROM nextris.tbinfpredef_user_default ud
+            JOIN nextris.tbinfpredef ip ON ip.guid = ud.template_id
+            WHERE ud.user_id = %s
+              AND ud.study_type_id = %s
+              AND ip.studytype_id = %s
+              AND COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
+            LIMIT 1
+            """,
+            (user_id, study_type_id, study_type_id),
+        )
+        user_default = cursor.fetchone()
+        if user_default:
+            return _serialize_template_candidate(user_default, 'simple')
+
     if default_predef_id:
         cursor.execute(
             """
             SELECT
                 ip.guid,
+                ip.study_reason,
+                ip.content,
+                ip.conclusion,
+                ip.technique,
                 ip.findings,
                 ip.impression,
-                ip.technique,
-                ip.conclusion,
                 'simple' AS report_type
             FROM nextris.tbinfpredef ip
             WHERE ip.guid = %s
@@ -334,23 +455,44 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
         )
         default_simple = cursor.fetchone()
         if default_simple:
-            return {
-                'template_id': str(default_simple[0]),
-                'findings': default_simple[1] or '',
-                'impressions': default_simple[2] or '',
-                'techniques': default_simple[3] or '',
-                'conclusions': default_simple[4] or '',
-                'report_type': 'simple',
-            }
+            return _serialize_template_candidate(default_simple, 'simple')
+
+    # Compatibilidad con instalaciones antiguas que guardaban el default
+    # únicamente en tbinfpredef.isdefault.
+    cursor.execute(
+        """
+        SELECT
+            ip.guid,
+            ip.study_reason,
+            ip.content,
+            ip.conclusion,
+            ip.technique,
+            ip.findings,
+            ip.impression,
+            'simple' AS report_type
+        FROM nextris.tbinfpredef ip
+        WHERE ip.studytype_id = %s
+          AND ip.isdefault = 1
+          AND COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
+        ORDER BY ip.tittle ASC
+        LIMIT 1
+        """,
+        (study_type_id,),
+    )
+    legacy_default = cursor.fetchone()
+    if legacy_default:
+        return _serialize_template_candidate(legacy_default, 'simple')
 
     cursor.execute(
         """
         SELECT
             ip.guid,
+            ip.study_reason,
+            ip.content,
+            ip.conclusion,
+            ip.technique,
             ip.findings,
             ip.impression,
-            ip.technique,
-            ip.conclusion,
             'simple' AS report_type
         FROM nextris.tbinfpredef ip
         WHERE ip.studytype_id = %s
@@ -362,14 +504,7 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
     )
     simple_row = cursor.fetchone()
     if simple_row:
-        return {
-            'template_id': str(simple_row[0]),
-            'findings': simple_row[1] or '',
-            'impressions': simple_row[2] or '',
-            'techniques': simple_row[3] or '',
-            'conclusions': simple_row[4] or '',
-            'report_type': 'simple',
-        }
+        return _serialize_template_candidate(simple_row, 'simple')
 
     # Fallback legacy de seguridad: usar default_predef_id aunque no sea simple.
     if default_predef_id:
@@ -383,49 +518,18 @@ def _select_predefined_template_for_exam(cursor, study_type_id, location_id, str
     return None
 
 
-PDF_OUTPUT_DIR = '/var/www/nextris-dev-react/output_pdfs'
-
-
-def _get_report_pdfpath_from_exam(exam_id):
-    """Obtiene la ruta de PDF asociada a un examen."""
-    config = get_db_config()
-    if not config:
-        return None, 'Error de configuración de base de datos', 500
-
-    connection = psycopg2.connect(**config)
-    cursor = connection.cursor()
+def _render_report_pdf_response(exam_id):
+    from io import BytesIO
+    from apps.services.report_view_service import resolve_authorized_report_view, ReportViewUnavailable
+    from apps.services.report_pdf_service import render_report_pdf
     try:
-        query = "SELECT pdfpath FROM nextris.tbreport WHERE idexamination = %s"
-        cursor.execute(query, (exam_id,))
-        result = cursor.fetchone()
-    finally:
-        cursor.close()
-        connection.close()
-
-    if not result or not result[0]:
-        return None, 'PDF no disponible', 404
-
-    return str(result[0]), None, None
-
-
-def _send_pdf_response_from_path(pdf_path):
-    """Valida y devuelve el PDF de forma consistente."""
-    normalized = os.path.normpath(str(pdf_path))
-    absolute_path = os.path.abspath(normalized)
-
-    if not os.path.exists(absolute_path):
-        return jsonify({
-            'success': False,
-            'message': 'Archivo PDF no encontrado en el sistema'
-        }), 404
-
-    if not absolute_path.lower().endswith('.pdf'):
-        return jsonify({
-            'success': False,
-            'message': 'Archivo no válido'
-        }), 400
-
-    return send_file(absolute_path, as_attachment=False, mimetype='application/pdf')
+        view = resolve_authorized_report_view(exam_id)
+        pdf = render_report_pdf(exam_id, view=view)
+        response = send_file(BytesIO(pdf.content), mimetype='application/pdf', download_name=pdf.filename)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except ReportViewUnavailable as error:
+        return jsonify(success=False, message=str(error), code=error.code), error.status
 
 
 def _normalize_placeholder_key(raw_value):
@@ -1200,17 +1304,19 @@ def _collect_placeholder_candidates(content):
 
 @api_blueprint.route('/examinations/for-reporting', methods=['GET'])
 @jwt_required()
+@require_permission('tabs.worklist.view', include_role_permissions=True)
 def get_examinations_for_reporting():
     """
     Obtiene lista de exámenes listos para reportar
-    Filtra por ubicaciones del usuario
+    No restringe por ubicación; la ubicación solo se devuelve como información.
     
     Query Parameters:
     - status (optional): Filtrar por estado (default: todos)
     - show_reported (optional): true para incluir exámenes reportados (isreported=1)
     - show_ready (optional): true para incluir exámenes listos para reportar (isreported=0)
     - assigned_to_me (optional): true para mostrar solo exámenes asignados al usuario actual
-    - modality_id (optional): GUID de la modalidad
+    - patient_id_exact (optional): Patient ID externo exacto del paciente
+    - modality_id (optional): GUID de la modalidad o GUIDs separados por coma
     - body_part_id (optional): GUID de la parte del cuerpo
     - study_group_id (optional): GUID del grupo de estudio
     - page (optional): Número de página (default: 1)
@@ -1226,6 +1332,7 @@ def get_examinations_for_reporting():
             {
                 "guid": "uuid",
                 "patient_name": "nombre completo",
+                "patient_id": "Patient ID externo",
                 "patient_dni": "dni",
                 "study_type": "descripción",
                 "admission_number": "ADM001",
@@ -1273,32 +1380,29 @@ def get_examinations_for_reporting():
         show_reported = request.args.get('show_reported', 'false').lower() == 'true'
         show_ready = request.args.get('show_ready', 'false').lower() == 'true'
         assigned_to_me = request.args.get('assigned_to_me', 'false').lower() == 'true'
-        modality_id = request.args.get('modality_id')
+        show_no_image = request.args.get('show_no_image', 'false').lower() == 'true'
+        show_without_order = request.args.get('show_without_order', 'false').lower() == 'true'
+        show_only_with_notes = request.args.get('show_only_with_notes', 'false').lower() == 'true'
+        show_cancelled = request.args.get('show_cancelled', 'false').lower() == 'true'
+        search = request.args.get('search', '').strip()
+        # Identificador externo exacto para acciones sobre "este paciente".
+        patient_id_exact = request.args.get('patient_id_exact', '').strip()
+        flag_filter = [value.strip().lower() for value in request.args.get('flag_filter', '').split(',') if value.strip()]
+        date_range = request.args.get('date_range', 'all').strip().lower()
+        date_field = request.args.get('date_field', 'admision').strip().lower()
+        sort_column = request.args.get('sort_column', '').strip().lower()
+        sort_direction = request.args.get('sort_direction', 'desc').strip().lower()
+        modality_ids = parse_filter_values(request.args.get('modality_id'))
         body_part_id = request.args.get('body_part_id')
         study_group_id = request.args.get('study_group_id')
-        facility_id = request.args.get('facility_id')
-        
-        print(f"[PARAMS] modality_id={modality_id}, body_part_id={body_part_id}, study_group_id={study_group_id}")
+        print(f"[PARAMS] modality_id={modality_ids}, body_part_id={body_part_id}, study_group_id={study_group_id}")
         
         connection = psycopg2.connect(**config)
-        ensure_location_report_execution_column(connection)
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'data': [],
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0
-                }
-            }), 200
-        
+        ensure_report_type_schema(connection)
+        ensure_user_default_schema(connection)
+        ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
-        
-        location_placeholders = ','.join(['%s'] * len(user_locations))
         
         # Query base - exámenes ejecutados
         # Lógica de filtrado por estado de reporte:
@@ -1311,17 +1415,27 @@ def get_examinations_for_reporting():
             reported_filter = ""
         elif show_reported:
             # Solo reportados
-            reported_filter = "AND e.IsReported = 1"
+            reported_filter = "AND (e.IsReported = 1 OR e.workflow_state = 'cancelled')"
         elif show_ready:
             # Solo listos (no reportados)
-            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.workflow_state, 'pending') = 'pending'"
         else:
             # Ninguno activo: no mostrar nada
             reported_filter = "AND 1=0"
         
+        # Cancelados se incluyen sólo mediante su opción explícita, independientemente
+        # de los filtros de lectura/finalización.
+        cancelled_condition = "(COALESCE(e.workflow_state, 'pending') = 'cancelled' OR LOWER(COALESCE(e.Status, '')) IN ('cancelled', 'canceled'))"
+        regular_condition = reported_filter.removeprefix('AND ').strip() or 'TRUE'
+        reported_filter = f"AND ((NOT {cancelled_condition} AND ({regular_condition}))"
+        if show_cancelled:
+            reported_filter += f" OR {cancelled_condition}"
+        reported_filter += ")"
+
         base_query = f"""
             SELECT e.Guid, 
-                   CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                   CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
+                   dp.patientid,
                    dp.nationalcode,
                    st.Description as study_type,
                    e.AdmisionNumber,
@@ -1331,11 +1445,17 @@ def get_examinations_for_reporting():
                    COALESCE(e.IsReported, 0) as is_reported,
                    COALESCE(e.IsExecuted, 0) as is_executed,
                    COALESCE(e.isimage, 0) as is_image,
-                   e.studyinstanceuid,
+                   COALESCE(nextris.available_study_for_exam(e.guid), e.studyinstanceuid) AS studyinstanceuid,
+                   nextris.available_image_count_for_exam(e.guid) as num_instances,
                    eq.Description as equipment,
                    loc.name as location,
                    e.assignto,
-                   rep.pdfpath,
+                   COALESCE(
+                       NULLIF(TRIM(CONCAT(COALESCE(ua.name, ''), ' ', COALESCE(ua.surname, ''))), ''),
+                       ua.username
+                   ) as assignto_name,
+                   CASE WHEN COALESCE(e.IsReported, 0) = 1 AND rep.Guid IS NOT NULL
+                        THEN TRUE ELSE FALSE END AS report_available,
                    st.modality_id,
                    mod.description as modality_description,
                    st.studygroup_id,
@@ -1346,26 +1466,112 @@ def get_examinations_for_reporting():
                    COALESCE(
                        NULLIF(TRIM(CONCAT(COALESCE(ub.name, ''), ' ', COALESCE(ub.surname, ''))), ''),
                        ub.username
-                   ) as blocked_by_name
-            FROM nextris.tbexamination e
+                   ) as blocked_by_name,
+                   e.reportdate,
+                   e.flags,
+                   e.tag_ids,
+                   (
+                       SELECT n.message
+                       FROM nextris.tbexaminationnote n
+                       WHERE n.examination_id = e.Guid
+                       ORDER BY n.created_on DESC, n.guid DESC
+                       LIMIT 1
+                   ) AS latest_note,
+                   COALESCE((
+                       SELECT json_agg(json_build_object(
+                           'id', recent.guid,
+                           'author_id', recent.author_id,
+                           'author_username', recent.author_username,
+                           'author_display_name', recent.author_display_name,
+                           'message', recent.message,
+                           'created_on', recent.created_on
+                       ) ORDER BY recent.created_on DESC, recent.guid DESC)
+                       FROM (
+                           SELECT n.guid, n.author_id, n.author_username,
+                                  n.author_display_name, n.message, n.created_on
+                           FROM nextris.tbexaminationnote n
+                           WHERE n.examination_id = e.Guid
+                           ORDER BY n.created_on DESC, n.guid DESC
+                           LIMIT 3
+                       ) recent
+                   ), '[]'::json) AS recent_notes,
+                    (
+                        SELECT COUNT(*)
+                        FROM nextris.tbexaminationnote n
+                        WHERE n.examination_id = e.Guid
+                    ) AS notes_count
+                    ,e."w-order" as w_order
+                    ,e.idreferringphysician
+                    ,e.idrequestingphysician
+                    ,e.clinicalquestion
+                    ,e.studytype_id
+                   ,e.requestingphysician_name
+                   ,e.othersdetails
+                   ,e.laterality_id
+                   ,resolved_template.template_id
+                   ,resolved_template.template_name
+                   ,resolved_template.template_source
+                   ,COALESCE(e.workflow_state, 'pending')
+                   ,e.workflow_state_at
+                   ,e.workflow_state_source
+                   ,e.workflow_state_user_id
+                   ,cr.code AS cancellation_reason_code
+                   ,cr.description AS cancellation_reason
+                   ,ps.study_date AS study_date
+                   ,ps.study_time AS study_time
+                   ,ps.created_time AS arrival_time
+             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
             LEFT JOIN nextris.tbreport rep ON e.Guid = rep.IdExamination
+            LEFT JOIN public.study ps ON ps.study_iuid = e.studyinstanceuid
             LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             LEFT JOIN nextris.isstudytypegroup sg ON st.studygroup_id = sg.guid
             LEFT JOIN nextris.isanatomicalpart bp ON st.bodypart_id = bp.guid
             LEFT JOIN nextris.tbuser ub ON e.blockby::text = ub.guid
-            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
-            AND (
-                COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
-                OR e.IsExecuted = 1
-            )
+            LEFT JOIN nextris.tbuser ua ON e.assignto::text = ua.guid
+            LEFT JOIN nextris.cancellation_reasons cr
+                ON cr.guid = e.cancellation_reason_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    ip.guid AS template_id,
+                    ip.tittle AS template_name,
+                    CASE
+                        WHEN rep.applied_template_id = ip.guid THEN 'Aplicada'
+                        ELSE 'Por defecto'
+                    END AS template_source
+                FROM nextris.tbinfpredef ip
+                WHERE ip.studytype_id = e.studytype_id
+                  AND (
+                      ip.guid = rep.applied_template_id
+                      OR COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
+                  )
+                ORDER BY
+                    CASE
+                        WHEN rep.applied_template_id = ip.guid THEN 0
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM nextris.tbinfpredef_user_default user_default
+                            WHERE user_default.user_id = %s
+                              AND user_default.study_type_id = e.studytype_id
+                              AND user_default.template_id = ip.guid
+                        ) THEN 1
+                        WHEN ip.guid = st.default_predef_id THEN 2
+                        WHEN ip.isdefault = 1 THEN 3
+                        ELSE 4
+                    END,
+                    ip.tittle ASC
+                LIMIT 1
+            ) resolved_template ON TRUE
+             WHERE 1 = 1
             {reported_filter}
         """
         
-        params = list(user_locations)
+        # La instalación utiliza una única ubicación. La ubicación se
+        # conserva para mostrarla, pero no restringe los resultados.
+        params = [user_id]
         
         # Aplicar filtro de estado si se proporciona
         if status_filter:
@@ -1376,12 +1582,75 @@ def get_examinations_for_reporting():
         if assigned_to_me:
             base_query += " AND e.assignto = %s"
             params.append(user_id)
+
+        # Búsqueda libre por paciente, Patient ID, DNI, admisión, accession o estudio.
+        if search:
+            search_pattern = f"%{search.lower()}%"
+            base_query += """
+                AND (
+                    LOWER(COALESCE(CONCAT(dp.Name, ' ', dp.Surname), '')) LIKE %s
+                    OR LOWER(COALESCE(dp.patientid, '')) LIKE %s
+                    OR LOWER(COALESCE(dp.nationalcode, '')) LIKE %s
+                    OR LOWER(COALESCE(e.LocalAcc, '')) LIKE %s
+                    OR LOWER(COALESCE(e.AdmisionNumber, '')) LIKE %s
+                    OR LOWER(COALESCE(st.Description, '')) LIKE %s
+                )
+            """
+            params.extend([search_pattern] * 6)
+
+        if patient_id_exact:
+            base_query += " AND LOWER(BTRIM(COALESCE(dp.patientid, ''))) = LOWER(%s)"
+            params.append(patient_id_exact)
+
+        # Por defecto solo se muestran estudios que tienen imágenes. La opción
+        # "Incluir sin imágenes" habilita explícitamente ambos grupos.
+        if not show_no_image:
+            base_query += " AND COALESCE(e.isimage, 0) = 1"
+
+        # Por defecto se muestran estudios con orden CP. Al activar
+        # "Incluir sin orden CP" se incluyen ambos grupos.
+        if not show_without_order:
+            base_query += ' AND COALESCE(e."w-order", 0) = 1'
+
+        if show_only_with_notes:
+            base_query += """
+                AND EXISTS (
+                    SELECT 1
+                    FROM nextris.tbexaminationnote n
+                    WHERE n.examination_id = e.Guid
+                )
+            """
+
+        if flag_filter:
+            valid_flags = {'red', 'green', 'blue', 'yellow'}
+            flag_filter = [flag for flag in flag_filter if flag in valid_flags]
+            if flag_filter:
+                base_query += " AND COALESCE(e.flags, ARRAY[]::text[]) && %s::text[]"
+                params.append(flag_filter)
+
+        # Los rangos representan el período reciente: desde ahora menos el
+        # intervalo hasta el momento actual. Esto evita que "1d" incluya todo
+        # el histórico anterior a hace un día.
+        date_intervals = {
+            '1d': '1 day',
+            '3d': '3 days',
+            '7d': '7 days',
+            '14d': '14 days',
+            '1m': '1 month',
+            '2m': '2 months',
+            '3m': '3 months',
+            '1y': '1 year',
+        }
+        if date_range in date_intervals:
+            date_column = 'e.reportdate' if date_field == 'reporte' else 'e.createdon'
+            base_query += f" AND {date_column} BETWEEN CURRENT_TIMESTAMP - INTERVAL '{date_intervals[date_range]}' AND CURRENT_TIMESTAMP"
         
         # Aplicar filtro de modalidad por GUID
-        if modality_id:
-            print(f"[FILTER] Aplicando filtro modality_id: {modality_id}")
-            base_query += " AND st.modality_id = %s"
-            params.append(modality_id)
+        if modality_ids:
+            print(f"[FILTER] Aplicando filtro modality_id: {modality_ids}")
+            modality_placeholders = ','.join(['%s'] * len(modality_ids))
+            base_query += f" AND st.modality_id IN ({modality_placeholders})"
+            params.extend(modality_ids)
         
         # Aplicar filtro de parte del cuerpo por GUID
         if body_part_id:
@@ -1395,18 +1664,62 @@ def get_examinations_for_reporting():
             base_query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
 
-        if facility_id:
-            base_query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
+        # Filtrar en SQL antes de contar y paginar, usando únicamente expresiones permitidas.
+        try:
+            column_filters = json.loads(request.args.get('column_filters', '{}'))
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'message': 'Filtros de columna inválidos'}), 400
+        if not isinstance(column_filters, dict) or any(not isinstance(value, str) for value in column_filters.values()):
+            return jsonify({'success': False, 'message': 'Filtros de columna inválidos'}), 400
+        filter_columns = {
+            'patient_name': "CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), ''))",
+            'patient_id': 'dp.patientid',
+            'patient_dni': 'dp.nationalcode',
+            'assignto_name': "COALESCE(NULLIF(TRIM(CONCAT(COALESCE(ua.name, ''), ' ', COALESCE(ua.surname, ''))), ''), ua.username, 'Sin asignar')",
+            'study_type': 'st.Description',
+            'template_name': 'resolved_template.template_name',
+            'status': 'e.Status',
+            'workflow_state': "COALESCE(e.workflow_state, 'pending')",
+            'admission_number': 'e.AdmisionNumber',
+            'accession_number': 'e.LocalAcc',
+            'created_on': 'e.CreatedOn',
+            'report_date': 'e.reportdate',
+            'num_instances': 'nextris.available_image_count_for_exam(e.guid)',
+        }
+        for key, value in column_filters.items():
+            expression = filter_columns.get(key)
+            if expression and value.strip():
+                base_query += f" AND STRPOS(LOWER(COALESCE(CAST({expression} AS TEXT), '')), LOWER(%s)) > 0"
+                params.append(value.strip())
+
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
         cursor.execute(count_query, params)
         total = cursor.fetchone()[0]
         
         # Query con paginación
-        query = base_query + """
-            ORDER BY e.CreatedOn DESC
+        sort_columns = {
+            'patient_name': 'patient_name',
+            'patient_id': 'dp.patientid',
+            'patient_dni': 'dp.nationalcode',
+            'assignto_name': 'assignto_name',
+            'study_type': 'st.Description',
+            'status': 'e.Status',
+            'admission_number': 'e.AdmisionNumber',
+            'accession_number': 'e.LocalAcc',
+            'created_on': 'e.CreatedOn',
+            'is_reported': 'e.IsReported',
+            'num_instances': 'num_instances',
+            'report_date': 'e.reportdate',
+            'template_name': 'resolved_template.template_name',
+            'study_date': 'ps.study_date',
+            'arrival_time': 'ps.created_time',
+            'workflow_state': "COALESCE(e.workflow_state, 'pending')",
+        }
+        sort_expression = sort_columns.get(sort_column, 'e.CreatedOn')
+        direction = 'ASC' if sort_direction == 'asc' else 'DESC'
+        query = base_query + f"""
+            ORDER BY {sort_expression} {direction}, e.CreatedOn DESC
             LIMIT %s OFFSET %s
         """
         
@@ -1416,31 +1729,63 @@ def get_examinations_for_reporting():
         results = []
         for row in cursor.fetchall():
             results.append({
-                'guid': str(row[0]),
-                'patient_name': row[1] or '',
-                'patient_dni': row[2] or '',
-                'study_type': row[3] or '',
-                'admission_number': row[4] or '',
-                'accession_number': row[5] or '',
-                'created_on': row[6].isoformat() if row[6] else None,
-                'status': row[7] or '',
-                'is_reported': bool(row[8]),
-                'is_executed': bool(row[9]),
-                'is_image': bool(row[10]),
-                'study_instance_uid': row[11] or '',
-                'equipment': row[12] or '',
-                'location': row[13] or '',
-                'assigned_to': str(row[14]) if row[14] else None,
-                'pdf_path': row[15] or None,
-                'modality_id': str(row[16]) if row[16] else None,
-                'modality_description': row[17] or '',
-                'study_group_id': str(row[18]) if row[18] else None,
-                'study_group_description': row[19] or '',
-                'bodypart_id': str(row[20]) if row[20] else None,
-                'bodypart_description': row[21] or '',
-                'blocked_by': str(row[22]) if row[22] else None,
-                'blocked_by_name': row[23] or ''
-            })
+            'guid': str(row[0]),
+            'patient_name': row[1] or '',
+                'patient_id': row[2] or '',
+                'patient_dni': row[3] or '',
+                'study_type': row[4] or '',
+                'admission_number': row[5] or '',
+                'accession_number': row[6] or '',
+                'created_on': _serialize_utc_datetime(row[7]),
+                'status': row[8] or '',
+                'is_reported': bool(row[9]),
+                'is_executed': bool(row[10]),
+                'is_image': bool(row[11]),
+                'study_instance_uid': row[12] or '',
+                'num_instances': row[13] or 0,
+                'equipment': row[14] or '',
+                'location': row[15] or '',
+                'assigned_to': str(row[16]) if row[16] else None,
+                'assignto_name': row[17] or '',
+                'report_available': bool(row[18]),
+                'modality_id': str(row[19]) if row[19] else None,
+                'modality_description': row[20] or '',
+                'study_group_id': str(row[21]) if row[21] else None,
+                'study_group_description': row[22] or '',
+                'bodypart_id': str(row[23]) if row[23] else None,
+                'bodypart_description': row[24] or '',
+                'blocked_by': str(row[25]) if row[25] else None,
+                'blocked_by_name': row[26] or '',
+                'report_date': row[27].isoformat() if row[27] else None,
+                'flags': row[28] or [],
+                'tag_ids': [str(value) for value in (row[29] or [])],
+                'general_notes': row[30] or None,
+                 'recent_notes': row[31] or [],
+                 'notes_count': int(row[32] or 0),
+                 'w_order': int(row[33] or 0),
+                 'referring_physician_id': str(row[34]) if row[34] else None,
+                 'requesting_physician_id': str(row[35]) if row[35] else None,
+                 'clinical_question': row[36] or '',
+                 'study_type_id': str(row[37]) if row[37] else None,
+                 'requesting_physician_name': row[38] or '',
+                 'other_details': row[39] or '',
+                 'laterality_id': row[40] if row[40] else None,
+                 'applied_template_id': str(row[41]) if row[41] else None,
+                 'template_name': row[42] or '',
+                 'template_source': row[43] or '',
+                 'workflow_state': row[44] or 'pending',
+                 # Los timestamps de workflow se almacenan como UTC naive.
+                 # Exponerlos con offset evita que el navegador los interprete
+                 # accidentalmente como hora local.
+                 'workflow_state_at': _serialize_utc_datetime(row[45]),
+                 'workflow_state_source': row[46] or None,
+                 'workflow_state_user_id': str(row[47]) if row[47] else None,
+                'cancellation_reason_code': row[48] or None,
+                'cancellation_reason': row[49] or None,
+                'study_date': row[50] or None,
+                'study_time': row[51] or None,
+                'arrival_time': row[52].isoformat() if row[52] else None,
+             })
         
         cursor.close()
         connection.close()
@@ -1462,8 +1807,321 @@ def get_examinations_for_reporting():
         }), 500
 
 
+@api_blueprint.route('/examinations/<exam_id>/confirm-study', methods=['POST'])
+@jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
+def confirm_study(exam_id):
+    """Confirma los datos clínicos mínimos de un estudio sin crear una orden."""
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        studytype_id = str(data.get('studytype_id') or '').strip()
+        referring_physician_id = data.get('referring_physician_id') or None
+        requesting_physician_id = data.get('requesting_physician_id') or None
+        requesting_physician_name = str(data.get('requesting_physician_name') or '').strip() or None
+        clinical_question = data.get('clinical_question')
+        other_details = data.get('other_details')
+
+        if not studytype_id:
+            return jsonify({
+                'success': False,
+                'message': 'El tipo de estudio es obligatorio'
+            }), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT COALESCE(workflow_state, 'pending'),
+                   COALESCE(isreported, 0)
+            FROM nextris.tbexamination WHERE guid = %s
+            """,
+            (exam_id,),
+        )
+        exam_state = cursor.fetchone()
+        if not exam_state:
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+        if exam_state[0] == 'cancelled':
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede modificarse', 'code': 'STUDY_CANCELLED'}), 409
+        if exam_state[1]:
+            return jsonify({'success': False, 'message': 'El estudio ya fue reportado y no puede modificarse', 'code': 'STUDY_ALREADY_REPORTED'}), 409
+
+        cursor.execute(
+            "SELECT 1 FROM nextris.isstudytype WHERE guid = %s",
+            (studytype_id,),
+        )
+        if not cursor.fetchone():
+            return jsonify({
+                'success': False,
+                'message': 'El tipo de estudio seleccionado no existe'
+            }), 400
+
+        if referring_physician_id:
+            cursor.execute(
+                "SELECT 1 FROM nextris.tbuser WHERE guid = %s",
+                (referring_physician_id,),
+            )
+            if not cursor.fetchone():
+                return jsonify({
+                    'success': False,
+                    'message': 'El médico referente seleccionado no existe'
+                }), 400
+
+        if requesting_physician_id:
+            cursor.execute(
+                "SELECT 1 FROM nextris.isrequestingphysician WHERE guid = %s",
+                (requesting_physician_id,),
+            )
+            if not cursor.fetchone():
+                return jsonify({
+                    'success': False,
+                    'message': 'El médico solicitante seleccionado no existe'
+                }), 400
+
+        cursor.execute(
+            """
+            UPDATE nextris.tbexamination
+            SET isexecuted = 1,
+                studytype_id = %s,
+                idreferringphysician = %s,
+                idrequestingphysician = %s,
+                requestingphysician_name = %s,
+                clinicalquestion = %s,
+                othersdetails = %s
+            WHERE guid = %s
+            """,
+            (
+                studytype_id,
+                referring_physician_id,
+                requesting_physician_id,
+                requesting_physician_name,
+                clinical_question,
+                other_details,
+                exam_id,
+            ),
+        )
+        connection.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Estudio confirmado correctamente'
+        }), 200
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def _workflow_action_error(error, action=None):
+    if isinstance(error, LookupError):
+        return jsonify({'success': False, 'message': str(error)}), 404
+    if isinstance(error, (ValueError, TypeError)):
+        return jsonify({'success': False, 'message': str(error)}), 400
+    if isinstance(error, PermissionError):
+        if action == WORKFLOW_CANCELLED and 'reportado' not in str(error).lower():
+            code = 'STUDY_CANCELLED'
+        else:
+            code = 'STUDY_ALREADY_REPORTED'
+        return jsonify({'success': False, 'message': str(error), 'code': code}), 409
+    return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+
+
+@api_blueprint.route('/config/cancellation-reasons', methods=['GET'])
+@jwt_required()
+def get_cancellation_reasons():
+    connection = None
+    cursor = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        include_inactive = request.args.get('include_inactive', '').lower() in ('1', 'true', 'yes')
+        query = """
+            SELECT guid, code, description, sort_order, active
+            FROM nextris.cancellation_reasons
+        """
+        if not include_inactive:
+            query += " WHERE active = TRUE"
+        query += " ORDER BY sort_order, description"
+        cursor.execute(query)
+        return jsonify({'success': True, 'data': [
+            {'guid': str(row[0]), 'code': row[1], 'description': row[2],
+             'sort_order': row[3], 'active': bool(row[4])}
+            for row in cursor.fetchall()
+        ]}), 200
+    except Exception as error:
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/config/cancellation-reasons', methods=['POST'])
+@jwt_required()
+def create_cancellation_reason():
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        code = str(data.get('code') or '').strip().upper()
+        description = str(data.get('description') or '').strip()
+        if not code or not description:
+            return jsonify({'success': False, 'message': 'code y description son obligatorios'}), 400
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        active_value = data.get('active', True)
+        if isinstance(active_value, str):
+            active_value = active_value.strip().lower() in ('1', 'true', 'yes', 'on')
+        cursor.execute(
+            """
+            INSERT INTO nextris.cancellation_reasons
+                (guid, code, description, sort_order, active)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING guid, code, description, sort_order, active
+            """,
+            (str(uuid.uuid4()), code, description, int(data.get('sort_order') or 0),
+             bool(active_value)),
+        )
+        row = cursor.fetchone()
+        connection.commit()
+        return jsonify({'success': True, 'data': {
+            'guid': str(row[0]), 'code': row[1], 'description': row[2],
+            'sort_order': row[3], 'active': bool(row[4]),
+        }}), 201
+    except psycopg2.errors.UniqueViolation:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'El código ya existe'}), 409
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/config/cancellation-reasons/<reason_id>', methods=['PATCH', 'PUT'])
+@jwt_required()
+def update_cancellation_reason(reason_id):
+    connection = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        allowed = {'code', 'description', 'sort_order', 'active'}
+        updates = [key for key in allowed if key in data]
+        if not updates:
+            return jsonify({'success': False, 'message': 'No hay campos para actualizar'}), 400
+        connection = psycopg2.connect(**get_db_config())
+        ensure_workflow_schema(connection)
+        cursor = connection.cursor()
+        assignments = []
+        values = []
+        for key in updates:
+            column = key
+            value = data[key]
+            if key == 'code':
+                value = str(value or '').strip().upper()
+            elif key == 'description':
+                value = str(value or '').strip()
+            elif key == 'sort_order':
+                value = int(value)
+            elif key == 'active':
+                if isinstance(value, str):
+                    value = value.strip().lower() in ('1', 'true', 'yes', 'on')
+                else:
+                    value = bool(value)
+            assignments.append(f'{column} = %s')
+            values.append(value)
+        assignments.append('updated_at = NOW()')
+        values.append(reason_id)
+        cursor.execute(
+            f"UPDATE nextris.cancellation_reasons SET {', '.join(assignments)} WHERE guid = %s RETURNING guid, code, description, sort_order, active",
+            values,
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Motivo no encontrado'}), 404
+        connection.commit()
+        return jsonify({'success': True, 'data': {
+            'guid': str(row[0]), 'code': row[1], 'description': row[2],
+            'sort_order': row[3], 'active': bool(row[4]),
+        }}), 200
+    except (ValueError, TypeError):
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'sort_order inválido'}), 400
+    except psycopg2.errors.UniqueViolation:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': 'El código ya existe'}), 409
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return jsonify({'success': False, 'message': f'Error: {error}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def _execute_local_workflow_action(exam_id, action):
+    connection = None
+    try:
+        connection = psycopg2.connect(**get_db_config())
+        data = request.get_json(silent=True) or {}
+        result = apply_cancel(connection, exam_id, data.get('reason_code'), data.get('detail'),
+                              source='nextris_ui', user_id=normalize_user_id(get_jwt_identity()))
+        connection.commit()
+        return jsonify(success=True, message='Estudio cancelado correctamente', data=result), 200
+    except Exception as error:
+        if connection:
+            connection.rollback()
+        return _workflow_action_error(error, action)
+    finally:
+        if connection:
+            connection.close()
+
+
+@api_blueprint.route('/examinations/<exam_id>/cancel', methods=['POST'])
+@jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
+def cancel_examination_from_worklist(exam_id):
+    return _execute_local_workflow_action(exam_id, WORKFLOW_CANCELLED)
+
+
+
+
 @api_blueprint.route('/examinations/<exam_id>/report', methods=['GET'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def get_examination_report(exam_id):
     """
     Obtiene los datos del reporte de un examen específico
@@ -1485,7 +2143,7 @@ def get_examination_report(exam_id):
             "techniques": "texto técnicas",
             "conclusions": "texto conclusiones",
             "was_saved": true,
-            "pdf_path": "ruta/al/archivo.pdf",
+            "report_available": true,
             "updated_on": "datetime",
             "history": "historia clínica",
             "clinical_question": "pregunta clínica",
@@ -1507,6 +2165,8 @@ def get_examination_report(exam_id):
             }), 500
 
         connection = psycopg2.connect(**config)
+        ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
 
         cursor.execute(
@@ -1522,12 +2182,24 @@ def get_examination_report(exam_id):
                    e.LocalAcc as accession_number,
                    e.StudyInstanceUID,
                    e.location_id,
-                   loc.facility_id,
-                   st.default_predef_id
+                   '1'::text AS facility_id,
+                   st.default_predef_id,
+                   st.description as study_type_description,
+                   mod.description as modality_description,
+                   COALESCE(e.IsReported, 0) AS is_reported,
+                   e.CreatedOn AS exam_date,
+                   dp.patientid AS patient_identifier,
+                   dp.nationalcode AS national_code,
+                   st.modality_id,
+                   COALESCE(e.workflow_state, 'pending') AS workflow_state,
+                   e.workflow_state_at,
+                   e.workflow_state_source,
+                   e.cancellation_detail
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
-            LEFT JOIN nextris.tblocation loc ON e.location_id = loc.guid
-            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
+           LEFT JOIN nextris.tblocation loc ON e.location_id = loc.guid
+           LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
+           LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             WHERE e.Guid = %s
             """,
             (exam_id,),
@@ -1542,6 +2214,7 @@ def get_examination_report(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
 
+        current_user_id = normalize_user_id(get_jwt_identity())
         exam_guid = exam[0]
         patient_id = exam[1]
         admission_number = exam[2]
@@ -1561,12 +2234,24 @@ def get_examination_report(exam_id):
         location_id = exam[16]
         facility_id = exam[17]
         default_predef_id = exam[18]
+        study_type_description = exam[19]
+        modality_description = exam[20]
+        is_reported = bool(exam[21])
+        exam_date = exam[22]
+        patient_identifier = exam[23]
+        national_code = exam[24]
+        modality_id = exam[25]
+        workflow_state = exam[26] or 'pending'
+        workflow_state_at = exam[27]
+        workflow_state_source = exam[28]
+        workflow_detail = exam[29]
 
         cursor.execute(
             """
             SELECT r.Guid, r.idexamination, r.idpatient, r.admnumber,
+                   r.study_reason, r.content, r.conclusion,
                    r.findings, r.impressions, r.techniques, r.conclusions,
-                   r.wassaved, r.pdfpath, r.date
+                   r.wassaved, r.date, r.applied_template_id
             FROM nextris.tbreport r
             WHERE r.IdExamination = %s
             """,
@@ -1574,28 +2259,38 @@ def get_examination_report(exam_id):
         )
         report = cursor.fetchone()
 
-        findings = ''
-        impressions = ''
-        techniques = ''
-        conclusions = ''
+        examination_reason = clinical_question or history or ''
+        study_reason = examination_reason
+        content = ''
+        conclusion = ''
         was_saved = False
         report_guid = None
-        pdf_path = None
+        report_available = False
         updated_on = None
         selected_template_id = None
         selected_template_report_type = None
+        selected_template_name = None
+        ensure_user_default_schema(connection)
 
         if report:
-            was_saved = bool(report[8])
+            was_saved = bool(report[11])
             report_guid = report[0]
-            pdf_path = report[9]
-            updated_on = report[10]
+            report_available = is_reported
+            updated_on = report[12]
+            selected_template_id = str(report[13]) if report[13] else None
 
             if was_saved:
-                findings = report[4] or ''
-                impressions = report[5] or ''
-                techniques = report[6] or ''
-                conclusions = report[7] or ''
+                fields = canonical_fields_from_row(
+                    report[4], report[5], report[6],
+                    legacy_findings=report[7],
+                    legacy_impressions=report[8],
+                    legacy_technique=report[9],
+                    legacy_conclusion=report[10],
+                    reason_fallback=clinical_question or history,
+                )
+                study_reason = fields['study_reason']
+                content = fields['content']
+                conclusion = fields['conclusion']
             else:
                 ensure_report_type_schema(connection)
                 ensure_template_location_schema(connection)
@@ -1606,15 +2301,18 @@ def get_examination_report(exam_id):
                     location_id,
                     structured_enabled,
                     default_predef_id,
+                    current_user_id,
                 )
                 if effective_template:
-                    findings = effective_template['findings']
-                    impressions = effective_template['impressions']
-                    techniques = effective_template['techniques']
-                    conclusions = effective_template['conclusions']
+                    study_reason = merge_template_study_reason(
+                        effective_template['study_reason'],
+                        examination_reason,
+                    )
+                    content = effective_template['content']
+                    conclusion = effective_template['conclusion']
                     selected_template_id = effective_template['template_id']
                     selected_template_report_type = effective_template['report_type']
-        elif study_type_id:
+        elif study_type_id and workflow_state == 'pending':
             ensure_report_type_schema(connection)
             ensure_template_location_schema(connection)
             structured_enabled = _is_structured_reports_enabled(cursor, facility_id)
@@ -1624,23 +2322,33 @@ def get_examination_report(exam_id):
                 location_id,
                 structured_enabled,
                 default_predef_id,
+                current_user_id,
             )
             if effective_template:
-                findings = effective_template['findings']
-                impressions = effective_template['impressions']
-                techniques = effective_template['techniques']
-                conclusions = effective_template['conclusions']
+                study_reason = merge_template_study_reason(
+                    effective_template['study_reason'],
+                    examination_reason,
+                )
+                content = effective_template['content']
+                conclusion = effective_template['conclusion']
                 selected_template_id = effective_template['template_id']
                 selected_template_report_type = effective_template['report_type']
 
         structured_enabled = _is_structured_reports_enabled(cursor, facility_id)
 
+        if selected_template_id:
+            cursor.execute(
+                "SELECT tittle FROM nextris.tbinfpredef WHERE guid = %s LIMIT 1",
+                (selected_template_id,),
+            )
+            selected_template_row = cursor.fetchone()
+            selected_template_name = selected_template_row[0] if selected_template_row else None
+
         debug_requested = request.args.get('debug_sr', '').strip().lower() in ('1', 'true', 'yes')
         debug_before = {
-            'findings': _collect_placeholder_candidates(findings),
-            'impressions': _collect_placeholder_candidates(impressions),
-            'techniques': _collect_placeholder_candidates(techniques),
-            'conclusions': _collect_placeholder_candidates(conclusions),
+            'study_reason': _collect_placeholder_candidates(study_reason),
+            'content': _collect_placeholder_candidates(content),
+            'conclusion': _collect_placeholder_candidates(conclusion),
         } if debug_requested else None
 
         sr_variable_values = _get_sr_variable_values(cursor, study_instance_uid)
@@ -1652,16 +2360,14 @@ def get_examination_report(exam_id):
             sr_variable_values,
             study_instance_uid,
         )
-        findings = _replace_sr_placeholders(findings, sr_variable_values)
-        impressions = _replace_sr_placeholders(impressions, sr_variable_values)
-        techniques = _replace_sr_placeholders(techniques, sr_variable_values)
-        conclusions = _replace_sr_placeholders(conclusions, sr_variable_values)
+        study_reason = _replace_sr_placeholders(study_reason, sr_variable_values)
+        content = _replace_sr_placeholders(content, sr_variable_values)
+        conclusion = _replace_sr_placeholders(conclusion, sr_variable_values)
 
         debug_after = {
-            'findings': _collect_placeholder_candidates(findings),
-            'impressions': _collect_placeholder_candidates(impressions),
-            'techniques': _collect_placeholder_candidates(techniques),
-            'conclusions': _collect_placeholder_candidates(conclusions),
+            'study_reason': _collect_placeholder_candidates(study_reason),
+            'content': _collect_placeholder_candidates(content),
+            'conclusion': _collect_placeholder_candidates(conclusion),
         } if debug_requested else None
 
         cursor.close()
@@ -1675,23 +2381,38 @@ def get_examination_report(exam_id):
                 'patient_id': str(patient_id) if patient_id else None,
                 'admission_number': admission_number or '',
                 'study_type_id': str(study_type_id) if study_type_id else None,
+                'study_type_description': study_type_description or '',
+                'modality_id': str(modality_id) if modality_id else None,
+                'modality_description': modality_description or '',
                 'location_id': str(location_id) if location_id else None,
                 'facility_id': str(facility_id) if facility_id else None,
                 'structured_reports_enabled': bool(structured_enabled),
                 'applied_template_id': selected_template_id,
+                'applied_template_name': selected_template_name,
                 'applied_template_report_type': selected_template_report_type,
                 'accession_number': accession_number or '',
+                'exam_date': exam_date.isoformat() if exam_date else None,
+                'patientid': patient_identifier or '',
+                'national_code': national_code or '',
                 'patient_name': patient_name or '',
                 'first_name': first_name or '',
                 'last_name': last_name or '',
                 'age': age,
                 'sex': sex or '',
-                'findings': findings,
-                'impressions': impressions,
-                'techniques': techniques,
-                'conclusions': conclusions,
+                'study_reason': study_reason,
+                'content': content,
+                'conclusion': conclusion,
+                **legacy_aliases({
+                    'content': content,
+                    'conclusion': conclusion,
+                }),
                 'was_saved': was_saved,
-                'pdf_path': pdf_path or None,
+                'report_available': report_available,
+                'workflow_state': workflow_state,
+                'workflow_state_at': _serialize_utc_datetime(workflow_state_at),
+                'workflow_state_source': workflow_state_source,
+                'workflow_detail': workflow_detail or '',
+                'report_read_only': workflow_state == 'cancelled',
                 'updated_on': updated_on.isoformat() if updated_on else None,
                 'history': history or '',
                 'clinical_question': clinical_question or '',
@@ -1728,6 +2449,7 @@ def get_examination_report(exam_id):
 
 @api_blueprint.route('/examinations/<exam_id>/report', methods=['PUT', 'PATCH'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def update_examination_report(exam_id):
     """
     Actualiza o crea el reporte de un examen
@@ -1756,10 +2478,15 @@ def update_examination_report(exam_id):
     try:
         data = request.get_json() or {}
         
-        findings = data.get('findings')
-        impressions = data.get('impressions')
-        techniques = data.get('techniques')
-        conclusions = data.get('conclusions')
+        normalized = normalize_report_payload(data)
+        if 'study_reason' not in normalized and 'history' in data:
+            normalized['study_reason'] = data.get('history') or ''
+        study_reason = normalized.get('study_reason')
+        content = normalized.get('content')
+        conclusion = normalized.get('conclusion')
+        applied_template_id = data.get('template_id', data.get('applied_template_id'))
+        if applied_template_id is not None:
+            applied_template_id = str(applied_template_id).strip() or None
         mark_as_reported = data.get('mark_as_reported', False)
         
         config = get_db_config()
@@ -1770,22 +2497,16 @@ def update_examination_report(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_applied_template_schema(connection)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
-        ensure_location_report_execution_column(connection)
-        ensure_plan_management_schema(connection)
-        
         # Verificar que el examen existe
         cursor.execute("""
             SELECT e.IdPatient,
                    e.AdmisionNumber,
-                   COALESCE(e.IsExecuted, 0) AS is_executed,
-                     COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
-                     COALESCE(e.IsReported, 0) AS is_reported,
-                     l.facility_id
+                   COALESCE(e.IsReported, 0) AS is_reported,
+                   COALESCE(e.workflow_state, 'pending') AS workflow_state
             FROM nextris.tbexamination e
-            LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-              LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-                  LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -1800,15 +2521,22 @@ def update_examination_report(exam_id):
         
         patient_id = exam[0]
         admission_number = exam[1]
-        is_executed = bool(exam[2])
-        require_execution_before_reporting = bool(exam[3])
-        already_reported = bool(exam[4])
-        facility_id = exam[5]
-
-        if not can_edit_or_sign_report(is_executed, require_execution_before_reporting):
+        already_reported = bool(exam[2])
+        workflow_state = exam[3] or 'pending'
+        if already_reported or mark_as_reported:
+            cleaned = remove_indicative_brackets(normalized)
+            normalized = {key: cleaned[key] for key in normalized}
+            study_reason = normalized.get('study_reason')
+            content = normalized.get('content')
+            conclusion = normalized.get('conclusion')
+        if workflow_state == 'cancelled':
             cursor.close()
             connection.close()
-            return jsonify(workflow_execution_error_response()), 400
+            return jsonify({
+                'success': False,
+                'message': 'El estudio está cancelado y no puede redactarse',
+                'code': 'STUDY_CANCELLED',
+            }), 409
         
         # Verificar si ya existe un reporte
         cursor.execute("""
@@ -1825,18 +2553,18 @@ def update_examination_report(exam_id):
             updates = []
             params = []
             
-            if findings is not None:
-                updates.append("Findings = %s")
-                params.append(findings)
-            if impressions is not None:
-                updates.append("Impressions = %s")
-                params.append(impressions)
-            if techniques is not None:
-                updates.append("Techniques = %s")
-                params.append(techniques)
-            if conclusions is not None:
-                updates.append("Conclusions = %s")
-                params.append(conclusions)
+            if study_reason is not None:
+                updates.append("study_reason = %s")
+                params.append(study_reason)
+            if content is not None:
+                updates.append("content = %s")
+                params.append(content)
+            if conclusion is not None:
+                updates.append("conclusion = %s")
+                params.append(conclusion)
+            if applied_template_id is not None:
+                updates.append("applied_template_id = %s")
+                params.append(applied_template_id)
             
             updates.append("WasSaved = true")
             updates.append("Date = NOW()")
@@ -1856,38 +2584,28 @@ def update_examination_report(exam_id):
             cursor.execute("""
                 INSERT INTO nextris.tbreport (
                     Guid, IdExamination, IdPatient, admnumber,
-                    Findings, Impressions, Techniques, Conclusions,
+                    study_reason, content, conclusion,
+                    applied_template_id,
                     WasSaved, CreatedOn, Date
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, true, NOW(), NOW()
                 )
             """, (
                 report_id, exam_id, patient_id, admission_number,
-                findings or '', impressions or '', techniques or '', conclusions or ''
+                study_reason if study_reason is not None else '',
+                content if content is not None else '',
+                conclusion if conclusion is not None else '',
+                applied_template_id,
             ))
         
         # Marcar examen como reportado si se solicita
         if mark_as_reported:
-            if not already_reported and facility_id:
-                is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'read')
-                if not is_allowed:
-                    cursor.close()
-                    connection.close()
-                    return jsonify({
-                        'success': False,
-                        'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
-                        'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
-                        'data': limit_payload,
-                    }), 403
-
             cursor.execute("""
                 UPDATE nextris.tbexamination
                 SET IsReported = 1
                 WHERE Guid = %s
             """, (exam_id,))
 
-            if not already_reported and facility_id:
-                increment_usage_counter(connection, facility_id, 'read', 1)
         
         connection.commit()
         cursor.close()
@@ -1951,14 +2669,25 @@ def get_examination_notes(exam_id):
         
         result = cursor.fetchone()
         
-        cursor.close()
-        connection.close()
-        
         if not result:
+            cursor.close()
+            connection.close()
             return jsonify({
                 'success': False,
                 'message': 'Examen no encontrado'
             }), 404
+
+        cursor.execute("""
+            SELECT guid, author_id, author_username, author_display_name,
+                   message, created_on
+            FROM nextris.tbexaminationnote
+            WHERE examination_id = %s
+            ORDER BY created_on DESC, guid DESC
+        """, (exam_id,))
+        notes = [_serialize_examination_note(row) for row in cursor.fetchall()]
+
+        cursor.close()
+        connection.close()
         
         return jsonify({
             'success': True,
@@ -1968,10 +2697,122 @@ def get_examination_notes(exam_id):
                 'others_details': result[2] or '',
                 'number_of_views': result[3] or '',
                 'stat': result[4] or '',
-                'laterality': result[5] or ''
+                'laterality': result[5] or '',
+                'notes': notes
             }
         }), 200
         
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/notes', methods=['POST'])
+@jwt_required()
+def create_examination_note(exam_id):
+    """Append an immutable note to an examination."""
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message')
+        if not isinstance(message, str) or not message.strip():
+            return jsonify({
+                'success': False,
+                'message': 'El mensaje de la nota no puede estar vacío'
+            }), 400
+
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT Guid FROM nextris.tbexamination
+            WHERE Guid = %s
+        """, (exam_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Examen no encontrado'
+            }), 404
+
+        author_id, author_username, author_display_name = _resolve_examination_note_author(cursor)
+        clean_message = message.strip()
+        cursor.execute("""
+            INSERT INTO nextris.tbexaminationnote (
+                guid, examination_id, author_id, author_username,
+                author_display_name, message
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING guid, author_id, author_username, author_display_name,
+                      message, created_on
+        """, (
+            str(uuid.uuid4()), exam_id, author_id, author_username,
+            author_display_name, clean_message
+        ))
+        note = _serialize_examination_note(cursor.fetchone())
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Nota guardada',
+            'data': note
+        }), 201
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+@api_blueprint.route('/examinations/<exam_id>/notes/<note_id>', methods=['DELETE'])
+@jwt_required()
+@require_permission('reports.notes.delete', include_role_permissions=True)
+def delete_examination_note(exam_id, note_id):
+    """Delete one examination note when the authenticated user has permission."""
+    try:
+        config = get_db_config()
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': 'Error de configuración de base de datos'
+            }), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+        cursor.execute("""
+            DELETE FROM nextris.tbexaminationnote
+            WHERE guid = %s AND examination_id = %s
+            RETURNING guid
+        """, (note_id, exam_id))
+        deleted = cursor.fetchone()
+
+        if not deleted:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Nota no encontrada'
+            }), 404
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return jsonify({
+            'success': True,
+            'message': 'Nota eliminada'
+        }), 200
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -2126,6 +2967,11 @@ def get_report_template(template_id):
         connection.close()
         
         if result:
+            fields = canonical_fields_from_row(
+                result[2], result[3], result[4],
+                legacy_findings=result[5], legacy_impressions=result[6],
+                legacy_technique=result[7], legacy_conclusion=result[4],
+            )
             return jsonify({
                 'success': True,
                 'data': {
@@ -2289,7 +3135,8 @@ def get_predefined_report(predef_id):
         cursor = connection.cursor()
         
         query = """
-            SELECT guid, tittle, findings, impression, technique, conclusion, studytype_id
+            SELECT guid, tittle, study_reason, content, conclusion,
+                   findings, impression, technique, studytype_id
             FROM nextris.tbinfpredef 
             WHERE guid=%s
         """
@@ -2306,11 +3153,9 @@ def get_predefined_report(predef_id):
                 'data': {
                     'guid': result[0],
                     'title': result[1] or '',
-                    'findings': result[2] or '',
-                    'impression': result[3] or '',
-                    'technique': result[4] or '',
-                    'conclusion': result[5] or '',
-                    'study_type_id': result[6]
+                    **fields,
+                    **legacy_aliases(fields),
+                    'study_type_id': result[8],
                 }
             }), 200
         else:
@@ -2370,10 +3215,10 @@ def create_predefined_report():
                 'message': 'title y study_type_id son campos requeridos'
             }), 400
         
-        findings = data.get('findings', '')
-        technique = data.get('technique', '')
-        impression = data.get('impression', '')
-        conclusion = data.get('conclusion', '')
+        normalized = normalize_report_payload(data)
+        study_reason = normalized.get('study_reason', '')
+        content = normalized.get('content', '')
+        conclusion = normalized.get('conclusion', '')
         is_default = data.get('is_default', False)
         
         config = get_db_config()
@@ -2397,12 +3242,12 @@ def create_predefined_report():
         # Insertar el nuevo predefinido
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (guid, tittle, study_reason, content, conclusion, studytype_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """
         
         cursor.execute(insert_query, (
-            new_guid, title, findings, impression, technique, conclusion, study_type_id
+            new_guid, title, study_reason, content, conclusion, study_type_id
         ))
         
         connection.commit()
@@ -2433,14 +3278,8 @@ def update_predefined_report(predef_id):
     Path:
     - predef_id: GUID del reporte predefinido
     
-    Body JSON (todos opcionales):
-    {
-        "title": "string",
-        "findings": "string",
-        "technique": "string",
-        "impression": "string",
-        "conclusion": "string"
-    }
+    Body JSON (todos opcionales): ``title``, ``study_reason``, ``content`` y
+    ``conclusion``. Los nombres legacy siguen siendo aceptados.
     
     Returns:
     {
@@ -2477,25 +3316,19 @@ def update_predefined_report(predef_id):
                 'message': 'Reporte predefinido no encontrado'
             }), 404
         
-        # Construir query dinámicamente
+        # Construir query dinámicamente. Sólo se escriben los campos canónicos;
+        # las columnas antiguas se conservan como fallback de solo lectura.
         updates = []
         params = []
         
         if 'title' in data:
             updates.append("tittle = %s")
             params.append(data['title'])
-        if 'findings' in data:
-            updates.append("findings = %s")
-            params.append(data['findings'])
-        if 'technique' in data:
-            updates.append("technique = %s")
-            params.append(data['technique'])
-        if 'impression' in data:
-            updates.append("impression = %s")
-            params.append(data['impression'])
-        if 'conclusion' in data:
-            updates.append("conclusion = %s")
-            params.append(data['conclusion'])
+        normalized = normalize_report_payload(data)
+        for key in ('study_reason', 'content', 'conclusion'):
+            if key in normalized:
+                updates.append(f"{key} = %s")
+                params.append(normalized[key])
         
         if not updates:
             cursor.close()
@@ -2528,6 +3361,7 @@ def update_predefined_report(predef_id):
 
 @api_blueprint.route('/reports/<exam_id>', methods=['PATCH', 'PUT'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def save_report(exam_id):
     """
     Guarda o actualiza los datos de un reporte médico
@@ -2558,16 +3392,16 @@ def save_report(exam_id):
                 'message': 'Se requiere un cuerpo JSON'
             }), 400
         
-        findings = data.get('findings')
-        techniques = data.get('techniques')
-        impressions = data.get('impressions')
-        conclusions = data.get('conclusions')
-        
-        if findings is None or techniques is None or impressions is None or conclusions is None:
+        normalized = normalize_report_payload(data)
+        if any(key not in normalized for key in ('study_reason', 'content', 'conclusion')):
             return jsonify({
                 'success': False,
-                'message': 'findings, techniques, impressions y conclusions son campos requeridos'
+                'message': 'study_reason, content y conclusion son campos requeridos'
             }), 400
+
+        study_reason = normalized['study_reason']
+        content = normalized['content']
+        conclusion = normalized['conclusion']
         
         config = get_db_config()
         if not config:
@@ -2577,15 +3411,38 @@ def save_report(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT COALESCE(workflow_state, 'pending'), COALESCE(isreported, 0)
+            FROM nextris.tbexamination WHERE guid = %s
+            """,
+            (exam_id,),
+        )
+        workflow = cursor.fetchone()
+        if not workflow:
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+        if workflow[0] == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
+
+        if workflow[1]:
+            normalized = remove_indicative_brackets(normalized)
+            study_reason = normalized['study_reason']
+            content = normalized['content']
+            conclusion = normalized['conclusion']
         
         query = """
             UPDATE nextris.tbreport 
-            SET findings=%s, techniques=%s, impressions=%s, conclusions=%s, wassaved=true 
+            SET study_reason=%s, content=%s, conclusion=%s, wassaved=true
             WHERE idexamination=%s
         """
         
-        cursor.execute(query, (findings, techniques, impressions, conclusions, exam_id))
+        cursor.execute(query, (study_reason, content, conclusion, exam_id))
         connection.commit()
         
         cursor.close()
@@ -2605,6 +3462,7 @@ def save_report(exam_id):
 
 @api_blueprint.route('/reports/next-exam', methods=['POST'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def get_next_exam():
     """
     Obtiene el siguiente examen disponible basado en los filtros configurados
@@ -2615,7 +3473,7 @@ def get_next_exam():
         "show_ready": true/false,
         "show_reported": true/false,
         "assigned_to_me": true/false,
-        "modality_id": "uuid" (optional),
+        "modality_id": "uuid o uuids separados por coma" (optional),
         "body_part_id": "uuid" (optional),
         "study_group_id": "uuid" (optional)
     }
@@ -2636,13 +3494,28 @@ def get_next_exam():
         data = request.get_json(force=True, silent=True) or {}
         
         current_exam_id = data.get('current_exam_id')
-        show_ready = data.get('show_ready', True)
-        show_reported = data.get('show_reported', False)
-        assigned_to_me = data.get('assigned_to_me', False)
-        modality_id = data.get('modality_id')
+        if not current_exam_id:
+            return jsonify({
+                'success': False,
+                'message': 'Se requiere current_exam_id para obtener el siguiente examen'
+            }), 400
+
+        def as_bool(value, default=False):
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in {'true', '1', 'on', 'yes'}
+
+        show_ready = as_bool(data.get('show_ready'), True)
+        show_reported = as_bool(data.get('show_reported'), False)
+        assigned_to_me = as_bool(data.get('assigned_to_me'), False)
+        show_no_image = as_bool(data.get('show_no_image'), False)
+        show_without_order = as_bool(data.get('show_without_order'), False)
+        sort_direction = 'desc' if str(data.get('sort_direction', 'asc')).lower() == 'desc' else 'asc'
+        modality_ids = parse_filter_values(data.get('modality_id'))
         body_part_id = data.get('body_part_id')
         study_group_id = data.get('study_group_id')
-        facility_id = data.get('facility_id')
         
         config = get_db_config()
         if not config:
@@ -2652,41 +3525,37 @@ def get_next_exam():
             }), 500
         
         connection = psycopg2.connect(**config)
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': None
-            }), 200
-        
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         
         # Obtener la fecha de creación del examen actual para buscar el siguiente
         cursor.execute("""
-            SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+            SELECT CreatedOn,
+                   COALESCE(workflow_state, 'pending'),
+                   COALESCE(isreported, 0)
+            FROM nextris.tbexamination WHERE Guid = %s
         """, (current_exam_id,))
         current_exam = cursor.fetchone()
         current_created_on = current_exam[0] if current_exam else None
-        
-        location_placeholders = ','.join(['%s'] * len(user_locations))
+        if current_exam and current_exam[1] == 'cancelled':
+            cursor.close(); connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede seleccionar el siguiente examen', 'code': 'STUDY_CANCELLED'}), 409
         
         # Aplicar el mismo filtro de reportado que en la lista
         if show_reported and show_ready:
             reported_filter = ""
         elif show_reported:
-            reported_filter = "AND e.IsReported = 1"
+            reported_filter = "AND (e.IsReported = 1 OR e.workflow_state = 'cancelled')"
         elif show_ready:
-            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
+            reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.workflow_state, 'pending') = 'pending'"
         else:
             reported_filter = "AND 1=0"
         
         # Query para obtener el siguiente examen
         query = f"""
             SELECT e.Guid, 
-                   e.studyinstanceuid,
-                   CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                   COALESCE(nextris.available_study_for_exam(e.guid), e.studyinstanceuid) AS studyinstanceuid,
+                   CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
                    dp.nationalcode,
                    st.Description as study_type,
                    e.LocalAcc,
@@ -2696,17 +3565,18 @@ def get_next_exam():
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
             LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
             LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-            WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
-            AND (
-                COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
-                OR e.IsExecuted = 1
-            )
-            AND e.Guid != %s
+            WHERE e.Guid != %s
+            AND (e.blockby IS NULL OR e.blockby::text = %s)
             {reported_filter}
         """
         
-        params = list(user_locations)
-        params.append(current_exam_id)
+        params = [current_exam_id, str(user_id)]
+
+        if not show_no_image:
+            query += ' AND COALESCE(e.isimage, 0) = 1'
+
+        if not show_without_order:
+            query += ' AND COALESCE(e."w-order", 0) = 1'
         
         # Aplicar filtro de asignación
         if assigned_to_me:
@@ -2714,9 +3584,10 @@ def get_next_exam():
             params.append(user_id)
         
         # Aplicar filtros adicionales
-        if modality_id:
-            query += " AND st.modality_id = %s"
-            params.append(modality_id)
+        if modality_ids:
+            modality_placeholders = ','.join(['%s'] * len(modality_ids))
+            query += f" AND st.modality_id IN ({modality_placeholders})"
+            params.extend(modality_ids)
         
         if body_part_id:
             query += " AND st.bodypart_id = %s"
@@ -2726,16 +3597,17 @@ def get_next_exam():
             query += " AND st.studygroup_id = %s"
             params.append(study_group_id)
 
-        if facility_id:
-            query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
-        # Ordenar y limitar a 1
+        # Seguir la misma dirección que la lista de Redacción. La lista por
+        # defecto es ascendente; en ese caso el siguiente es posterior al
+        # examen actual. Con descendente se busca el anterior.
         if current_created_on:
-            query += " AND e.CreatedOn <= %s"
-            params.append(current_created_on)
+            if sort_direction == 'desc':
+                query += " AND (e.CreatedOn < %s OR (e.CreatedOn = %s AND e.Guid::text < %s))"
+            else:
+                query += " AND (e.CreatedOn > %s OR (e.CreatedOn = %s AND e.Guid::text > %s))"
+            params.extend([current_created_on, current_created_on, str(current_exam_id)])
         
-        query += " ORDER BY e.CreatedOn DESC LIMIT 1"
+        query += f" ORDER BY e.CreatedOn {sort_direction.upper()}, e.Guid {sort_direction.upper()} LIMIT 1"
         
         cursor.execute(query, params)
         next_exam = cursor.fetchone()
@@ -2774,6 +3646,7 @@ def get_next_exam():
 
 @api_blueprint.route('/reports/<exam_id>/sign', methods=['POST'])
 @jwt_required()
+@require_permission('reports.sign', include_role_permissions=True)
 def sign_report(exam_id):
     """
     Firma un reporte médico (marca como reportado) y opcionalmente devuelve el siguiente examen
@@ -2788,7 +3661,7 @@ def sign_report(exam_id):
         "show_ready": true/false (opcional, para obtener siguiente),
         "show_reported": true/false (opcional, para obtener siguiente),
         "assigned_to_me": true/false (opcional, para obtener siguiente),
-        "modality_id": "uuid" (opcional, para filtrar siguiente),
+        "modality_id": "uuid o uuids separados por coma" (opcional, para filtrar siguiente),
         "body_part_id": "uuid" (opcional, para filtrar siguiente),
         "study_group_id": "uuid" (opcional, para filtrar siguiente)
     }
@@ -2806,7 +3679,6 @@ def sign_report(exam_id):
     """
     try:
         data = request.get_json(force=True, silent=True) or {}
-        requested_facility_id = data.get('facility_id')
         
         # Obtener ID del médico que firma
         reporter_physician_id = data.get('reporter_physician_id')
@@ -2822,6 +3694,7 @@ def sign_report(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
 
         # Verificar que el médico tenga firma habilitada antes de permitir firmar
@@ -2861,8 +3734,6 @@ def sign_report(exam_id):
                 'error_code': 'SIGNATURE_DATA_INCOMPLETE'
             }), 400
 
-        ensure_location_report_execution_column(connection)
-        ensure_plan_management_schema(connection)
         
         # Obtener datos del examen para el nombre del PDF
         cursor.execute("""
@@ -2871,15 +3742,10 @@ def sign_report(exam_id):
                    p.Name,
                    p.Surname,
                    e.IdPatient,
-                   COALESCE(e.IsExecuted, 0) AS is_executed,
-                   COALESCE(loc.require_execution_before_reporting, TRUE) AS require_execution_before_reporting,
                    COALESCE(e.IsReported, 0) AS is_reported,
-                   l.facility_id
+                   COALESCE(e.workflow_state, 'pending') AS workflow_state
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient p ON e.IdPatient = p.Guid
-            LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-            LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-            LEFT JOIN nextris.tblocation l ON l.guid = COALESCE(e.location_id, eq.location_id)
             WHERE e.Guid = %s
         """, (exam_id,))
         
@@ -2892,37 +3758,52 @@ def sign_report(exam_id):
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
         
-        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_executed, require_execution_before_reporting, is_reported, facility_id = exam_data
-        already_reported = bool(is_reported)
-        usage_facility_id = resolve_facility_id_for_usage(
-            connection,
-            facility_id,
-            requested_facility_id,
-            reporter_physician_id,
-        )
-
-        if not can_edit_or_sign_report(bool(is_executed), bool(require_execution_before_reporting)):
+        accession_number, patient_id, patient_name, patient_surname, patient_guid, is_reported, workflow_state = exam_data
+        if workflow_state == 'cancelled':
             cursor.close()
             connection.close()
-            return jsonify(workflow_execution_error_response()), 400
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
+        already_reported = bool(is_reported)
         
-        # Crear nombre del PDF: <acc_number>_<patient_id>_<patient_name>.pdf
-        # Limpiar caracteres especiales del nombre y manejar valores None
-        clean_surname = (patient_surname or '').strip().replace(' ', '_')
-        clean_name = (patient_name or '').strip().replace(' ', '_')
-        full_name = f"{clean_surname}_{clean_name}".strip('_')
-        full_name = ''.join(c for c in full_name if c.isalnum() or c == '_') or 'SinNombre'
-        
-        acc_num = accession_number or 'SinACC'
-        pat_id = patient_id or 'SinID'
-        
-        pdf_filename = f"{acc_num}_{pat_id}_{full_name}.pdf"
-        pdf_relative_path = f"output_pdfs/{pdf_filename}"
-        
-        # Verificar si existe el reporte, si no, crearlo. Solo guardamos iduser aquí
-        # para que la generación de PDF pueda leer la firma del médico.
+        # Verificar si existe el reporte, si no, crearlo.
         cursor.execute("SELECT guid FROM nextris.tbreport WHERE idexamination = %s", (exam_id,))
         report_exists = cursor.fetchone()
+
+        if report_exists:
+            cursor.execute(
+                """
+                SELECT r.study_reason, r.content, r.conclusion,
+                       r.findings, r.impressions, r.techniques, r.conclusions,
+                       e.clinicalquestion, e.history
+                FROM nextris.tbreport r
+                JOIN nextris.tbexamination e ON e.guid = r.idexamination
+                WHERE r.idexamination = %s
+                LIMIT 1
+                """,
+                (exam_id,),
+            )
+            report_fields_row = cursor.fetchone()
+            report_fields = canonical_fields_from_row(
+                report_fields_row[0], report_fields_row[1], report_fields_row[2],
+                legacy_findings=report_fields_row[3],
+                legacy_impressions=report_fields_row[4],
+                legacy_technique=report_fields_row[5],
+                legacy_conclusion=report_fields_row[6],
+                reason_fallback=(report_fields_row[7] or report_fields_row[8]) if report_fields_row else '',
+            ) if report_fields_row else {'study_reason': '', 'content': '', 'conclusion': ''}
+        else:
+            report_fields = {'study_reason': '', 'content': '', 'conclusion': ''}
+
+        report_fields = remove_indicative_brackets(report_fields)
+        if not fields_are_complete(report_fields):
+            connection.rollback()
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'success': False,
+                'message': 'Razón del estudio, contenido y conclusión son obligatorios para firmar el informe',
+                'code': 'REPORT_FIELDS_REQUIRED',
+            }), 400
 
         if not report_exists:
             report_guid = str(uuid.uuid4())
@@ -2937,61 +3818,20 @@ def sign_report(exam_id):
         else:
             cursor.execute("""
                 UPDATE nextris.tbreport
-                SET iduser = %s
+                SET iduser = %s, study_reason = %s, content = %s, conclusion = %s
                 WHERE idexamination = %s
-            """, (reporter_physician_id, exam_id))
+            """, (reporter_physician_id, report_fields['study_reason'],
+                  report_fields['content'], report_fields['conclusion'], exam_id))
 
-        # Commit intermedio: el generador de PDF usa otra conexión y necesita ver estos cambios.
-        connection.commit()
-        
-        # Generar PDF del reporte
-        print(f"[SIGN] Generando PDF para exam_id: {exam_id}, filename: {pdf_filename}")
-        try:
-            from apps.home.controllers.report_controller import generate_report_pdf_with_signature
-            pdf_path = generate_report_pdf_with_signature(exam_id, pdf_filename=pdf_filename)
-            
-            print(f"[SIGN] PDF generado, ruta retornada: {pdf_path}")
-            print(f"[SIGN] ¿Existe el archivo?: {os.path.exists(pdf_path) if pdf_path else 'pdf_path es None'}")
-            
-            if not pdf_path or not os.path.exists(pdf_path):
-                cursor.close()
-                connection.close()
-                return jsonify({
-                    'success': False,
-                    'message': f'Error: El PDF no se pudo generar. Ruta: {pdf_path}'
-                }), 500
-                
-        except Exception as pdf_error:
-            # FALLAR si no se puede generar el PDF
-            import traceback
-            traceback.print_exc()
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': f'Error al generar PDF: {str(pdf_error)}'
-            }), 500
-
-        # Solo después de generar el PDF correctamente, marcar examen reportado
-        # y persistir la ruta de PDF.
+        # El médico firmante queda también como referente del estudio.
+        # El PDF se renderiza bajo demanda.
         query = """
             UPDATE nextris.tbexamination
-            SET IsReported=1, assignto=%s, reportdate=CURRENT_TIMESTAMP
+            SET IsReported=1, assignto=%s, idreferringphysician=%s,
+                reportdate=CURRENT_TIMESTAMP
             WHERE Guid=%s
         """
-        if not already_reported and usage_facility_id:
-            is_allowed, limit_payload = check_limit_before_action(connection, usage_facility_id, 'read')
-            if not is_allowed:
-                cursor.close()
-                connection.close()
-                return jsonify({
-                    'success': False,
-                    'message': limit_payload.get('message', 'Límite del plan alcanzado para redacción'),
-                    'error_code': limit_payload.get('reason', 'READ_LIMIT_REACHED'),
-                    'data': limit_payload,
-                }), 403
-
-        cursor.execute(query, (reporter_physician_id, exam_id))
+        cursor.execute(query, (reporter_physician_id, reporter_physician_id, exam_id))
 
         if cursor.rowcount == 0:
             connection.rollback()
@@ -3001,15 +3841,6 @@ def sign_report(exam_id):
                 'success': False,
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
-
-        cursor.execute("""
-            UPDATE nextris.tbreport
-            SET pdfpath = %s, iduser = %s
-            WHERE idexamination = %s
-        """, (pdf_relative_path, reporter_physician_id, exam_id))
-
-        if not already_reported and usage_facility_id:
-            increment_usage_counter(connection, usage_facility_id, 'read', 1)
 
         connection.commit()
 
@@ -3036,104 +3867,80 @@ def sign_report(exam_id):
                 show_ready = data.get('show_ready', True)
                 show_reported = data.get('show_reported', False)
                 assigned_to_me = data.get('assigned_to_me', False)
-                modality_id = data.get('modality_id')
+                modality_ids = parse_filter_values(data.get('modality_id'))
                 body_part_id = data.get('body_part_id')
                 study_group_id = data.get('study_group_id')
-                
-                user_locations = get_user_locations(reporter_physician_id, connection)
-                
-                if user_locations:
-                    cursor = connection.cursor()
-                    
-                    # Obtener la fecha de creación del examen actual
-                    cursor.execute("""
-                        SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
-                    """, (exam_id,))
-                    current_exam = cursor.fetchone()
-                    current_created_on = current_exam[0] if current_exam else None
-                    
-                    location_placeholders = ','.join(['%s'] * len(user_locations))
-                    
-                    # Aplicar el mismo filtro de reportado que en la lista
-                    if show_reported and show_ready:
-                        reported_filter = ""
-                    elif show_reported:
-                        reported_filter = "AND e.IsReported = 1"
-                    elif show_ready:
-                        reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0)"
-                    else:
-                        reported_filter = "AND 1=0"
-                    
-                    # Query para obtener el siguiente examen
-                    query = f"""
-                        SELECT e.Guid, 
-                               e.studyinstanceuid,
-                               CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
-                               dp.nationalcode,
-                               st.Description as study_type,
-                               e.LocalAcc,
-                               COALESCE(e.IsReported, 0) as is_reported
-                        FROM nextris.tbexamination e
-                        LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
-                        LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
-                        LEFT JOIN nextris.isequipment eq ON e.IdEquipment = eq.Guid
-                        LEFT JOIN nextris.tblocation loc ON COALESCE(e.location_id, eq.location_id) = loc.guid
-                        WHERE COALESCE(e.location_id, eq.location_id) IN ({location_placeholders})
-                        AND (
-                            COALESCE(loc.require_execution_before_reporting, TRUE) = FALSE
-                            OR e.IsExecuted = 1
-                        )
-                        AND e.Guid != %s
-                        {reported_filter}
-                    """
-                    
-                    params = list(user_locations)
-                    params.append(exam_id)
-                    
-                    # Aplicar filtro de asignación
-                    if assigned_to_me:
-                        query += " AND e.assignto = %s"
-                        params.append(reporter_physician_id)
-                    
-                    # Aplicar filtros adicionales
-                    if modality_id:
-                        query += " AND st.modality_id = %s"
-                        params.append(modality_id)
-                    
-                    if body_part_id:
-                        query += " AND st.bodypart_id = %s"
-                        params.append(body_part_id)
-                    
-                    if study_group_id:
-                        query += " AND st.studygroup_id = %s"
-                        params.append(study_group_id)
 
-                    if requested_facility_id:
-                        query += " AND loc.facility_id = %s"
-                        params.append(requested_facility_id)
-                    
-                    # Ordenar y limitar a 1
-                    if current_created_on:
-                        query += " AND e.CreatedOn <= %s"
-                        params.append(current_created_on)
-                    
-                    query += " ORDER BY e.CreatedOn DESC LIMIT 1"
-                    
-                    cursor.execute(query, params)
-                    next_exam_row = cursor.fetchone()
-                    
-                    if next_exam_row:
-                        next_exam = {
-                            'guid': str(next_exam_row[0]),
-                            'study_instance_uid': next_exam_row[1] or '',
-                            'patient_name': next_exam_row[2] or '',
-                            'patient_dni': next_exam_row[3] or '',
-                            'study_type': next_exam_row[4] or '',
-                            'accession_number': next_exam_row[5] or '',
-                            'is_reported': bool(next_exam_row[6])
-                        }
-                    
-                    cursor.close()
+                # El flujo de reportes es global: la ubicación y la facility
+                # son datos informativos y no limitan el siguiente estudio.
+                cursor.execute("""
+                    SELECT CreatedOn FROM nextris.tbexamination WHERE Guid = %s
+                """, (exam_id,))
+                current_exam = cursor.fetchone()
+                current_created_on = current_exam[0] if current_exam else None
+
+                if show_reported and show_ready:
+                    reported_filter = ""
+                elif show_reported:
+                    reported_filter = "AND (e.IsReported = 1 OR e.workflow_state = 'cancelled')"
+                elif show_ready:
+                    reported_filter = "AND (e.IsReported IS NULL OR e.IsReported = 0) AND COALESCE(e.workflow_state, 'pending') = 'pending'"
+                else:
+                    reported_filter = "AND 1=0"
+
+                query = f"""
+                    SELECT e.Guid,
+                           COALESCE(nextris.available_study_for_exam(e.guid), e.studyinstanceuid) AS studyinstanceuid,
+                           CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
+                           dp.nationalcode,
+                           st.Description as study_type,
+                           e.LocalAcc,
+                           COALESCE(e.IsReported, 0) as is_reported
+                    FROM nextris.tbexamination e
+                    LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
+                    LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
+                    WHERE e.Guid != %s
+                    {reported_filter}
+                """
+
+                params = [exam_id]
+
+                if assigned_to_me:
+                    query += " AND e.assignto = %s"
+                    params.append(reporter_physician_id)
+
+                if modality_ids:
+                    modality_placeholders = ','.join(['%s'] * len(modality_ids))
+                    query += f" AND st.modality_id IN ({modality_placeholders})"
+                    params.extend(modality_ids)
+
+                if body_part_id:
+                    query += " AND st.bodypart_id = %s"
+                    params.append(body_part_id)
+
+                if study_group_id:
+                    query += " AND st.studygroup_id = %s"
+                    params.append(study_group_id)
+
+                if current_created_on:
+                    query += " AND e.CreatedOn <= %s"
+                    params.append(current_created_on)
+
+                query += " ORDER BY e.CreatedOn DESC LIMIT 1"
+
+                cursor.execute(query, params)
+                next_exam_row = cursor.fetchone()
+
+                if next_exam_row:
+                    next_exam = {
+                        'guid': str(next_exam_row[0]),
+                        'study_instance_uid': next_exam_row[1] or '',
+                        'patient_name': next_exam_row[2] or '',
+                        'patient_dni': next_exam_row[3] or '',
+                        'study_type': next_exam_row[4] or '',
+                        'accession_number': next_exam_row[5] or '',
+                        'is_reported': bool(next_exam_row[6])
+                    }
             except Exception as next_error:
                 print(f"[SIGN] Error al obtener siguiente examen: {str(next_error)}")
                 # No fallar si hay error al obtener el siguiente, solo loguearlo
@@ -3141,15 +3948,15 @@ def sign_report(exam_id):
         # Cerrar conexión
         cursor.close()
         connection.close()
-        
+
         response_data = {
             'success': True,
-            'message': 'Reporte firmado exitosamente'
+            'message': 'Reporte firmado exitosamente',
         }
-        
+
         if next_exam:
             response_data['next_exam'] = next_exam
-        
+
         return jsonify(response_data), 200
         
     except psycopg2.Error as db_error:
@@ -3173,105 +3980,18 @@ def sign_report(exam_id):
 @jwt_required()
 def verify_credentials():
     """
-    Verifica las credenciales del usuario actual
-    Útil para acciones críticas como firmar reportes
-    
-    Headers:
-    - Authorization: Bearer <token>
-    
-    Body JSON:
-    {
-        "password": "string" (required)
-    }
-    
-    Returns:
-    {
-        "success": true,
-        "message": "Credenciales válidas"
-    }
-    
-    Error Response:
-    {
-        "success": false,
-        "message": "Credenciales inválidas"
-    }
+    Compatibilidad con clientes anteriores. La sesión JWT y el permiso
+    reports.sign son suficientes; la firma no requiere reingresar contraseña.
     """
-    try:
-        data = request.get_json(force=True, silent=True)
-        
-        if not data or 'password' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'La contraseña es requerida'
-            }), 400
-        
-        password = data.get('password')
-        user_id = get_jwt_identity()
-        
-        config = get_db_config()
-        if not config:
-            return jsonify({
-                'success': False,
-                'message': 'Error de configuración de base de datos'
-            }), 500
-        
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-        
-        # Obtener hash de contraseña del usuario
-        cursor.execute("""
-            SELECT password FROM nextris.tbuser 
-            WHERE guid = %s
-        """, (user_id,))
-        
-        result = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        
-        if not result:
-            return jsonify({
-                'success': False,
-                'message': 'Usuario no encontrado'
-            }), 404
-        
-        stored_password = result[0]
-        
-        # Verificar contraseña (asumiendo que está hasheada con bcrypt o similar)
-        try:
-            from werkzeug.security import check_password_hash
-            
-            if check_password_hash(stored_password, password):
-                return jsonify({
-                    'success': True,
-                    'message': 'Credenciales válidas'
-                }), 200
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'Credenciales inválidas'
-                }), 401
-        except:
-            # Si no está hasheada, comparar directamente (no recomendado en producción)
-            if stored_password == password:
-                return jsonify({
-                    'success': True,
-                    'message': 'Credenciales válidas'
-                }), 200
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'Credenciales inválidas'
-                }), 401
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
+    return jsonify({
+        'success': True,
+        'message': 'Verificación de contraseña omitida'
+    }), 200
 
 
 @api_blueprint.route('/reports/<exam_id>/unsign', methods=['POST'])
 @jwt_required()
+@require_permission('reports.unsign', include_role_permissions=True)
 def unsign_report(exam_id):
     """
     Quita la firma de un reporte (desmarca como reportado)
@@ -3296,7 +4016,11 @@ def unsign_report(exam_id):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        query = "UPDATE nextris.tbexamination SET isreported=0 WHERE guid=%s"
+        query = """
+            UPDATE nextris.tbexamination
+            SET isreported = 0, reportdate = NULL
+            WHERE guid = %s
+        """
         cursor.execute(query, (exam_id,))
         
         connection.commit()
@@ -3322,95 +4046,69 @@ def unsign_report(exam_id):
         }), 500
 
 
+@api_blueprint.route('/reports/<uuid:exam_id>/view', methods=['GET'])
+@jwt_required()
+def get_report_view(exam_id):
+    from apps.services.report_view_service import ReportViewUnavailable, resolve_authorized_report_view
+
+    try:
+        response = jsonify({'success': True, 'data': resolve_authorized_report_view(exam_id)})
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 200
+    except ReportViewUnavailable as error:
+        return jsonify({'success': False, 'message': str(error), 'code': error.code}), error.status
+    except Exception:
+        return jsonify({'success': False, 'message': 'No se pudo obtener el informe'}), 500
+
+
 @api_blueprint.route('/reports/<exam_id>/pdf', methods=['GET'])
 @jwt_required()
 def get_report_pdf(exam_id):
     """
-    Obtiene el PDF de un reporte
+    Abre el informe de NextRIS (compatibilidad con enlaces antiguos)
     
     Path:
     - exam_id: GUID del examen
     
     Returns:
-    - Archivo PDF del reporte
+    - PDF local generado en memoria
     """
-    try:
-        pdf_path, error_message, status_code = _get_report_pdfpath_from_exam(exam_id)
-        if error_message:
-            return jsonify({
-                'success': False,
-                'message': error_message
-            }), status_code
-
-        return _send_pdf_response_from_path(pdf_path)
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
+    return _render_report_pdf_response(exam_id)
 
 
 @api_blueprint.route('/pdfs/by-exam/<exam_id>', methods=['GET'])
+@jwt_required()
 def serve_pdf_by_exam(exam_id):
     """
-    Ruta canónica para abrir PDFs por GUID de examen.
+    Compatibilidad con enlaces antiguos: PDF local autenticado.
     Pública para compatibilidad con flujos legacy.
     """
-    try:
-        pdf_path, error_message, status_code = _get_report_pdfpath_from_exam(exam_id)
-        if error_message:
-            return jsonify({
-                'success': False,
-                'message': error_message
-            }), status_code
-
-        return _send_pdf_response_from_path(pdf_path)
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
+    return _render_report_pdf_response(exam_id)
 
 
 @api_blueprint.route('/pdfs/<path:filename>', methods=['GET'])
 def serve_pdf(filename):
     """
-    Sirve archivos PDF directamente desde output_pdfs
-    Endpoint público sin autenticación para abrir PDFs en nueva pestaña
+    Compatibilidad histórica para URLs basadas en nombre de archivo.
     
     Path:
     - filename: Nombre del archivo PDF (ej: ACC006_NR00000013_Díaz_Lucía.pdf)
     
-    URL completa desde pdf_path:
-    - Si pdf_path = "output_pdfs/ACC006_NR00000013_Díaz_Lucía.pdf"
-    - URL = "/api/pdfs/ACC006_NR00000013_Díaz_Lucía.pdf"
+    Los PDFs ahora se identifican por GUID de examen y se generan bajo demanda.
     
     Returns:
     - Archivo PDF
     """
-    try:
-        # Sanitizar el nombre del archivo para evitar path traversal
-        safe_filename = os.path.basename(filename)
-
-        if not safe_filename:
-            return jsonify({
-                'success': False,
-                'message': 'PDF no encontrado'
-            }), 404
-
-        pdf_path = os.path.join(PDF_OUTPUT_DIR, safe_filename)
-        return _send_pdf_response_from_path(pdf_path)
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
+    return jsonify({
+        'success': False,
+        'message': 'Los PDFs por nombre de archivo fueron retirados; use el GUID del examen.',
+        'code': 'PDF_FILENAME_ENDPOINT_RETIRED',
+    }), 410
 
 
 @api_blueprint.route('/examinations/<exam_id>/block', methods=['POST'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def block_examination(exam_id):
     """
     Bloquea un examen para edición exclusiva del usuario actual
@@ -3436,11 +4134,13 @@ def block_examination(exam_id):
             }), 500
         
         connection = psycopg2.connect(**config)
+        ensure_workflow_schema(connection)
         cursor = connection.cursor()
         
         # Verificar si el examen existe y si ya está bloqueado
         cursor.execute("""
-            SELECT blockby FROM nextris.tbexamination
+            SELECT blockby, COALESCE(workflow_state, 'pending')
+            FROM nextris.tbexamination
             WHERE Guid = %s
         """, (exam_id,))
         
@@ -3454,6 +4154,11 @@ def block_examination(exam_id):
             }), 404
         
         current_block = result[0]
+        workflow_state = result[1]
+        if workflow_state == 'cancelled':
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'El estudio está cancelado y no puede redactarse', 'code': 'STUDY_CANCELLED'}), 409
         
         # Si ya está bloqueado por otro usuario, no permitir
         if current_block and str(current_block) != str(user_id):
@@ -3491,6 +4196,7 @@ def block_examination(exam_id):
 
 @api_blueprint.route('/examinations/<exam_id>/unblock', methods=['POST'])
 @jwt_required()
+@require_permission('reports.write', include_role_permissions=True)
 def unblock_examination(exam_id):
     """
     Desbloquea un examen
@@ -3533,9 +4239,17 @@ def unblock_examination(exam_id):
             }), 404
         
         current_block = result[0]
-        
-        # Solo el usuario que bloqueó puede desbloquear (o si no está bloqueado)
-        if current_block and str(current_block) != str(user_id):
+
+        # El usuario que tomó el estudio puede desbloquearlo. El sysadmin
+        # también puede hacerlo para resolver bloqueos abandonados o erróneos.
+        user_permissions = get_user_permission_codes(
+            user_id,
+            connection=connection,
+            include_role_permissions=True,
+        )
+        is_sysadmin = '*' in user_permissions
+
+        if current_block and str(current_block) != str(user_id) and not is_sysadmin:
             cursor.close()
             connection.close()
             return jsonify({
@@ -3622,5 +4336,63 @@ def get_study_groups_filter():
         cursor.close()
         connection.close()
         return jsonify({'success': True, 'data': results}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@api_blueprint.route('/reports/<exam_id>/assign', methods=['POST'])
+@jwt_required()
+@require_permission('reports.assign', include_role_permissions=True)
+def assign_exam_to_user(exam_id):
+    """
+    Asigna un examen a un usuario (radiólogo).
+
+    Body:
+        user_id: GUID del usuario radiólogo
+
+    Returns:
+        {"success": true, "message": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get('user_id'):
+            return jsonify({'success': False, 'message': 'user_id es requerido'}), 400
+
+        user_id = data['user_id']
+
+        config = get_db_config()
+        if not config:
+            return jsonify({'success': False, 'message': 'Error de configuración de base de datos'}), 500
+
+        connection = psycopg2.connect(**config)
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT 1 FROM nextris.tbexamination WHERE guid = %s", (exam_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Examen no encontrado'}), 404
+
+        cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid = %s", (user_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'}), 404
+
+        cursor.execute(
+            """
+            UPDATE nextris.tbexamination
+            SET assignto = %s
+            WHERE guid = %s
+            """,
+            (user_id, exam_id)
+        )
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({'success': True, 'message': 'Estudio asignado correctamente'}), 200
+
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500

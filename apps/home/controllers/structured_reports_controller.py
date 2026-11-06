@@ -35,10 +35,6 @@ def _ensure_rel_parser_facility_table() -> None:
             CONSTRAINT fk_rel_parser_facility_parser
                 FOREIGN KEY (parser_manifest_id)
                 REFERENCES dicom_sr.parser_manifest(id)
-                ON DELETE CASCADE,
-            CONSTRAINT fk_rel_parser_facility_facility
-                FOREIGN KEY (facility_guid)
-                REFERENCES nextris.tbfacility(guid)
                 ON DELETE CASCADE
         )
     """
@@ -352,9 +348,9 @@ def _get_parser_and_key(parser_manifest_id: int):
 def _get_facility_by_guid(facility_guid: str):
     return DatabaseService.execute_query(
         """
-        SELECT guid, name, code
-        FROM nextris.tbfacility
-        WHERE guid = %s
+        SELECT id::text, name, code
+        FROM nextris.app_config
+        WHERE id::text = %s
         LIMIT 1
         """,
         (facility_guid,),
@@ -689,7 +685,7 @@ def list_parser_facility_relations():
                 rel.updated_at
             FROM dicom_sr.rel_parser_facility rel
             INNER JOIN dicom_sr.parser_manifest pm ON pm.id = rel.parser_manifest_id
-            INNER JOIN nextris.tbfacility f ON f.guid = rel.facility_guid
+            INNER JOIN nextris.app_config f ON f.id::text = rel.facility_guid
         """
 
         params = None
@@ -749,7 +745,7 @@ def create_parser_facility_relation():
             return jsonify({'success': False, 'error': 'Parser no encontrado'}), 404
 
         facility_exists = DatabaseService.execute_query(
-            "SELECT 1 FROM nextris.tbfacility WHERE guid = %s LIMIT 1",
+            "SELECT 1 FROM nextris.app_config WHERE id::text = %s LIMIT 1",
             (facility_guid,),
             fetch_one=True,
         )
@@ -838,7 +834,7 @@ def sync_parser_facility_relations():
 
         if normalized_facilities:
             existing_rows = DatabaseService.execute_query(
-                "SELECT guid FROM nextris.tbfacility WHERE guid = ANY(%s)",
+                "SELECT id::text FROM nextris.app_config WHERE id::text = ANY(%s)",
                 (normalized_facilities,),
             )
             existing_guids = {row[0] for row in existing_rows}

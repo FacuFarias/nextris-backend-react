@@ -7,14 +7,15 @@ Migrado desde examination_controller.py - 19 endpoints REST
 from flask import jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 import psycopg2
-import pytz
-from datetime import datetime, timedelta
 from apps.api import api_blueprint
+from apps.services.timezone_utils import DEFAULT_TIMEZONE, format_local_datetime, to_utc_naive
+from apps.api.permissions import require_permission
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
     check_limit_before_action,
-    increment_usage_counter,
+
 )
+from apps.services.report_fields import canonical_fields_from_row, legacy_aliases
 
 
 def get_db_config():
@@ -464,7 +465,7 @@ def create_worklist():
                 if equipment_id:
                     cursor.execute(
                         """
-                        SELECT l.facility_id
+                        SELECT '1'::text AS facility_id
                         FROM nextris.isequipment eq
                         LEFT JOIN nextris.tblocation l ON l.guid = eq.location_id
                         WHERE eq.guid = %s
@@ -476,7 +477,7 @@ def create_worklist():
                     facility_id = facility_row[0] if facility_row else None
 
                 if facility_id:
-                    is_allowed, limit_payload = check_limit_before_action(connection, facility_id, 'receive')
+                    is_allowed, limit_payload = check_limit_before_action(connection, 'receive')
                     if not is_allowed:
                         errors.append(limit_payload.get('message', 'Límite de plan alcanzado para recibir estudios'))
                         continue
@@ -501,11 +502,11 @@ def create_worklist():
                 
                 # Insertar examen
                 cursor.execute("""
-                    INSERT INTO nextris.tbexamination (
+                    INSERT INTO nextris.tbexamination ("w-order", 
                         IdPatient, studytype_id, IdEquipment, IdSeverity,
                         IdReferringPhysician, IdRequestingPhysician,
                         admisionnumber, LocalAcc, Status, CreatedOn, IsExecuted
-                    ) VALUES (
+                    ) VALUES (1, 
                         %s, %s, %s, %s, %s, %s, %s, %s, 'Scheduled', NOW(), 0
                     ) RETURNING Guid
                 """, (
@@ -531,8 +532,6 @@ def create_worklist():
                     )
                 """, (exam_guid, patient_id, adm_number))
 
-                if facility_id:
-                    increment_usage_counter(connection, facility_id, 'received', 1)
                 
                 created_exams.append(exam_guid)
                 
@@ -711,7 +710,7 @@ def get_orders_ex():
         for row in cursor.fetchall():
             results.append([
                 row[0],  # guid
-                row[1].strftime('%d/%m/%Y %H:%M') if row[1] else '',
+                format_local_datetime(row[1], DEFAULT_TIMEZONE, separator=' ') if row[1] else '',
                 row[2] if row[2] else '',  # apellido
                 row[3] if row[3] else '',  # nombre
                 row[4] if row[4] else '',  # estudio
@@ -1074,18 +1073,11 @@ def create_appointment_equipment():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        # Zona horaria Argentina
-        tz_argentina = pytz.timezone('America/Argentina/Buenos_Aires')
-        
         for exam in exams:
             try:
-                # Convertir timestamps
-                init_time = datetime.fromisoformat(exam.get('init').replace('Z', '+00:00'))
-                finish_time = datetime.fromisoformat(exam.get('finish').replace('Z', '+00:00'))
-                
-                # Ajustar a zona horaria Argentina
-                init_time = init_time - timedelta(hours=3)
-                finish_time = finish_time - timedelta(hours=3)
+                # El frontend puede enviar ISO con Z o una hora local sin offset.
+                init_time = to_utc_naive(exam.get('init'))
+                finish_time = to_utc_naive(exam.get('finish'))
                 
                 medico_solicitante = exam.get('medico_solicitante')
                 rads = exam.get('rads')
@@ -1159,15 +1151,10 @@ def create_appointment_medico():
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
         
-        tz_argentina = pytz.timezone('America/Argentina/Buenos_Aires')
-        
         for exam in exams:
             try:
-                init_time = datetime.fromisoformat(exam.get('init').replace('Z', '+00:00'))
-                finish_time = datetime.fromisoformat(exam.get('finish').replace('Z', '+00:00'))
-                
-                init_time = init_time - timedelta(hours=3)
-                finish_time = finish_time - timedelta(hours=3)
+                init_time = to_utc_naive(exam.get('init'))
+                finish_time = to_utc_naive(exam.get('finish'))
                 
                 medico_solicitante = exam.get('medico_solicitante')
                 rads = exam.get('rads')
@@ -1210,6 +1197,7 @@ def create_appointment_medico():
 
 @api_blueprint.route('/examinations/<exam_id>/execute', methods=['POST'])
 @jwt_required()
+@require_permission('worklist.confirm_execute', include_role_permissions=True)
 def execute_examination(exam_id):
     """
     Marca una orden como ejecutada y actualiza detalles clínicos
@@ -1486,16 +1474,32 @@ def get_report_data(exam_id):
         
         # Obtener reporte
         cursor.execute("""
-            SELECT 
+            SELECT
                 Guid, IdExamination, IdPatient, admnumber,
-                IdReferringPhysician, Findings, Impressions, Techniques,
-                Conclusions, WasSaved
+                IdReferringPhysician, study_reason, content, conclusion,
+                Findings, Impressions, Techniques, Conclusions, WasSaved
             FROM nextris.tbReport
             WHERE IdExamination = %s
         """, (exam_id,))
         
         report_row = cursor.fetchone()
-        report = list(report_row) if report_row else []
+        report_fields = canonical_fields_from_row(
+            report_row[5] if report_row else None,
+            report_row[6] if report_row else None,
+            report_row[7] if report_row else None,
+            legacy_findings=report_row[8] if report_row else None,
+            legacy_impressions=report_row[9] if report_row else None,
+            legacy_technique=report_row[10] if report_row else None,
+            legacy_conclusion=report_row[11] if report_row else None,
+            reason_fallback=exam[13] or exam[12],
+        )
+        # Mantener la lista legacy para consumidores antiguos y exponer además
+        # el contrato canónico en la respuesta.
+        report = (
+            [report_row[0], report_row[1], report_row[2], report_row[3],
+             report_fields['content'], '', '', report_fields['conclusion'], report_row[12]]
+            if report_row else []
+        )
         
         # Obtener tipo de estudio y modalidad
         cursor.execute("""
@@ -1514,7 +1518,8 @@ def get_report_data(exam_id):
         predefinido = {}
         if default_predef_id:
             cursor.execute("""
-                SELECT Findings, Impressions, Techniques, Conclusions, Tittle
+                SELECT study_reason, content, conclusion,
+                       Findings, Impressions, Techniques, Conclusions, Tittle
                 FROM nextris.tbinfpredef
                 WHERE Guid = %s
             """, (default_predef_id,))
@@ -1522,11 +1527,15 @@ def get_report_data(exam_id):
             predef_row = cursor.fetchone()
             if predef_row:
                 predefinido = {
-                    'findings': predef_row[0] if predef_row[0] else '',
-                    'impressions': predef_row[1] if predef_row[1] else '',
-                    'techniques': predef_row[2] if predef_row[2] else '',
-                    'conclusions': predef_row[3] if predef_row[3] else '',
-                    'tittle': predef_row[4] if predef_row[4] else ''
+                    **legacy_aliases(canonical_fields_from_row(
+                        predef_row[0], predef_row[1], predef_row[2],
+                        legacy_findings=predef_row[3], legacy_impressions=predef_row[4],
+                        legacy_technique=predef_row[5], legacy_conclusion=predef_row[6],
+                    )),
+                    'study_reason': predef_row[0] or '',
+                    'content': predef_row[1] or '',
+                    'conclusion': predef_row[2] or '',
+                    'tittle': predef_row[7] if predef_row[7] else ''
                 }
         
         # Obtener lateralidad
@@ -1545,12 +1554,16 @@ def get_report_data(exam_id):
         
         result = {
             'report': report,
+            'study_reason': report_fields['study_reason'],
+            'content': report_fields['content'],
+            'conclusion': report_fields['conclusion'],
+            **legacy_aliases(report_fields),
             'isreported': 1 if exam[4] else 0,
             'isimage': 1 if exam[5] else 0,
             'study_instance_uid': exam[6] if exam[6] else '',
             'predefinido': predefinido,
             'descripcion_predef': descripcion_predef if descripcion_predef else '',
-            'wassaved': report[9] if report and len(report) > 9 else 0,
+            'wassaved': report[8] if report and len(report) > 8 else 0,
             'fecha_examen': exam[7].strftime('%d/%m/%Y') if exam[7] else '',
             'modality': modality if modality else '',
             'numberofviews': exam[8] if exam[8] else '',
@@ -1740,4 +1753,3 @@ def update_examination_demograficos(guid):
     except Exception as e:
         print(f"[API UPDATE DEMOGRAFICOS] Error: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
-

@@ -1,3 +1,4 @@
+import os
 """
 Servicio de HL7 para el sistema RIS
 Maneja comunicación HL7 y generación de mensajes
@@ -13,7 +14,7 @@ class HL7Service:
     """Servicio para gestión de mensajes HL7"""
 
     @staticmethod
-    def send_hl7_message(message, host=None, port=2575):
+    def send_hl7_message(message, host=None, port=None):
         """
         Envía un mensaje HL7 al servidor especificado
         
@@ -22,8 +23,10 @@ class HL7Service:
             host: Host del servidor HL7 (si no se especifica, usa configuración)
             port: Puerto del servidor HL7 (por defecto 2575 para DCM4CHEE)
         """
+        if port is None:
+            port = int(os.getenv('HL7_ORM_PORT', '2575'))
         if host is None:
-            host = ConfigService.get_ipserver()
+            host = os.getenv('HL7_HOST', ConfigService.get_ipserver())
             
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -144,7 +144,7 @@ def check_report_exists(exam_id):
         
         query = """
             SELECT r.guid, r.findings, r.techniques, r.impressions, r.conclusions,
-                   r.idpatient, r.idexamination, r.iduser, r.pdfpath
+                   r.idpatient, r.idexamination, r.iduser
             FROM nextris.tbreport r
             WHERE r.idexamination = %s
         """
@@ -167,7 +167,7 @@ def check_report_exists(exam_id):
         print_info(f"Conclusions: {result[4][:50] if result[4] else 'NULL'}...")
         print_info(f"Patient ID: {result[5]}")
         print_info(f"User ID: {result[7]}")
-        print_info(f"PDF Path: {result[8]}")
+        print_info("PDF: se genera bajo demanda")
         
         return True
         
@@ -277,36 +277,18 @@ def verify_pdf_generated(exam_id):
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        query = """
-            SELECT r.pdfpath
-            FROM nextris.tbreport r
-            WHERE r.idexamination = %s
-        """
-        
-        cursor.execute(query, (exam_id,))
-        result = cursor.fetchone()
-        
         cursor.close()
         conn.close()
-        
-        if not result or not result[0]:
-            print_error("No se registró el path del PDF en la base de datos")
-            return False
-        
-        pdf_path = result[0]
-        print_info(f"PDF Path en DB: {pdf_path}")
-        
-        # Verificar si el archivo existe
-        import os
-        full_path = f"/var/www/nextris-dev-react/{pdf_path}"
-        
-        if os.path.exists(full_path):
-            file_size = os.path.getsize(full_path)
-            print_success(f"✓ PDF generado correctamente: {full_path}")
-            print_info(f"Tamaño del archivo: {file_size} bytes")
+        from run import app
+        from apps.services.report_pdf_service import render_report_pdf
+        with app.app_context():
+            rendered = render_report_pdf(exam_id)
+        if rendered.content.startswith(b'%PDF'):
+            print_success("PDF renderizado correctamente en memoria")
+            print_info(f"Tamaño: {len(rendered.content)} bytes")
             return True
         else:
-            print_error(f"✗ El archivo PDF NO existe en el sistema de archivos: {full_path}")
+            print_error("✗ El renderizador no devolvió un PDF válido")
             return False
         
     except Exception as e:

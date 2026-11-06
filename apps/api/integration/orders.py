@@ -7,6 +7,7 @@ Permite a sistemas externos enviar órdenes de exámenes al RIS
 from flask import jsonify, request
 import psycopg2
 import uuid
+import secrets
 from datetime import datetime
 from apps.api import api_blueprint
 
@@ -18,7 +19,7 @@ def get_db_config():
     return db_config
 
 
-def find_or_create_patient(cursor, patient_data, patientdomain_id):
+def find_or_create_patient(cursor, patient_data):
     """
     Busca un paciente por DNI o lo crea si no existe.
     Retorna el guid UUID (no el patientid) porque tbexamination.idpatient referencia datapatient.guid.
@@ -88,8 +89,8 @@ def find_or_create_patient(cursor, patient_data, patientdomain_id):
     
     cursor.execute("""
         INSERT INTO nextris.datapatient 
-        (guid, name, surname, patientid, nationalcode, birthdate, sexcode, id_patientdomain)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        (guid, name, surname, patientid, nationalcode, birthdate, sexcode)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """, (
         new_guid,
         first_name,
@@ -97,8 +98,7 @@ def find_or_create_patient(cursor, patient_data, patientdomain_id):
         new_patient_id,
         dni,
         birthdate,
-        sex,
-        patientdomain_id
+        sex
     ))
     
     return new_guid
@@ -158,8 +158,8 @@ def find_facility_by_name(cursor, institution_name):
     Retorna un dict con guid, name, hl7_enable_orm o None si no existe.
     """
     cursor.execute("""
-        SELECT guid, name, hl7_enable_orm 
-        FROM nextris.tbfacility 
+        SELECT id::text, name, hl7_enable_orm 
+        FROM nextris.app_config 
         WHERE LOWER(name) = LOWER(%s)
         LIMIT 1
     """, (institution_name,))
@@ -173,36 +173,6 @@ def find_facility_by_name(cursor, institution_name):
     return None
 
 
-def get_patientdomain_from_location(cursor, location_id):
-    """
-    Obtiene el patientdomain_id de una ubicación.
-    """
-    cursor.execute("""
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'nextris'
-          AND table_name = 'tbfacility'
-          AND column_name = 'id_patientdomain'
-        LIMIT 1
-    """)
-    has_facility_domain = cursor.fetchone() is not None
-    
-    if has_facility_domain:
-        cursor.execute("""
-            SELECT COALESCE(NULLIF(f.id_patientdomain, ''), NULLIF(l.id_patientdomain, ''))
-            FROM nextris.tblocation l
-            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
-            WHERE l.guid = %s
-        """, (location_id,))
-    else:
-        cursor.execute("""
-            SELECT NULLIF(l.id_patientdomain, '')
-            FROM nextris.tblocation l
-            WHERE l.guid = %s
-        """, (location_id,))
-    
-    result = cursor.fetchone()
-    return result[0] if result and result[0] else None
 
 
 @api_blueprint.route('/integration/orders', methods=['POST'])
@@ -280,38 +250,21 @@ def receive_external_order():
         cursor = connection.cursor()
         
         try:
-            # Validar que la institución existe y tiene HL7 habilitado
-            if institution_name:
-                facility = find_facility_by_name(cursor, institution_name)
-                if not facility:
-                    return jsonify({
-                        'success': False,
-                        'message': f'Institución no encontrada: {institution_name}'
-                    }), 404
-                if not facility['hl7_enable_orm']:
-                    return jsonify({
-                        'success': False,
-                        'message': f'HL7 no habilitado para la institución: {institution_name}'
-                    }), 403
-            
-            # Buscar ubicación
-            location_id = None
-            patientdomain_id = None
-            
-            if location_name:
-                location_id = find_location_by_name(cursor, location_name, institution_name)
-                if location_id:
-                    patientdomain_id = get_patientdomain_from_location(cursor, location_id)
-            
-            # Si no se encontró patientdomain, usar el primero disponible
-            if not patientdomain_id:
-                cursor.execute("SELECT guid FROM nextris.ispatientdomain LIMIT 1")
-                result = cursor.fetchone()
-                patientdomain_id = result[0] if result else None
-            
-            # Buscar o crear paciente
-            patient_id = find_or_create_patient(cursor, patient_data, patientdomain_id)
-            
+            cursor.execute('SELECT name, hl7_enable_orm, hl7_bearer_token_orm FROM nextris.app_config WHERE id=1')
+            settings = cursor.fetchone()
+            if not settings or not settings[1]:
+                return jsonify(success=False, message='La recepción de órdenes HL7 está deshabilitada'), 403
+            if institution_name and str(institution_name).casefold() != str(settings[0]).casefold():
+                return jsonify(success=False, message='Institución no encontrada'), 404
+            if not settings[2]:
+                return jsonify(success=False, message='Configure el token de recepción HL7'), 503
+            authorization = request.headers.get('Authorization', '')
+            if not secrets.compare_digest(authorization, 'Bearer ' + settings[2]):
+                return jsonify(success=False, message='Token de integración inválido'), 401
+
+            location_id = find_location_by_name(cursor, location_name, institution_name) if location_name else None
+            patient_id = find_or_create_patient(cursor, patient_data)
+
             # Buscar tipo de estudio por código
             study_type_id = find_study_type_by_code(cursor, order_data.get('procedure_code'))
             
@@ -369,12 +322,12 @@ def receive_external_order():
             
             # Insertar examen en tbexamination
             cursor.execute("""
-                INSERT INTO nextris.tbexamination (
+                INSERT INTO nextris.tbexamination ("w-order", 
                     guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                     AdmisionNumber, localacc, createdon, status, isexecuted,
                     isadmitted, idreferringphysician, location_id
-                ) VALUES (
-                    uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0,
+                ) VALUES (1, 
+                    gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0,
                     1, %s, %s
                 ) RETURNING guid
             """, (
@@ -395,7 +348,7 @@ def receive_external_order():
                 INSERT INTO nextris.tbreport (
                     guid, admnumber, idexamination, idpatient, date
                 ) VALUES (
-                    uuid_generate_v4(), %s, %s, %s, NOW()
+                    gen_random_uuid(), %s, %s, %s, NOW()
                 )
             """, (adm_number, examination_guid, patient_id))
             

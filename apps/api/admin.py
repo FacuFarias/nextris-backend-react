@@ -1,3 +1,4 @@
+from apps.api.permissions import require_permission
 # -*- encoding: utf-8 -*-
 """
 API de Administración - Endpoints REST para funciones administrativas
@@ -20,6 +21,7 @@ from apps.api.utils import get_db_config, update_examination_status
 
 @api_blueprint.route('/admin/examinations/<exam_id>/unreport', methods=['POST'])
 @jwt_required()
+@require_permission('reports.unsign')
 def unreport_examination(exam_id):
     """
     Quita el estado de reportado a un examen
@@ -83,6 +85,7 @@ def unreport_examination(exam_id):
 
 @api_blueprint.route('/admin/examinations/<exam_id>/status', methods=['PATCH'])
 @jwt_required()
+@require_permission('worklist.confirm_execute')
 def update_examination_status_endpoint(exam_id):
     """
     Actualiza el estado de un examen
@@ -164,6 +167,7 @@ def update_examination_status_endpoint(exam_id):
 
 @api_blueprint.route('/admin/examinations', methods=['GET'])
 @jwt_required()
+@require_permission('tabs.worklist.view')
 def get_examinations_admin():
     """
     Obtiene lista de exámenes para administración

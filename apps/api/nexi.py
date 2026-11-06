@@ -65,22 +65,6 @@ def _get_db_config():
     return db_config
 
 
-def _get_user_patientdomain_ids(cursor, user_id):
-    cursor.execute(
-        """
-        SELECT patientdomain_id
-        FROM nextris.rel_user_patientdomain
-        WHERE user_id = %s
-        """,
-        (user_id,)
-    )
-
-    user_domains = [row[0] for row in cursor.fetchall()]
-    if user_domains:
-        return user_domains
-
-    cursor.execute("SELECT guid FROM nextris.ispatientdomain")
-    return [row[0] for row in cursor.fetchall()]
 
 
 def _get_user_locations(cursor, user_id):
@@ -121,9 +105,6 @@ def _search_patients_context(user_id, search_term, limit):
     cursor = connection.cursor()
 
     try:
-        user_domains = _get_user_patientdomain_ids(cursor, user_id)
-        if not user_domains:
-            return []
 
         pattern = f"%{search_term}%"
         normalized_pattern = f"%{_normalize_search_text(search_term)}%"
@@ -131,8 +112,7 @@ def _search_patients_context(user_id, search_term, limit):
             """
             SELECT dp.guid, dp.patientid, dp.name, dp.surname, dp.nationalcode, dp.birthdate, dp.sexcode
             FROM nextris.datapatient dp
-            WHERE dp.id_patientdomain = ANY(%s)
-              AND (
+            WHERE (
                 dp.name ILIKE %s OR
                 dp.surname ILIKE %s OR
                 dp.nationalcode ILIKE %s OR
@@ -148,7 +128,6 @@ def _search_patients_context(user_id, search_term, limit):
             LIMIT %s
             """,
             (
-                user_domains,
                 pattern,
                 pattern,
                 pattern,
@@ -187,18 +166,15 @@ def _get_patient_summary_context(user_id, patient_guid):
     cursor = connection.cursor()
 
     try:
-        user_domains = _get_user_patientdomain_ids(cursor, user_id)
-        if not user_domains:
-            return None
 
         cursor.execute(
             """
             SELECT guid, patientid, name, surname, nationalcode, email, phone, birthdate, sexcode,
-                   id_patientdomain, healthcard
+                   NULL::text AS patientdomain_id, healthcard
             FROM nextris.datapatient
-            WHERE guid = %s AND id_patientdomain = ANY(%s)
+            WHERE guid = %s
             """,
-            (patient_guid, user_domains)
+            (patient_guid,)
         )
         row = cursor.fetchone()
         if not row:
@@ -258,16 +234,12 @@ def _get_patient_studies_context(user_id, patient_guid, limit, reported_only=Fal
     cursor = connection.cursor()
 
     try:
-        user_domains = _get_user_patientdomain_ids(cursor, user_id)
-        if not user_domains:
-            return []
 
         user_locations = _get_user_locations(cursor, user_id)
         where_clauses = [
             "e.idpatient = %s",
-            "dp.id_patientdomain = ANY(%s)",
         ]
-        params = [patient_guid, user_domains]
+        params = [patient_guid]
 
         if user_locations:
             where_clauses.append("(eq.location_id = ANY(%s) OR eq.location_id IS NULL)")
@@ -288,7 +260,8 @@ def _get_patient_studies_context(user_id, patient_guid, limit, reported_only=Fal
                    e.isexecuted,
                    e.studyinstanceuid,
                    st.description,
-                   rep.pdfpath,
+                   CASE WHEN COALESCE(e.isreported, 0) = 1 AND rep.guid IS NOT NULL
+                        THEN TRUE ELSE FALSE END AS report_available,
                    eq.aetitle,
                    loc.name
             FROM nextris.tbexamination e
@@ -315,7 +288,7 @@ def _get_patient_studies_context(user_id, patient_guid, limit, reported_only=Fal
                 'is_executed': bool(row[5]),
                 'study_instance_uid': row[6],
                 'study_type': row[7],
-                'report_pdf_path': row[8],
+                'report_available': bool(row[8]),
                 'equipment_aetitle': row[9],
                 'location_name': row[10],
             })
@@ -466,12 +439,12 @@ def _build_images_link(study_instance_uid: str | None, exam_guid: str | None = N
     viewer_url = (os.getenv('DICOM_VIEWER_URL') or '').strip()
     # Guard against malformed/sensitive env values; fallback to canonical viewer URL.
     if not viewer_url or 'anthropic' in viewer_url.lower() or 'api_key' in viewer_url.lower():
-        viewer_url = 'https://viewer.nextris.cloud/viewer'
+        viewer_url = 'http://localhost:3000/viewer'
 
     viewer_url = viewer_url.replace('viewer.html', 'viewer')
     base = viewer_url.split('?', 1)[0].rstrip('/')
-    if not base.lower().startswith('http') or 'viewer.nextris.cloud' not in base.lower():
-        base = 'https://viewer.nextris.cloud/viewer'
+    if not base.lower().startswith('http'):
+        base = 'http://localhost:3000/viewer'
 
     url = f"{base}?StudyInstanceUIDs={uid}"
     if exam_guid:
@@ -482,18 +455,10 @@ def _build_images_link(study_instance_uid: str | None, exam_guid: str | None = N
 def _build_report_link(study: dict, base_url: str) -> str | None:
     """Builds a link for report visualization/download."""
     exam_guid = (study.get('guid') or '').strip()
-    if exam_guid:
+    if exam_guid and study.get('report_available'):
         encoded_exam = quote(exam_guid)
-        return f"{base_url.rstrip('/')}/api/pdfs/by-exam/{encoded_exam}"
-
-    report_path = (study.get('report_pdf_path') or '').strip()
-
-    if report_path:
-        # Backward-compatible fallback by filename.
-        safe_filename = os.path.basename(report_path)
-        if safe_filename:
-            encoded = quote(safe_filename)
-            return f"{base_url.rstrip('/')}/api/pdfs/{encoded}"
+        frontend = os.getenv('PUBLIC_FRONTEND_URL', base_url).rstrip('/')
+        return f"{frontend}/informes/{encoded_exam}"
 
     return None
 
@@ -597,13 +562,10 @@ def _search_studies_with_filters_context(
     cursor = connection.cursor()
 
     try:
-        user_domains = _get_user_patientdomain_ids(cursor, user_id)
-        if not user_domains:
-            return []
 
         user_locations = _get_user_locations(cursor, user_id)
-        where_clauses = ["dp.id_patientdomain = ANY(%s)"]
-        params = [user_domains]
+        where_clauses = ["TRUE"]
+        params = []
 
         if user_locations:
             where_clauses.append("(eq.location_id = ANY(%s) OR eq.location_id IS NULL)")
@@ -636,7 +598,8 @@ def _search_studies_with_filters_context(
                    e.isexecuted,
                    e.studyinstanceuid,
                    st.description,
-                   rep.pdfpath,
+                   CASE WHEN COALESCE(e.isreported, 0) = 1 AND rep.guid IS NOT NULL
+                        THEN TRUE ELSE FALSE END AS report_available,
                    eq.aetitle,
                    loc.name,
                    dp.guid,
@@ -668,7 +631,7 @@ def _search_studies_with_filters_context(
                 'is_executed': bool(row[5]),
                 'study_instance_uid': row[6],
                 'study_type': row[7],
-                'report_pdf_path': row[8],
+                'report_available': bool(row[8]),
                 'equipment_aetitle': row[9],
                 'location_name': row[10],
                 'patient_guid': row[11],

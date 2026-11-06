@@ -71,21 +71,13 @@ def test_viewer_url():
         print(f"   {result['data']['direct_url']}")
         print(f"\n🔬 Study UID:")
         print(f"   {result['data']['study_uid']}")
-        print(f"\n🔑 Token de Keycloak (primeros 50 caracteres):")
-        print(f"   {result['data']['access_token'][:50]}...")
+        viewer_url = result['data']['viewer_url']
+        assert 'handoff_code=' in viewer_url
+        assert 'access_token=' not in viewer_url
+        assert 'access_token' not in result['data']
+        print(f"\n🔑 Handoff opaco de un solo uso generado correctamente")
         print(f"\n⏱️  Expira en: {result['data']['expires_in']} segundos")
-        print(f"\n💡 El frontend puede:")
-        print(f"   1. Abrir 'html_page' en un popup (incluye auto-login)")
-        print(f"   2. Usar 'access_token' para autenticar manualmente")
-        print(f"   3. Guardar la página HTML y abrirla como archivo")
-        
-        # Opcional: Guardar HTML para prueba manual
-        import os
-        html_file = "/tmp/viewer_test.html"
-        with open(html_file, 'w') as f:
-            f.write(result['data']['html_page'])
-        print(f"\n📄 HTML guardado en: {html_file}")
-        print(f"   Abre este archivo en el navegador para probar")
+        print(f"\n💡 El frontend debe abrir viewer_url directamente; no recibe credenciales técnicas")
             
     elif resp.status_code == 403:
         print(f"\n⚠️  Sin permisos para ver esta ubicación")

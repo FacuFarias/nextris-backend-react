@@ -20,7 +20,7 @@ config = ConfigService.get_db_config()
 # Configuración DICOM
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../uploads_dicom')
 ALLOWED_EXTENSIONS = {'dcm', 'dicom', 'dic'}
-PACS_HOST = '148.230.72.8'
+PACS_HOST = os.getenv('PACS_HOST', '127.0.0.1')
 PACS_PORT = 11112
 PACS_AET = 'DCM4CHEE'
 LOCAL_AET = 'NEXTRIS_UPLOADER'

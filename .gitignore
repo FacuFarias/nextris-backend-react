@@ -139,8 +139,6 @@ basededatos.db
 db.sqlite3
 
 # Output generado
-output_pdfs/*
-!output_pdfs/.gitkeep
 
 # Media uploads
 media/firmas/*
@@ -170,3 +168,12 @@ routes_new.py
 routes_refactored.py
 # DICOM uploads
 uploads_dicom/
+
+# Local configuration and clinical files
+.env
+.env.*
+!.env.example
+!*.env.example
+media/
+output_pdfs/
+deployment/reports/

@@ -7,8 +7,9 @@ from flask import jsonify, request
 from apps.home import blueprint
 from apps.home.services import DatabaseService, HL7Service
 from apps.home.controllers.admin_controller import updatestatus
-import pytz
-from datetime import datetime, timedelta
+from apps.services.report_fields import canonical_fields_from_row, legacy_aliases
+from datetime import datetime
+from apps.services.timezone_utils import DEFAULT_TIMEZONE, format_local_datetime, to_utc_naive
 
 
 @blueprint.route('/get_examination_details', methods=['POST'])
@@ -304,10 +305,10 @@ def crear_worklist():
                 if hl7_success:
                     # Insertar en tbexamination
                     insert_query = """
-                        INSERT INTO nextris.tbexamination (
+                        INSERT INTO nextris.tbexamination ("w-order", 
                             Guid, StudyInstanceUID, IdPatient, StudyType_Id, IdEquipment,
                             AdmisionNumber, LocalAcc, createdon, Status, IsExecuted
-                        ) VALUES (
+                        ) VALUES (1, 
                             uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', 0
                         )
                     """
@@ -432,7 +433,16 @@ def get_orders_ex():
         results = DatabaseService.execute_query(query, (location_ids,))
         print(f"[DEBUG get_orders_ex] Se encontraron {len(results) if results else 0} órdenes pendientes")
         
-        return jsonify(results)
+        # tbexamination.createdon se almacena como UTC naive. La cola de
+        # órdenes se muestra siempre en el horario de Argentina.
+        visible_results = []
+        for row in results:
+            row = list(row)
+            if len(row) > 1 and row[1]:
+                row[1] = format_local_datetime(row[1], DEFAULT_TIMEZONE, separator=' ')
+            visible_results.append(row)
+
+        return jsonify(visible_results)
         
     except Exception as e:
         print(f"[ERROR get_orders_ex] {str(e)}")
@@ -646,9 +656,6 @@ def debug_tables():
 def insertar_citas_per_equip():
     data = request.get_json()
     print(data)
-    # Zona horaria local, ajusta esto según tu zona horaria
-    local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
-    
     # Obtener location_id del request
     location_id = data.get('location_id')
     print("[DEBUG insertar_citas_per_equip] location_id recibido:", location_id)
@@ -675,20 +682,9 @@ def insertar_citas_per_equip():
         print("idmedsol:", idmedsol)
         print("idmedref:", idrad)
 
-        # Quitar el sufijo .000Z antes de convertir
-        init_str = exam['init'].replace('.000Z', '')
-        finish_str = exam['finish'].replace('.000Z', '')
-
-        # Convertir las horas a la zona horaria local y luego restar 3 horas
-        init_local = local_tz.localize(datetime.strptime(init_str, '%Y-%m-%dT%H:%M:%S'))
-        finish_local = local_tz.localize(datetime.strptime(finish_str, '%Y-%m-%dT%H:%M:%S'))
-
-        init_adjusted = init_local - timedelta(hours=3)
-        finish_adjusted = finish_local - timedelta(hours=3)
-
-        # Convertir a formato ISO 8601
-        init_str_adjusted = init_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
-        finish_str_adjusted = finish_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+        # Guardar siempre UTC naive, sin sumar/restar horas manualmente.
+        init_str_adjusted = to_utc_naive(exam['init'], DEFAULT_TIMEZONE)
+        finish_str_adjusted = to_utc_naive(exam['finish'], DEFAULT_TIMEZONE)
 
         # Preparar valores para la query (manejar None apropiadamente)
         idmedsol_sql = f"'{idmedsol}'" if idmedsol else 'NULL'
@@ -708,9 +704,6 @@ def insertar_citas_per_med():
     """Insertar citas para agenda por médico"""
     data = request.get_json()
     print(data)
-    # Zona horaria local, ajusta esto según tu zona horaria
-    local_tz = pytz.timezone("America/Argentina/Buenos_Aires")
-    
     # Obtener location_id del request
     location_id = data.get('location_id')
     print("[DEBUG insertar_citas_per_med] location_id recibido:", location_id)
@@ -737,20 +730,8 @@ def insertar_citas_per_med():
         print("idmedsol:", idmedsol)
         print("idmedref:", idrad)
 
-        # Quitar el sufijo .000Z antes de convertir
-        init_str = exam['init'].replace('.000Z', '')
-        finish_str = exam['finish'].replace('.000Z', '')
-
-        # Convertir las horas a la zona horaria local y luego restar 3 horas
-        init_local = local_tz.localize(datetime.strptime(init_str, '%Y-%m-%dT%H:%M:%S'))
-        finish_local = local_tz.localize(datetime.strptime(finish_str, '%Y-%m-%dT%H:%M:%S'))
-
-        init_adjusted = init_local - timedelta(hours=3)
-        finish_adjusted = finish_local - timedelta(hours=3)
-
-        # Convertir a formato ISO 8601
-        init_str_adjusted = init_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
-        finish_str_adjusted = finish_adjusted.strftime('%Y-%m-%dT%H:%M:%S')
+        init_str_adjusted = to_utc_naive(exam['init'], DEFAULT_TIMEZONE)
+        finish_str_adjusted = to_utc_naive(exam['finish'], DEFAULT_TIMEZONE)
 
         # Preparar valores para la query (manejar None apropiadamente)
         idmedsol_sql = f"'{idmedsol}'" if idmedsol else 'NULL'
@@ -1002,14 +983,28 @@ def get_data_report():
 
         # Obtener los datos del reporte asociado a la tbexamination
         query_report = """
-            SELECT guid, idpatient, admnumber, idreferringphysician, 
-                   findings, impressions, techniques, conclusions, wassaved 
+            SELECT guid, idpatient, admnumber, idreferringphysician,
+                   study_reason, content, conclusion,
+                   findings, impressions, techniques, conclusions, wassaved
             FROM nextris.tbreport 
             WHERE idexamination = %s
         """
         report_results = DatabaseService.execute_query(query_report, (guid,))
-        report = report_results[0] if report_results else None
-        wassaved = report[8] if report else None
+        raw_report = report_results[0] if report_results else None
+        report_fields = canonical_fields_from_row(
+            raw_report[4] if raw_report else None,
+            raw_report[5] if raw_report else None,
+            raw_report[6] if raw_report else None,
+            legacy_findings=raw_report[7] if raw_report else None,
+            legacy_impressions=raw_report[8] if raw_report else None,
+            legacy_technique=raw_report[9] if raw_report else None,
+            legacy_conclusion=raw_report[10] if raw_report else None,
+            reason_fallback=history or clinical_question,
+        )
+        report = ([raw_report[0], raw_report[1], raw_report[2], raw_report[3],
+                   report_fields['content'], '', '', report_fields['conclusion'], raw_report[11]]
+                  if raw_report else None)
+        wassaved = raw_report[11] if raw_report else None
 
         # Buscar default_predef_id si existe para el studytype
         predef_data = None
@@ -1029,7 +1024,8 @@ def get_data_report():
                 
                 if default_predef_id:
                     query_infpredef = """
-                        SELECT findings, impression, technique, conclusion, tittle 
+                        SELECT study_reason, content, conclusion,
+                               findings, impression, technique, tittle
                         FROM nextris.tbinfpredef 
                         WHERE guid = %s
                     """
@@ -1038,16 +1034,23 @@ def get_data_report():
                     if infpredef_results:
                         infpredef = infpredef_results[0]
                         predef_data = {
-                            'findings': infpredef[0],
-                            'impressions': infpredef[1],
-                            'techniques': infpredef[2],
-                            'conclusions': infpredef[3],
-                            'tittle': infpredef[4]
+                            'study_reason': infpredef[0] or '',
+                            'content': infpredef[1] or '',
+                            'conclusion': infpredef[2] or '',
+                            'findings': infpredef[1] or '',
+                            'impressions': '',
+                            'techniques': '',
+                            'conclusions': infpredef[2] or '',
+                            'tittle': infpredef[6]
                         }
 
         # Crear una respuesta combinada
         response = {
             'report': report,
+            'study_reason': report_fields['study_reason'],
+            'content': report_fields['content'],
+            'conclusion': report_fields['conclusion'],
+            **legacy_aliases(report_fields),
             'isreported': isreported,
             'isimage': isimage,
             'study_instance_uid': study_instance_uid,

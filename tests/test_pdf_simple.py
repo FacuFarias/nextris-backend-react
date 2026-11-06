@@ -7,8 +7,11 @@ Test para verificar que la firma de reportes funciona correctamente después de 
 import sys
 import psycopg2
 
-# Exam ID conocido que tiene reporte
-TEST_EXAM_ID = "646bed76-a9ab-41f4-b9b2-deb6660df876"
+sys.path.insert(0, '/var/www/nextris-dev-react')
+
+# El examen se selecciona dinámicamente para que el test no dependa de datos
+# concretos del entorno.
+TEST_EXAM_ID = None
 
 # Configuración de base de datos
 DB_CONFIG = {
@@ -45,7 +48,7 @@ def test_database_query():
         cursor = connection.cursor()
         
         query = """
-            SELECT p.Surname, p.Name, st.Description, rep.Date, rep.idreferringphysician, 
+            SELECT p.Surname, p.Name, st.Description, rep.Date,
                    rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
             FROM nextris.tbreport rep
             LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
@@ -54,7 +57,20 @@ def test_database_query():
             WHERE rep.IdExamination = %s
         """
         
-        cursor.execute(query, (TEST_EXAM_ID,))
+        cursor.execute("""
+            SELECT e.guid
+            FROM nextris.tbexamination e
+            JOIN nextris.tbreport r ON r.idexamination = e.guid
+            WHERE COALESCE(e.isreported, 0) = 1
+            LIMIT 1
+        """)
+        exam = cursor.fetchone()
+        if not exam:
+            print("✗ No hay informes firmados para probar")
+            cursor.close()
+            connection.close()
+            return False
+        cursor.execute(query, (exam[0],))
         result = cursor.fetchall()
         
         cursor.close()
@@ -75,76 +91,28 @@ def test_database_query():
         return False
 
 def test_pdf_generation_inline():
-    """Generar PDF usando el código inline (sin función importada)"""
-    print("\n=== Probando generación de PDF inline ===")
-    
+    """Verifica que el PDF se renderiza en memoria y no crea archivos."""
+    print("\n=== Probando generación de PDF bajo demanda ===")
     try:
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import letter
+        from run import app
+        from apps.services.report_pdf_service import render_report_pdf
+        from apps.home.services.config_service import ConfigService
         import psycopg2
-        import os
-        
-        # Conectar a BD
-        connection = psycopg2.connect(**DB_CONFIG)
-        cursor = connection.cursor()
-        
-        # Obtener datos
-        query = """
-            SELECT p.Surname, p.Name, st.Description, rep.Date, rep.idreferringphysician, 
-                   rep.Findings, rep.Techniques, rep.Impressions, rep.Conclusions, rep.iduser
-            FROM nextris.tbreport rep
-            LEFT JOIN nextris.tbexamination tbex ON tbex.Guid = rep.IdExamination
-            LEFT JOIN nextris.isstudytype st ON tbex.studytype_id = st.Guid
-            LEFT JOIN nextris.datapatient p ON p.guid = rep.IdPatient
-            WHERE rep.IdExamination = %s
-        """
-        
-        cursor.execute(query, (TEST_EXAM_ID,))
-        result = cursor.fetchall()
-        
-        if not result:
-            print("✗ No se encontraron datos")
-            cursor.close()
-            connection.close()
-            return False
-        
-        data = result[0]
-        surname, name, examen, fecha, refmed, findings, techniques, impressions, conclusions, userid = data
-        
-        # Crear PDF
-        output_dir = 'output_pdfs'
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        
-        pdf_file_path = os.path.join(output_dir, "TEST_INLINE.pdf")
-        
-        c = canvas.Canvas(pdf_file_path, pagesize=letter)
-        width, height = letter
-        
-        # Contenido mínimo
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(50, height - 50, f"Examen: {examen or 'N/A'}")
-        c.setFont("Helvetica", 12)
-        c.drawString(50, height - 80, f"Paciente: {name or ''} {surname or ''}")
-        c.drawString(50, height - 100, f"Fecha: {fecha or 'N/A'}")
-        
-        c.save()
-        
-        cursor.close()
-        connection.close()
-        
-        if os.path.exists(pdf_file_path):
-            size = os.path.getsize(pdf_file_path)
-            print(f"✓ PDF generado: {pdf_file_path} ({size} bytes)")
+        with app.app_context():
+            conn = psycopg2.connect(**ConfigService.get_db_config())
+            cur = conn.cursor()
+            cur.execute("SELECT guid FROM nextris.tbexamination WHERE COALESCE(isreported, 0) = 1 LIMIT 1")
+            exam_id = str(cur.fetchone()[0])
+            cur.close()
+            conn.close()
+            rendered = render_report_pdf(exam_id)
+        if rendered.content.startswith(b"%PDF"):
+            print(f"✓ PDF renderizado en memoria: {len(rendered.content)} bytes")
             return True
-        else:
-            print(f"✗ PDF no se generó")
-            return False
-            
-    except Exception as e:
-        print(f"✗ Error: {e}")
-        import traceback
-        traceback.print_exc()
+        print("✗ El resultado no es un PDF válido")
+        return False
+    except Exception as error:
+        print(f"✗ Error: {error}")
         return False
 
 def main():

@@ -5,136 +5,23 @@ Utilidades de permisos para API JWT.
 
 from functools import wraps
 import uuid
-import unicodedata
 
 import psycopg2
 from flask import jsonify
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt_identity, get_jwt
 
 from apps.api.utils import get_db_config
 
 
-PERMISSION_CATALOG = [
-    # Permisos de pestañas/módulos
-    {'code': 'tabs.patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pestaña Pacientes'},
-    {'code': 'tabs.appointments.view', 'module': 'appointments', 'action': 'view', 'description': 'Ver pestaña Citas'},
-    {'code': 'tabs.admissions.view', 'module': 'admissions', 'action': 'view', 'description': 'Ver pestaña Admisión'},
-    {'code': 'tabs.execution.view', 'module': 'execution', 'action': 'view', 'description': 'Ver pestaña Ejecución'},
-    {'code': 'tabs.reports.view', 'module': 'reports', 'action': 'view', 'description': 'Ver pestaña Redacción/Informes'},
-    {'code': 'tabs.distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
-    {'code': 'tabs.config.view', 'module': 'config', 'action': 'view', 'description': 'Ver pestaña Configuración'},
-    {'code': 'tabs.gestion.view', 'module': 'gestion', 'action': 'view', 'description': 'Ver pestaña Gestión'},
-    {'code': 'tabs.images.view', 'module': 'images', 'action': 'view', 'description': 'Ver pestaña Imágenes'},
-    {'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'},
-    {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'},
-    # Permisos de acciones
-    {'code': 'reports.sign', 'module': 'reports', 'action': 'sign', 'description': 'Firmar informe'},
-    {'code': 'reports.unsign', 'module': 'reports', 'action': 'unsign', 'description': 'Desfirmar informe'},
-    {'code': 'distribution.send_report', 'module': 'distribution', 'action': 'send_report', 'description': 'Enviar informe por email'},
-    {'code': 'distribution.send_report_whatsapp', 'module': 'distribution', 'action': 'send_report_whatsapp', 'description': 'Enviar informe por WhatsApp'},
-    {'code': 'distribution.update_email', 'module': 'distribution', 'action': 'update_email', 'description': 'Actualizar email para distribución'},
-    {'code': 'users.manage', 'module': 'users', 'action': 'manage', 'description': 'Gestionar usuarios'},
-    {'code': 'users.permissions.manage', 'module': 'users', 'action': 'manage_permissions', 'description': 'Gestionar permisos de usuarios'},
-
-    # Permisos solicitados para flujo operativo
-    {'code': 'admissions.view', 'module': 'admissions', 'action': 'view', 'description': 'Ver admisiones'},
-    {'code': 'admissions.create_spontaneous', 'module': 'admissions', 'action': 'create_spontaneous', 'description': 'Generar admisión espontánea'},
-    {'code': 'admissions.admit_appointments', 'module': 'admissions', 'action': 'admit_appointments', 'description': 'Admisionar citas'},
-
-    {'code': 'appointments.view', 'module': 'appointments', 'action': 'view', 'description': 'Ver citas'},
-    {'code': 'appointments.create', 'module': 'appointments', 'action': 'create', 'description': 'Generar citas'},
-
-    {'code': 'distribution.view', 'module': 'distribution', 'action': 'view', 'description': 'Ver pestaña Distribución'},
-    {'code': 'distribution.perform', 'module': 'distribution', 'action': 'perform', 'description': 'Hacer la distribución'},
-
-    {'code': 'execution.view_pending', 'module': 'execution', 'action': 'view_pending', 'description': 'Ver ejecuciones pendientes'},
-    {'code': 'execution.execute', 'module': 'execution', 'action': 'execute', 'description': 'Ejecutar'},
-
-    {'code': 'patients.view', 'module': 'patients', 'action': 'view', 'description': 'Ver pacientes'},
-    {'code': 'patients.manage', 'module': 'patients', 'action': 'manage', 'description': 'Generar nuevos pacientes / editar pacientes'},
-
-    {'code': 'images.view', 'module': 'images', 'action': 'view', 'description': 'Ver imágenes DICOM'},
-    {'code': 'images.share_link', 'module': 'images', 'action': 'share_link', 'description': 'Generar enlace compartido de imágenes'},
-
-    {'code': 'reports.view_writing', 'module': 'reports', 'action': 'view_writing', 'description': 'Ver redacción'},
-    {'code': 'reports.view_reports', 'module': 'reports', 'action': 'view_reports', 'description': 'Ver reportes'},
-]
+from apps.permission_policy import (
+    PERMISSION_CATALOG, VALID_PERMISSION_CODES, DISABLED_MODULES,
+    DEPRECATED_PERMISSION_ALIASES, ROLE_BASED_PERMISSIONS,
+    normalize_permission_code, normalize_permission_codes, normalize_role_name,
+    get_default_permissions_for_role, validate_permission_codes,
+)
 
 
-DEPRECATED_PERMISSION_ALIASES = {
-    # Backward compatibility for renamed permissions.
-    'tabs.preferences.view': 'tabs.gestion.view',
-}
-
-
-def normalize_permission_code(code):
-    if not code:
-        return code
-    return DEPRECATED_PERMISSION_ALIASES.get(code, code)
-
-
-def normalize_permission_codes(permission_codes):
-    normalized = []
-    seen = set()
-
-    for code in permission_codes or []:
-        normalized_code = normalize_permission_code(code)
-        if normalized_code == '*':
-            # '*' es un permiso efectivo por rol, no un permiso personalizado persistible.
-            continue
-        if not normalized_code or normalized_code in seen:
-            continue
-        seen.add(normalized_code)
-        normalized.append(normalized_code)
-
-    return normalized
-
-
-ROLE_BASED_PERMISSIONS = {
-    'sysadmin': {'*'},
-    'administrativo': {
-        'tabs.patients.view',
-        'tabs.appointments.view',
-        'tabs.admissions.view',
-        'tabs.distribution.view',
-    },
-    'tecnico': {
-        'tabs.patients.view',
-        'tabs.execution.view',
-    },
-    'medico': {
-        'tabs.patients.view',
-        'patients.manage',
-        'tabs.admissions.view',
-        'admissions.view',
-        'admissions.create_spontaneous',
-        'tabs.reports.view',
-        'tabs.distribution.view',
-        'distribution.view',
-        'distribution.perform',
-        'distribution.send_report',
-        'distribution.send_report_whatsapp',
-        'distribution.update_email',
-        'reports.sign',
-    },
-}
-
-
-def normalize_role_name(role_name):
-    if not role_name:
-        return ''
-
-    normalized = unicodedata.normalize('NFD', str(role_name))
-    normalized = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
-    return normalized.strip().lower()
-
-
-def get_default_permissions_for_role(role_name):
-    normalized_role = normalize_role_name(role_name)
-    return sorted(ROLE_BASED_PERMISSIONS.get(normalized_role, set()))
-
-
-def ensure_permissions_schema(connection):
+def ensure_permissions_schema(connection, commit=True):
     cursor = connection.cursor()
     try:
         cursor.execute(
@@ -173,14 +60,17 @@ def ensure_permissions_schema(connection):
             ON nextris.rel_user_permission(user_id);
             """
         )
-        connection.commit()
+        if commit:
+            connection.commit()
     except Exception:
-        connection.rollback()
+        if commit:
+            connection.rollback()
+        raise
     finally:
         cursor.close()
 
 
-def seed_permissions(connection):
+def seed_permissions(connection, commit=True):
     cursor = connection.cursor()
     try:
         values = [
@@ -207,20 +97,17 @@ def seed_permissions(connection):
             values,
         )
 
-        deprecated_codes = list(DEPRECATED_PERMISSION_ALIASES.keys())
-        if deprecated_codes:
-            cursor.execute(
-                """
-                UPDATE nextris.ispermission
-                SET is_active = FALSE
-                WHERE code = ANY(%s)
-                """,
-                (deprecated_codes,),
-            )
+        cursor.execute(
+            "UPDATE nextris.ispermission SET is_active = FALSE WHERE NOT (code = ANY(%s))",
+            (list(VALID_PERMISSION_CODES),),
+        )
 
-        connection.commit()
+        if commit:
+            connection.commit()
     except Exception:
-        connection.rollback()
+        if commit:
+            connection.rollback()
+        raise
     finally:
         cursor.close()
 
@@ -234,24 +121,17 @@ def get_permission_catalog(connection=None):
         connection = psycopg2.connect(**config)
 
     try:
-        ensure_permissions_schema(connection)
-        seed_permissions(connection)
         cursor = connection.cursor()
         try:
             cursor.execute(
                 """
                 SELECT code, module, action, description
                 FROM nextris.ispermission
-                WHERE is_active = TRUE
+                WHERE is_active = TRUE AND code = ANY(%s)
                 ORDER BY module, action, code
-                """
+                """, (list(VALID_PERMISSION_CODES),)
             )
             rows = cursor.fetchall()
-        except Exception:
-            rows = [
-                (item['code'], item['module'], item['action'], item['description'])
-                for item in PERMISSION_CATALOG
-            ]
         finally:
             cursor.close()
         return [
@@ -293,13 +173,12 @@ def get_user_permission_codes(user_id, connection=None, include_role_permissions
         connection = psycopg2.connect(**config)
 
     try:
-        ensure_permissions_schema(connection)
-        seed_permissions(connection)
 
         permissions = set()
-        if include_role_permissions:
-            role_name = _get_user_role_name(user_id, connection)
-            permissions.update(get_default_permissions_for_role(role_name))
+        # Roles are editable templates, never runtime grants. Only Sysadmin is global.
+        role_name = _get_user_role_name(user_id, connection)
+        if normalize_role_name(role_name) == 'sysadmin':
+            permissions.add('*')
 
         cursor = connection.cursor()
         try:
@@ -320,7 +199,7 @@ def get_user_permission_codes(user_id, connection=None, include_role_permissions
         finally:
             cursor.close()
 
-        permissions.update(normalize_permission_code(row[0]) for row in rows)
+        permissions.update(code for row in rows if (code := normalize_permission_code(row[0])) in VALID_PERMISSION_CODES)
         return sorted(permissions)
     finally:
         if own_connection and connection:
@@ -333,7 +212,45 @@ def user_has_permission_code(user_id, permission_code, connection=None, include_
         connection=connection,
         include_role_permissions=include_role_permissions,
     )
-    return '*' in codes or permission_code in codes
+    return '*' in codes or normalize_permission_code(permission_code) in codes
+
+
+def user_has_administrator_role(user_id, connection=None):
+    """Indica si el usuario pertenece a un rol administrativo privilegiado."""
+    own_connection = connection is None
+    if own_connection:
+        config = get_db_config()
+        if not config:
+            return False
+        connection = psycopg2.connect(**config)
+
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT r.description
+                FROM nextris.tbuser u
+                LEFT JOIN nextris.isrole r ON r.guid = u.idrole
+                WHERE u.guid = %s
+                LIMIT 1
+                """,
+                (str(user_id),),
+            )
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        return normalize_role_name(row[0] if row else '') in {'sysadmin', 'admin', 'administrador'}
+    except Exception:
+        return False
+    finally:
+        if own_connection and connection:
+            connection.close()
+
+
+def require_admin_permission(permission_code):
+    """Compatibility name: explicit staff permissions determine authorization."""
+    return require_permission(permission_code)
 
 
 def replace_user_permissions(user_id, permission_codes, connection=None):
@@ -345,8 +262,6 @@ def replace_user_permissions(user_id, permission_codes, connection=None):
         connection = psycopg2.connect(**config)
 
     try:
-        ensure_permissions_schema(connection)
-        seed_permissions(connection)
 
         cursor = connection.cursor()
         cursor.execute("SELECT 1 FROM nextris.tbuser WHERE guid = %s", (user_id,))
@@ -354,7 +269,7 @@ def replace_user_permissions(user_id, permission_codes, connection=None):
             cursor.close()
             raise ValueError('Usuario no encontrado')
 
-        normalized_codes = normalize_permission_codes(permission_codes)
+        normalized_codes = validate_permission_codes(permission_codes)
         if normalized_codes:
             cursor.execute(
                 """
@@ -391,46 +306,37 @@ def replace_user_permissions(user_id, permission_codes, connection=None):
                 ],
             )
 
-        connection.commit()
+        if own_connection:
+            connection.commit()
         cursor.close()
         return normalized_codes
     except Exception:
-        connection.rollback()
+        if own_connection:
+            connection.rollback()
         raise
     finally:
         if own_connection and connection:
             connection.close()
 
 
-def require_permission(permission_code, include_role_permissions=False):
-    """
-    Decorador para validar permisos API por usuario.
-
-    Nota: este decorador asume que la ruta ya tiene @jwt_required().
-    """
+def require_any_permission(*permission_codes):
+    """Authorize staff using the exact same saved grants as the session API."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             user_id = get_jwt_identity()
             if not user_id:
-                return jsonify({
-                    'success': False,
-                    'message': 'No autenticado'
-                }), 401
-
-            has_permission = user_has_permission_code(
-                user_id,
-                permission_code,
-                include_role_permissions=include_role_permissions,
-            )
-            if not has_permission:
-                return jsonify({
-                    'success': False,
-                    'message': f'No tiene permiso: {permission_code}'
-                }), 403
-
+                return jsonify(success=False, message='No autenticado'), 401
+            if get_jwt().get('user_type', '').lower() == 'patient':
+                return jsonify(success=False, message='Acceso exclusivo del personal'), 403
+            codes = get_user_permission_codes(user_id)
+            if '*' not in codes and not any(normalize_permission_code(code) in codes for code in permission_codes):
+                return jsonify(success=False, message='No tiene permiso: ' + ', '.join(permission_codes)), 403
             return func(*args, **kwargs)
-
         return wrapper
-
     return decorator
+
+
+def require_permission(permission_code, include_role_permissions=False):
+    # Keep the argument for source compatibility; roles no longer add permissions.
+    return require_any_permission(permission_code)

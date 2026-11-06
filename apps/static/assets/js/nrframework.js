@@ -87,6 +87,9 @@ function VerPDF(idest){
             a.href = url;
             a.target = '_blank';
             a.click();
+            window.setTimeout(function () {
+                window.URL.revokeObjectURL(url);
+            }, 60000);
         })
         .catch(error => {
             console.error('Error:', error);
@@ -962,4 +965,3 @@ function initModalBlurEffect() {
 
 // Inicializar el efecto blur automáticamente
 initModalBlurEffect();
-

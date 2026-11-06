@@ -1,3 +1,4 @@
+import uuid
 """
 Tags API — CRUD de tags por facility y asignación a examinations.
 
@@ -61,7 +62,9 @@ def get_all_tags():
         cursor = connection.cursor()
         cursor.execute(
             """
-            SELECT guid, facility_id, description, is_active, created_at, updated_at
+            -- Algunas instalaciones antiguas no tienen facility_id en tbtags.
+            -- El listado global no necesita ese campo para resolver tags.
+            SELECT guid, NULL::varchar AS facility_id, description, is_active, created_at, updated_at
             FROM nextris.tbtags
             WHERE is_active = TRUE
             ORDER BY description
@@ -89,11 +92,9 @@ def get_tags():
       - facility_id (requerido)
       - include_inactive (opcional, default false)
     """
-    facility_id = request.args.get('facility_id')
+    facility_id = '1'
     include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
 
-    if not facility_id:
-        return jsonify({'success': False, 'message': 'El parámetro facility_id es requerido'}), 400
 
     config = get_db_config()
     if not config:
@@ -106,22 +107,22 @@ def get_tags():
         if include_inactive:
             cursor.execute(
                 """
-                SELECT guid, facility_id, description, is_active, created_at, updated_at
+                SELECT guid, NULL::text AS facility_id, description, is_active, created_at, updated_at
                 FROM nextris.tbtags
-                WHERE facility_id = %s
+                WHERE TRUE
                 ORDER BY description
                 """,
-                (facility_id,)
+                ()
             )
         else:
             cursor.execute(
                 """
-                SELECT guid, facility_id, description, is_active, created_at, updated_at
+                SELECT guid, NULL::text AS facility_id, description, is_active, created_at, updated_at
                 FROM nextris.tbtags
-                WHERE facility_id = %s AND is_active = TRUE
+                WHERE is_active = TRUE
                 ORDER BY description
                 """,
-                (facility_id,)
+                ()
             )
 
         rows = cursor.fetchall()
@@ -153,11 +154,11 @@ def create_tag():
     if not data:
         return jsonify({'success': False, 'message': 'Se requiere un cuerpo JSON'}), 400
 
-    facility_id = data.get('facility_id')
+    facility_id = '1'
     description = (data.get('description') or '').strip()[:20]
 
-    if not facility_id or not description:
-        return jsonify({'success': False, 'message': 'facility_id y description son requeridos'}), 400
+    if not description:
+        return jsonify({'success': False, 'message': 'description es requerido'}), 400
 
     is_active = data.get('is_active', True)
 
@@ -171,11 +172,11 @@ def create_tag():
 
         cursor.execute(
             """
-            INSERT INTO nextris.tbtags (facility_id, description, is_active)
+            INSERT INTO nextris.tbtags (guid, description, is_active)
             VALUES (%s, %s, %s)
             RETURNING guid
             """,
-            (facility_id, description, is_active)
+            (str(uuid.uuid4()), description, is_active)
         )
         new_guid = cursor.fetchone()[0]
         connection.commit()

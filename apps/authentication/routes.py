@@ -396,6 +396,16 @@ def change_password():
         hashed_password = generate_password_hash(new_password)
         
         if is_patient:
+            from apps.services.patient_email_verification import require_password_change_email, VerificationError
+            cursor.execute("SELECT guid FROM nextris.tbuser_patient WHERE username = %s", (username,))
+            patient = cursor.fetchone()
+            try:
+                require_password_change_email(cursor, patient[0] if patient else '')
+            except VerificationError as exc:
+                connection.rollback()
+                cursor.close()
+                connection.close()
+                return jsonify(success=False, message=str(exc)), exc.status
             # Actualizar contraseña en tbuser_patient
             print(f"[CHANGE PASSWORD] Actualizando contraseña en nextris.tbuser_patient para: {username}")
             cursor.execute("""

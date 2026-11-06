@@ -183,11 +183,11 @@ def index():
 def get_dicom_viewer_url():
     """Devuelve la URL del visor DICOM configurado"""
     try:
-        dicom_url = current_app.config.get('DICOM_VIEWER_URL', 'http://192.168.1.45:8085/viewer.html')
+        dicom_url = current_app.config.get('DICOM_VIEWER_URL', 'http://localhost:3000/viewer')
         return jsonify({'url': dicom_url})
     except Exception as e:
         print(f"Error obteniendo URL del visor DICOM: {str(e)}")
-        return jsonify({'url': 'http://192.168.1.45:8085/viewer.html'})  # URL por defecto
+        return jsonify({'url': 'http://localhost:3000/viewer'})  # URL por defecto
 
 @blueprint.route('/generate_dicom_token', methods=['POST'])
 def generate_dicom_token():

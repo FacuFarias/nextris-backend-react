@@ -59,12 +59,10 @@ def get_locations():
     Obtener todas las ubicaciones con sus zonas horarias
     
     Query params:
-    - facility_id: (opcional) Filtrar por facility
     - timezone: (opcional) Filtrar por zona horaria
     """
     try:
         user_id = get_jwt_identity()
-        facility_id = request.args.get('facility_id')
         timezone = request.args.get('timezone')
         
         config = get_db_config()
@@ -74,7 +72,7 @@ def get_locations():
         
         query = """
             SELECT 
-                guid, facility_id, name, code, address, phone, 
+                guid, name, code, address, phone, 
                 status, geographic_location, timezone, created_at, updated_at,
                 gateway_aet, gateway_ip, transmission_type, retention_days,
                 COALESCE(require_execution_before_reporting, TRUE)
@@ -82,10 +80,6 @@ def get_locations():
             WHERE 1=1
         """
         params = []
-        
-        if facility_id:
-            query += " AND facility_id = %s"
-            params.append(facility_id)
         
         if timezone:
             query += " AND timezone = %s"
@@ -100,21 +94,20 @@ def get_locations():
         for loc in locations:
             result.append({
                 'guid': loc[0],
-                'facility_id': loc[1],
-                'name': loc[2],
-                'code': loc[3],
-                'address': loc[4],
-                'phone': loc[5],
-                'status': loc[6],
-                'geographic_location': loc[7],
-                'timezone': loc[8],
-                'created_at': loc[9].isoformat() if loc[9] else None,
-                'updated_at': loc[10].isoformat() if loc[10] else None,
-                'gateway_aet': loc[11],
-                'gateway_ip': loc[12],
-                'transmission_type': loc[13],
-                'retention_days': loc[14],
-                'require_execution_before_reporting': bool(loc[15])
+                'name': loc[1],
+                'code': loc[2],
+                'address': loc[3],
+                'phone': loc[4],
+                'status': loc[5],
+                'geographic_location': loc[6],
+                'timezone': loc[7],
+                'created_at': loc[8].isoformat() if loc[8] else None,
+                'updated_at': loc[9].isoformat() if loc[9] else None,
+                'gateway_aet': loc[10],
+                'gateway_ip': loc[11],
+                'transmission_type': loc[12],
+                'retention_days': loc[13],
+                'require_execution_before_reporting': bool(loc[14])
             })
         
         cursor.close()
@@ -145,7 +138,7 @@ def get_location(guid):
         
         cursor.execute("""
             SELECT 
-                guid, facility_id, name, code, address, phone, 
+                guid, name, code, address, phone, 
                 status, geographic_location, timezone, created_at, updated_at,
                 gateway_aet, gateway_ip, transmission_type, retention_days,
                 COALESCE(require_execution_before_reporting, TRUE)
@@ -167,21 +160,20 @@ def get_location(guid):
             'success': True,
             'data': {
                 'guid': location[0],
-                'facility_id': location[1],
-                'name': location[2],
-                'code': location[3],
-                'address': location[4],
-                'phone': location[5],
-                'status': location[6],
-                'geographic_location': location[7],
-                'timezone': location[8],
-                'created_at': location[9].isoformat() if location[9] else None,
-                'updated_at': location[10].isoformat() if location[10] else None,
-                'gateway_aet': location[11],
-                'gateway_ip': location[12],
-                'transmission_type': location[13],
-                'retention_days': location[14],
-                'require_execution_before_reporting': bool(location[15])
+                'name': location[1],
+                'code': location[2],
+                'address': location[3],
+                'phone': location[4],
+                'status': location[5],
+                'geographic_location': location[6],
+                'timezone': location[7],
+                'created_at': location[8].isoformat() if location[8] else None,
+                'updated_at': location[9].isoformat() if location[9] else None,
+                'gateway_aet': location[10],
+                'gateway_ip': location[11],
+                'transmission_type': location[12],
+                'retention_days': location[13],
+                'require_execution_before_reporting': bool(location[14])
             }
         }), 200
         
@@ -200,7 +192,6 @@ def create_location():
     
     Body JSON:
     {
-        "facility_id": "...",
         "name": "...",
         "code": "...",
         "address": "...",
@@ -213,8 +204,7 @@ def create_location():
     try:
         data = request.get_json()
         
-        # Validar campos requeridos
-        required_fields = ['facility_id', 'name', 'code']
+        required_fields = ['name', 'code']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({
@@ -222,7 +212,6 @@ def create_location():
                     'message': f'El campo {field} es requerido'
                 }), 400
         
-        # Validar que la zona horaria sea válida si se proporciona
         timezone = data.get('timezone')
         if timezone:
             try:
@@ -233,7 +222,6 @@ def create_location():
                     'message': f'Zona horaria inválida: {timezone}'
                 }), 400
         
-        # Validar transmission_type si se proporciona
         transmission_type = data.get('transmission_type', 'Manual')
         if transmission_type not in ('Manual', 'Automatic'):
             return jsonify({
@@ -251,29 +239,14 @@ def create_location():
         ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
-        # Verificar que facility_id exista
-        cursor.execute("""
-            SELECT guid FROM nextris.tbfacility WHERE guid = %s
-        """, (data.get('facility_id'),))
-        
-        if not cursor.fetchone():
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'facility_id no existe'
-            }), 400
-        
-        # Crear la ubicación
         cursor.execute("""
             INSERT INTO nextris.tblocation 
-            (facility_id, name, code, address, phone, geographic_location, timezone, status,
+            (name, code, address, phone, geographic_location, timezone, status,
              gateway_aet, gateway_ip, transmission_type, retention_days,
              require_execution_before_reporting)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING guid, created_at
         """, (
-            data.get('facility_id'),
             data.get('name'),
             data.get('code'),
             data.get('address', ''),
@@ -321,7 +294,6 @@ def update_location(guid):
     try:
         data = request.get_json()
         
-        # Validar zona horaria si se proporciona
         timezone = data.get('timezone')
         if timezone:
             try:
@@ -337,7 +309,6 @@ def update_location(guid):
         ensure_location_report_execution_column(connection)
         cursor = connection.cursor()
         
-        # Verificar que la ubicación exista
         cursor.execute("SELECT guid FROM nextris.tblocation WHERE guid = %s", (guid,))
         if not cursor.fetchone():
             cursor.close()
@@ -347,11 +318,9 @@ def update_location(guid):
                 'message': 'Ubicación no encontrada'
             }), 404
         
-        # Construir query dinámico
         update_fields = []
         params = []
         
-        # Validar transmission_type si se proporciona
         if 'transmission_type' in data and data['transmission_type'] not in ('Manual', 'Automatic'):
             cursor.close()
             connection.close()
@@ -402,7 +371,6 @@ def update_location(guid):
                 'message': 'No hay campos para actualizar'
             }), 400
         
-        # Agregar updated_at
         update_fields.append("updated_at = now()")
         params.append(guid)
         
@@ -435,7 +403,6 @@ def delete_location(guid):
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         
-        # Verificar que existe
         cursor.execute("SELECT guid FROM nextris.tblocation WHERE guid = %s", (guid,))
         if not cursor.fetchone():
             cursor.close()
@@ -445,7 +412,6 @@ def delete_location(guid):
                 'message': 'Ubicación no encontrada'
             }), 404
         
-        # Eliminar
         cursor.execute("DELETE FROM nextris.tblocation WHERE guid = %s", (guid,))
         connection.commit()
         
@@ -510,7 +476,6 @@ def get_current_timezone():
                 'message': 'La ubicación no tiene zona horaria configurada'
             }), 400
         
-        # Obtener la hora actual en esa zona horaria
         tz = pytz.timezone(timezone_str)
         current_time = datetime.now(tz)
         
@@ -542,7 +507,6 @@ def list_timezones():
     try:
         timezones = sorted(pytz.all_timezones)
         
-        # Agrupar por región
         grouped = {}
         for tz in timezones:
             region = tz.split('/')[0]

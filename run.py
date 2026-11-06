@@ -5,7 +5,7 @@ Copyright (c) 2019 - present AppSeed.us
 import requests
 import os
 from   flask_migrate import Migrate
-from   flask_minify  import Minify
+# from   flask_minify  import Minify  # Disabled: incompatible with Python 3.14
 from   flask_cors import CORS
 from   sys import exit
 import mysql.connector
@@ -88,13 +88,21 @@ CORS(app, resources={
 })
 
 if not DEBUG:
-    Minify(app=app, html=True, js=False, cssless=False)
+    pass  # Minify disabled: incompatible with Python 3.14
     
 if DEBUG:
     app.logger.info('DEBUG            = ' + str(DEBUG)             )
     app.logger.info('Page Compression = ' + 'FALSE' if DEBUG else 'TRUE' )
     app.logger.info('DBMS             = ' + app_config.SQLALCHEMY_DATABASE_URI)
     app.logger.info('ASSETS_ROOT      = ' + app_config.ASSETS_ROOT )
+
+# PACS patient listener (DISABLED)
+# Uncomment to re-enable automatic portal user creation via NOTIFY/LISTEN.
+# try:
+#     from apps.home.services.pacs_patient_listener import start_pacs_listener
+#     start_pacs_listener()
+# except Exception as e:
+#     print(f"[WARNING] Could not start PACS patient listener: {e}")
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5001)

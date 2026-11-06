@@ -9,6 +9,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
 from datetime import datetime
+from apps.services.timezone_utils import DEFAULT_TIMEZONE, format_local_datetime
 
 
 def get_db_config():
@@ -338,7 +339,7 @@ def create_admission_from_appointment(appointment_guid):
             """
             SELECT LOWER(COALESCE(p.code, ''))
             FROM nextris.tblocation l
-            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.app_config f ON f.id = 1
             LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
             WHERE l.guid = %s
             LIMIT 1
@@ -401,12 +402,12 @@ def create_admission_from_appointment(appointment_guid):
         
         # Crear nuevo examen en tbexamination
         cursor.execute("""
-            INSERT INTO nextris.tbexamination (
+            INSERT INTO nextris.tbexamination ("w-order", 
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
                 idrequestingphysician, isadmitted, location_id
-            ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, 1, %s
+            ) VALUES (1, 
+                gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -427,7 +428,7 @@ def create_admission_from_appointment(appointment_guid):
             INSERT INTO nextris.tbreport (
                 guid, admnumber, idexamination, idpatient, date
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, NOW()
+                gen_random_uuid(), %s, %s, %s, NOW()
             )
         """, (new_admission, examination_guid, patient_id))
         
@@ -646,7 +647,7 @@ def create_admission_order():
             """
             SELECT LOWER(COALESCE(p.code, ''))
             FROM nextris.tblocation l
-            LEFT JOIN nextris.tbfacility f ON f.guid = l.facility_id
+            LEFT JOIN nextris.app_config f ON f.id = 1
             LEFT JOIN nextris.isplan p ON p.guid = f.plan_id
             WHERE l.guid = %s
             LIMIT 1
@@ -756,12 +757,12 @@ def create_admission_order():
         initial_is_executed = 1 if is_free_plan else 0
 
         cursor.execute("""
-            INSERT INTO nextris.tbexamination (
+            INSERT INTO nextris.tbexamination ("w-order", 
                 guid, studyinstanceuid, idpatient, studytype_id, idequipment,
                 admisionnumber, localacc, createdon, status, isexecuted,
                 idseverity, idrequestingphysician, idreferringphysician, idpricelist, isadmitted, location_id
-            ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, %s, %s, %s, 1, %s
+            ) VALUES (1, 
+                gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW(), 'A', %s, %s, %s, %s, %s, 1, %s
             ) RETURNING guid
         """, (
             study_instance_uid,
@@ -785,7 +786,7 @@ def create_admission_order():
             INSERT INTO nextris.tbreport (
                 guid, admnumber, idexamination, idpatient, date
             ) VALUES (
-                uuid_generate_v4(), %s, %s, %s, NOW()
+                gen_random_uuid(), %s, %s, %s, NOW()
             )
         """, (admission_number, exam_guid, patient[0]))
         
@@ -848,7 +849,7 @@ def appointments_to_admit():
         
         query = """
             SELECT tba.guid, 
-                   COALESCE(pat.name || ' ' || pat.surname, 'Sin paciente') as fullname, 
+                   COALESCE(CONCAT_WS(', ', NULLIF(TRIM(pat.surname), ''), NULLIF(TRIM(pat.name), '')), 'Sin paciente') as fullname,
                    tba.comienzo,
                    tba.idequipment as equipo,
                    tba.location_id as location,
@@ -861,10 +862,13 @@ def appointments_to_admit():
             LEFT JOIN nextris.datapatient pat on tba.idpatient=pat.guid
             LEFT JOIN nextris.isrequestingphysician rp on tba.idmed_sol=rp.guid
             LEFT JOIN nextris.tbuser us on tba.idmed=us.guid
-            LEFT JOIN nextris.isstudytype st on tba.idexam=st.guid
-            LEFT JOIN nextris.isequipment equip on equip.guid=tba.idequipment
-            WHERE isadmitted=false
-            AND DATE(tba.comienzo) = CURRENT_DATE
+             LEFT JOIN nextris.isstudytype st on tba.idexam=st.guid
+             LEFT JOIN nextris.isequipment equip on equip.guid=tba.idequipment
+             LEFT JOIN nextris.tblocation loc_event on loc_event.guid=tba.location_id
+             LEFT JOIN nextris.tblocation loc_equip on loc_equip.guid=equip.location_id
+             WHERE isadmitted=false
+             AND DATE((tba.comienzo AT TIME ZONE 'UTC') AT TIME ZONE COALESCE(loc_equip.timezone, loc_event.timezone, 'America/Argentina/Buenos_Aires')) =
+                 (CURRENT_TIMESTAMP AT TIME ZONE COALESCE(loc_equip.timezone, loc_event.timezone, 'America/Argentina/Buenos_Aires'))::date
             ORDER BY tba.comienzo DESC
         """
         
@@ -874,7 +878,7 @@ def appointments_to_admit():
             results.append({
                 'guid': str(row[0]),
                 'fullname': row[1],
-                'comienzo': row[2].isoformat() if row[2] else None,
+                'comienzo': format_local_datetime(row[2], DEFAULT_TIMEZONE, separator=' ') if row[2] else None,
                 'equipo': row[3],
                 'location': row[4],
                 'medref': row[5],

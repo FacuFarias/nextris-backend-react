@@ -9,6 +9,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 import uuid
 from apps.api import api_blueprint
+from apps.api.permissions import require_permission
+from apps.services.report_fields import canonical_fields_from_row, legacy_aliases, normalize_report_payload
 
 
 def get_db_config():
@@ -22,6 +24,16 @@ def get_db_config():
 
 
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
+
+
+def _template_fields(row):
+    """Resolve canonical template fields while supporting unmigrated rows."""
+    fields = canonical_fields_from_row(
+        row[20], row[21], row[22],
+        legacy_findings=row[8], legacy_impressions=row[10],
+        legacy_technique=row[9], legacy_conclusion=row[11],
+    )
+    return {**fields, **legacy_aliases(fields)}
 
 
 def normalize_report_type(value, default='simple'):
@@ -54,6 +66,43 @@ def ensure_report_type_schema(conn):
                 ADD COLUMN report_type VARCHAR(20) NOT NULL DEFAULT 'simple'
                 """
             )
+
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'nextris'
+                  AND table_name = 'tbinfpredef'
+                  AND column_name = 'isdefault'
+            )
+            """
+        )
+        if not cur.fetchone()[0]:
+            cur.execute(
+                """
+                ALTER TABLE nextris.tbinfpredef
+                ADD COLUMN isdefault SMALLINT NOT NULL DEFAULT 0
+                """
+            )
+
+        for column_name in ('structured_variables', 'criteria'):
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'nextris'
+                      AND table_name = 'tbinfpredef'
+                      AND column_name = %s
+                )
+                """,
+                (column_name,)
+            )
+            if not cur.fetchone()[0]:
+                cur.execute(
+                    f"ALTER TABLE nextris.tbinfpredef ADD COLUMN {column_name} TEXT NOT NULL DEFAULT ''"
+                )
 
         # Backfill y saneamiento para plantillas existentes.
         cur.execute(
@@ -253,6 +302,7 @@ def sync_template_locations(conn, template_id, location_ids):
 
 @api_blueprint.route('/templates', methods=['GET'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def get_templates():
     """
     Obtiene lista de todas las plantillas de informes predefinidos
@@ -347,7 +397,13 @@ def get_templates():
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                ist.code AS study_type_code,
+                ip.structured_variables,
+                ip.criteria,
+                ip.study_reason,
+                ip.content,
+                ip.conclusion
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -388,6 +444,7 @@ def get_templates():
         
         templates = []
         for row in results:
+            fields = _template_fields(row)
             owner_id = row[14] or 'nextris'
             can_edit = is_admin or owner_id == user_id
             can_delete = is_admin or owner_id == user_id
@@ -398,6 +455,7 @@ def get_templates():
                     'guid': row[0],
                     'title': row[1] or '',
                     'study_type_description': row[3] or '',
+                    'study_type_code': row[17] or '',
                     'report_type': row[12] or 'simple',
                     'location_ids': row[13] or [],
                     'owner_id': owner_id,
@@ -405,6 +463,8 @@ def get_templates():
                     'can_delete': can_delete,
                     'is_user_default': is_user_default,
                     'is_system_default': is_system_default,
+                    'structured_variables': row[18] or '',
+                    'criteria': row[19] or '',
                 })
             else:
                 templates.append({
@@ -412,14 +472,12 @@ def get_templates():
                     'title': row[1] or '',
                     'study_type_id': row[2],
                     'study_type_description': row[3] or '',
+                    'study_type_code': row[17] or '',
                     'modality_id': row[4],
                     'modality_description': row[5] or '',
                     'bodypart_id': row[6],
                     'bodypart_description': row[7] or '',
-                    'findings': row[8] or '',
-                    'technique': row[9] or '',
-                    'impression': row[10] or '',
-                    'conclusion': row[11] or '',
+                    **fields,
                     'report_type': row[12] or 'simple',
                     'location_ids': row[13] or [],
                     'owner_id': owner_id,
@@ -427,6 +485,8 @@ def get_templates():
                     'can_delete': can_delete,
                     'is_user_default': is_user_default,
                     'is_system_default': is_system_default,
+                    'structured_variables': row[18] or '',
+                    'criteria': row[19] or '',
                 })
         
         return jsonify({
@@ -444,6 +504,7 @@ def get_templates():
 
 @api_blueprint.route('/templates/<template_id>', methods=['GET'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def get_template(template_id):
     """
     Obtiene una plantilla específica por su ID
@@ -519,7 +580,13 @@ def get_template(template_id):
                     SELECT 1 FROM nextris.tbinfpredef_user_default ud
                     WHERE ud.user_id = %s AND ud.template_id = ip.guid
                 ) AS is_user_default,
-                (ist.default_predef_id = ip.guid) AS is_system_default
+                (ist.default_predef_id = ip.guid OR ip.isdefault = 1) AS is_system_default,
+                ist.code AS study_type_code,
+                ip.structured_variables,
+                ip.criteria,
+                ip.study_reason,
+                ip.content,
+                ip.conclusion
             FROM nextris.tbinfpredef ip
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             LEFT JOIN nextris.ismodality im ON ist.modality_id = im.guid
@@ -538,6 +605,7 @@ def get_template(template_id):
         conn.close()
         
         if result:
+            fields = _template_fields(result)
             owner_id = result[14] or 'nextris'
             can_edit = is_admin or owner_id == user_id
             can_delete = is_admin or owner_id == user_id
@@ -548,14 +616,12 @@ def get_template(template_id):
                 'title': result[1] or '',
                 'study_type_id': result[2],
                 'study_type_description': result[3] or '',
+                'study_type_code': result[17] or '',
                 'modality_id': result[4],
                 'modality_description': result[5] or '',
                 'bodypart_id': result[6],
                 'bodypart_description': result[7] or '',
-                'findings': result[8] or '',
-                'technique': result[9] or '',
-                'impression': result[10] or '',
-                'conclusion': result[11] or '',
+                **fields,
                 'report_type': result[12] or 'simple',
                 'location_ids': result[13] or [],
                 'owner_id': owner_id,
@@ -563,6 +629,8 @@ def get_template(template_id):
                 'can_delete': can_delete,
                 'is_user_default': is_user_default,
                 'is_system_default': is_system_default,
+                'structured_variables': result[18] or '',
+                'criteria': result[19] or '',
             }
             
             return jsonify({
@@ -585,6 +653,7 @@ def get_template(template_id):
 
 @api_blueprint.route('/templates', methods=['POST'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def create_template():
     """
     Crea una nueva plantilla de informe predefinido
@@ -639,12 +708,14 @@ def create_template():
         # Extraer datos
         title = data.get('title', '').strip()
         study_type_id = data.get('study_type_id')
-        findings = data.get('findings', '').strip()
-        technique = data.get('technique', '').strip()
-        impression = data.get('impression', '').strip()
-        conclusion = data.get('conclusion', '').strip()
+        normalized = normalize_report_payload(data)
+        study_reason = normalized.get('study_reason', '').strip()
+        content = normalized.get('content', '').strip()
+        conclusion = normalized.get('conclusion', '').strip()
         report_type = normalize_report_type(data.get('report_type'))
         is_default = data.get('is_default', False)
+        structured_variables = data.get('structured_variables', '').strip()
+        criteria = data.get('criteria', '').strip()
 
         try:
             location_ids = normalize_location_ids(data.get('location_ids', []))
@@ -677,20 +748,23 @@ def create_template():
         # Insertar plantilla
         insert_query = """
             INSERT INTO nextris.tbinfpredef 
-            (guid, tittle, findings, impression, technique, conclusion, studytype_id, report_type, owner_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (guid, tittle, study_reason, content, conclusion, studytype_id,
+             report_type, owner_id, isdefault, structured_variables, criteria)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cur.execute(insert_query, (
             new_guid,
             title,
-            findings,
-            impression,
-            technique,
+            study_reason,
+            content,
             conclusion,
             study_type_id,
             report_type,
-            owner_id
+            owner_id,
+            1 if is_default and is_admin else 0,
+            structured_variables,
+            criteria
         ))
 
         sync_template_locations(
@@ -742,6 +816,7 @@ def create_template():
 
 @api_blueprint.route('/templates/<template_id>', methods=['PUT'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def edit_template(template_id):
     """
     Edita una plantilla de informe existente
@@ -817,12 +892,15 @@ def edit_template(template_id):
         # Extraer datos para actualizar
         title = data.get('title', '').strip()
         study_type_id = data.get('study_type_id')
-        findings = data.get('findings', '').strip()
-        technique = data.get('technique', '').strip()
-        impression = data.get('impression', '').strip()
-        conclusion = data.get('conclusion', '').strip()
+        normalized = normalize_report_payload(data)
+        study_reason = normalized.get('study_reason', '').strip()
+        content = normalized.get('content', '').strip()
+        conclusion = normalized.get('conclusion', '').strip()
         report_type_raw = data.get('report_type')
         report_type = normalize_report_type(report_type_raw) if report_type_raw is not None else None
+        is_default = data.get('is_default')
+        structured_variables = data.get('structured_variables', '').strip()
+        criteria = data.get('criteria', '').strip()
 
         try:
             location_ids = normalize_location_ids(data.get('location_ids', []))
@@ -842,25 +920,63 @@ def edit_template(template_id):
         update_query = """
             UPDATE nextris.tbinfpredef 
             SET tittle = %s,
-                findings = %s,
-                impression = %s,
-                technique = %s,
+                study_reason = %s,
+                content = %s,
                 conclusion = %s,
-                studytype_id = %s,
-                report_type = COALESCE(%s, report_type)
+                 studytype_id = %s,
+                 report_type = COALESCE(%s, report_type),
+                 structured_variables = %s,
+                 criteria = %s
             WHERE guid = %s
         """
         
         cur.execute(update_query, (
             title,
-            findings,
-            impression,
-            technique,
+            study_reason,
+            content,
             conclusion,
             study_type_id,
             report_type,
+            structured_variables,
+            criteria,
             template_id
         ))
+
+        if is_default is not None:
+            if is_admin:
+                cur.execute(
+                    "UPDATE nextris.tbinfpredef SET isdefault = %s WHERE guid = %s",
+                    (1 if is_default else 0, template_id)
+                )
+                if is_default:
+                    cur.execute(
+                        "UPDATE nextris.isstudytype SET default_predef_id = %s WHERE guid = %s",
+                        (template_id, study_type_id)
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE nextris.isstudytype SET default_predef_id = NULL WHERE default_predef_id = %s",
+                        (template_id,)
+                    )
+            elif is_default:
+                cur.execute(
+                    """
+                    INSERT INTO nextris.tbinfpredef_user_default (user_id, template_id, study_type_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, study_type_id) DO UPDATE
+                        SET template_id = EXCLUDED.template_id,
+                            created_on = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, template_id, study_type_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    DELETE FROM nextris.tbinfpredef_user_default
+                    WHERE user_id = %s AND template_id = %s
+                    """,
+                    (user_id, template_id)
+                )
 
         effective_report_type = report_type
         if effective_report_type is None:
@@ -905,6 +1021,7 @@ def edit_template(template_id):
 
 @api_blueprint.route('/templates/<template_id>', methods=['DELETE'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def delete_template(template_id):
     """
     Elimina una plantilla de informe
@@ -1021,6 +1138,7 @@ def delete_template(template_id):
 
 @api_blueprint.route('/templates/set-default', methods=['POST'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def set_default_template():
     """
     Establece una plantilla como predeterminada para un tipo de estudio
@@ -1141,6 +1259,7 @@ def set_default_template():
 
 @api_blueprint.route('/templates/<template_id>/set-user-default', methods=['POST'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def set_user_default_template(template_id):
     """Establece una plantilla propia como el default personal del usuario para ese tipo de estudio."""
     try:
@@ -1195,6 +1314,7 @@ def set_user_default_template(template_id):
 
 @api_blueprint.route('/templates/<template_id>/set-user-default', methods=['DELETE'])
 @jwt_required()
+@require_permission('templates.manage', include_role_permissions=True)
 def unset_user_default_template(template_id):
     """Quita el default personal del usuario para la plantilla indicada."""
     try:

@@ -32,12 +32,17 @@ class Config(object):
     DB_ENGINE   = os.getenv('DB_ENGINE'   , 'postgresql')
     DB_USERNAME = os.getenv('DB_USER' , 'pacs')
     DB_PASS     = os.getenv('DB_PASS'     , 'pacs')
-    DB_HOST     = os.getenv('DB_HOST'     , '192.168.1.47')
+    DB_HOST     = os.getenv('DB_HOST'     , '127.0.0.1')
     DB_PORT     = os.getenv('DB_PORT'     , '5432')
     DB_NAME     = os.getenv('DB_NAME'     , 'pacsdb')
     
     # DICOM Viewer URL
-    DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'http://192.168.1.42:8082/viewer.html')
+    DICOM_VIEWER_URL = os.getenv('DICOM_VIEWER_URL', 'http://localhost:3000/viewer')
+    DICOMWEB_INTERNAL_URL = os.getenv('DICOMWEB_INTERNAL_URL', 'http://127.0.0.1:8088')
+
+    # Public API URL (used for building share links, emails, etc.)
+    PUBLIC_API_URL = os.getenv('PUBLIC_API_URL', '')
+    VIEWER_SHARE_EXPIRATION_HOURS = int(os.getenv('VIEWER_SHARE_EXPIRATION_HOURS', '720'))
 
     # Analytics
     ANALYTICS_ENABLED    = os.getenv('ANALYTICS_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')

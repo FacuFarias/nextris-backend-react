@@ -4,7 +4,7 @@ API REST para Distribución de Informes
 Endpoints para gestión y envío de informes médicos finalizados
 """
 
-from flask import request, jsonify, send_file
+from flask import request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
@@ -13,16 +13,14 @@ import uuid
 import os
 import smtplib
 import requests
+from urllib.parse import urlparse, urlunparse
 import html
 from apps.api.facility_plan_usage import (
     ensure_plan_management_schema,
     check_limit_before_action,
-    increment_usage_counter,
 )
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def get_db_config():
@@ -33,6 +31,17 @@ def get_db_config():
         return config
     except:
         return None
+
+
+def _build_viewer_url(study_uid):
+    """Construye URL absoluta del visor DICOM usando config."""
+    viewer_url_cfg = current_app.config.get(
+        'DICOM_VIEWER_URL',
+        'http://localhost:3000/viewer'
+    )
+    parsed = urlparse(viewer_url_cfg)
+    viewer_base = f"{parsed.scheme}://{parsed.netloc}"
+    return f"{viewer_base}/viewer?StudyInstanceUIDs={study_uid}"
 
 
 def get_user_locations(user_id, connection):
@@ -60,7 +69,7 @@ def get_smtp_fallback_from_any_facility(connection):
                    smtp_from,
                    smtp_from_name,
                    use_tls
-            FROM nextris.tbfacility
+            FROM nextris.app_config
             WHERE COALESCE(TRIM(smtp_user), '') <> ''
               AND COALESCE(TRIM(smtp_password), '') <> ''
             ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
@@ -89,6 +98,7 @@ def get_smtp_fallback_from_any_facility(connection):
 
 @api_blueprint.route('/examinations/distribution', methods=['GET'])
 @jwt_required()
+@require_permission('distribution.view')
 def get_examinations_for_distribution():
     """
     Obtiene exámenes listos para distribuir (informes finalizados)
@@ -123,54 +133,36 @@ def get_examinations_for_distribution():
     """
     try:
         user_id = get_jwt_identity()
-        
+
         config = get_db_config()
         if not config:
             return jsonify({
                 'success': False,
                 'message': 'Error de configuración de base de datos'
             }), 500
-        
+
         # Parámetros
         all_reported = request.args.get('all_reported', 'false').lower() == 'true'
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
-        facility_id = request.args.get('facility_id')
+        date_range = request.args.get('date_range', 'all').strip().lower()
+        date_field = request.args.get('date_field', 'admision').strip().lower()
         per_page = min(per_page, 100)
         offset = (page - 1) * per_page
-        
+
         connection = psycopg2.connect(**config)
         cursor = connection.cursor()
         ensure_plan_management_schema(connection)
         
-        # Obtener ubicaciones del usuario
-        user_locations = get_user_locations(user_id, connection)
-        
-        if not user_locations:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'data': [],
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0
-                }
-            }), 200
-        
         # Query base
         query = """
-            SELECT 
+            SELECT
                 e.guid,
                 TO_CHAR(e.createdon, 'DD/MM/YYYY HH24:MI') as fecha,
                 st.description as examen,
-                CONCAT(dp.name, ' ', dp.surname) as paciente,
+                CONCAT_WS(', ', NULLIF(TRIM(dp.surname), ''), NULLIF(TRIM(dp.name), '')) as paciente,
                 COALESCE(dp.email, '') as mail,
-                CASE 
-                    WHEN COALESCE(e.ispublicated, 0) = 1 THEN 'E'
-                    ELSE 'R'
-                END as estado,
+                CASE WHEN COALESCE(e.ispublicated, 0) = 1 THEN 'E' ELSE 'R' END as estado,
                 COALESCE(u.name || ' ' || COALESCE(u.surname, ''), u.username, '') as medico_autor,
                 COALESCE(rp.description, '') as medico_solicitante,
                 COALESCE(e.stat, 'N') as urgencia,
@@ -179,7 +171,8 @@ def get_examinations_for_distribution():
                 COALESCE(e.isexecuted, 0) as isexecuted,
                 COALESCE(e.ispublicated, 0) as ispublicated,
                 e.localacc as accession_number,
-                COALESCE(dp.phone, '') as phone
+                COALESCE(dp.phone, '') as phone,
+                NULL::text as sent_at, NULL::text as send_error
             FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.idpatient = dp.guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
@@ -188,20 +181,35 @@ def get_examinations_for_distribution():
             LEFT JOIN nextris.isrequestingphysician rp ON e.idrequestingphysician = rp.guid
             LEFT JOIN nextris.tbreport r ON r.idexamination = e.guid
             LEFT JOIN nextris.tbuser u ON r.iduser = u.guid
-            WHERE COALESCE(e.location_id, eq.location_id) = ANY(%s)
-            AND e.isreported = 1
+            WHERE e.isreported = 1
         """
-        
-        params = [user_locations]
-        
+
+        params = []
+
         # Si no se quieren los ya enviados, filtrar
         if not all_reported:
-            query += " AND (e.ispublicated IS NULL OR e.ispublicated = 0)"
+            query += " AND COALESCE(e.ispublicated, 0) = 0"
 
-        if facility_id:
-            query += " AND loc.facility_id = %s"
-            params.append(facility_id)
-        
+        # Filtro de fechas
+        date_intervals = {
+            '1d': '1 day',
+            '3d': '3 days',
+            '7d': '7 days',
+            '14d': '14 days',
+            '1m': '1 month',
+            '2m': '2 months',
+            '3m': '3 months',
+            '1y': '1 year'
+        }
+        if date_range in date_intervals:
+            if date_field == 'estudio':
+                date_column = 'e.reportdate'
+            elif date_field == 'enviado':
+                date_column = 'e.reportdate'
+            else:  # admision
+                date_column = 'e.createdon'
+            query += f" AND {date_column} BETWEEN CURRENT_TIMESTAMP - INTERVAL '{date_intervals[date_range]}' AND CURRENT_TIMESTAMP"
+
         query += " ORDER BY e.createdon DESC"
         
         # Contar total
@@ -235,7 +243,9 @@ def get_examinations_for_distribution():
                 'isexecuted': bool(row[11]),
                 'ispublicated': bool(row[12]),
                 'accession_number': row[13] or '',
-                'phone': row[14] or ''
+                'phone': row[14] or '',
+                'sent_at': row[15] or None,
+                'send_error': row[16] or None
             })
         
         return jsonify({
@@ -306,7 +316,7 @@ def send_report_email(exam_id):
         # Obtener información del reporte y examen
         query = """
             SELECT 
-                r.pdfpath,
+                r.guid,
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
                 ex.localacc as accession_number,
@@ -327,7 +337,7 @@ def send_report_email(exam_id):
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
             LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
             LEFT JOIN nextris.tblocation l ON COALESCE(ex.location_id, eq.location_id) = l.guid
-            LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+            LEFT JOIN nextris.app_config f ON f.id = 1
             WHERE ex.guid = %s
         """
         
@@ -342,7 +352,6 @@ def send_report_email(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
         
-        pdf_path = result[0]
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
@@ -389,14 +398,14 @@ def send_report_email(exam_id):
                     }
                 }), 409
         
-        if not pdf_path or not os.path.exists(pdf_path):
+        from apps.services.report_view_service import ReportViewUnavailable, resolve_report_view, report_view_text
+        try:
+            external_text = report_view_text(resolve_report_view(exam_id)['report'])
+        except ReportViewUnavailable as error:
             cursor.close()
             connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'PDF del informe no encontrado'
-            }), 404
-        
+            return jsonify({'success': False, 'message': str(error), 'code': error.code}), error.status
+
         if not smtp_user or not smtp_password:
             smtp_fallback = get_smtp_fallback_from_any_facility(connection)
             if smtp_fallback:
@@ -435,7 +444,7 @@ def send_report_email(exam_id):
         viewer_text_block = ""
         viewer_html_block = ""
         if has_images and study_uid:
-            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_url = _build_viewer_url(study_uid)
             viewer_text_block = (
                 "\n\nPuede visualizar las imágenes médicas en el siguiente enlace:\n"
                 f"{viewer_url}\n"
@@ -453,7 +462,8 @@ def send_report_email(exam_id):
 
         body_text = (
             f"Estimado/a {patient_name or 'Paciente'},\n\n"
-            "Le enviamos adjunto su informe médico en formato PDF.\n\n"
+            "Informe médico consultado en NextRIS:\n\n"
+            f"{external_text}\n\n"
             f"Estudio: {study_type or 'Estudio'}\n"
             f"Número de acceso: {accession_number or 'N/A'}"
             f"{viewer_text_block}\n"
@@ -483,7 +493,7 @@ def send_report_email(exam_id):
                     <tr>
                         <td style=\"padding:24px; color:#e8ebff;\">
                             <p style=\"margin:0 0 14px 0; font-size:16px; line-height:1.5;\">Estimado/a <strong>{patient_name_safe}</strong>:</p>
-                            <p style=\"margin:0 0 18px 0; font-size:15px; line-height:1.6; color:#cdd3ff;\">Le enviamos adjunto su informe médico en formato PDF.</p>
+                            <p style=\"margin:0 0 18px 0; font-size:15px; line-height:1.6; color:#cdd3ff;\">Informe médico consultado en NextRIS:</p>
 
                             <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background:#11152d; border:1px solid #2b325f; border-radius:10px;\">
                                 <tr>
@@ -494,6 +504,7 @@ def send_report_email(exam_id):
                                 </tr>
                             </table>
 
+                            <pre style="white-space:pre-wrap">{html.escape(external_text)}</pre>
                             {viewer_html_block}
 
                             <p style=\"margin:24px 0 0 0; font-size:12px; color:#97a0d6; line-height:1.5;\">Este es un mensaje automático generado por NextRIS. Por favor, no responder a este correo.</p>
@@ -516,18 +527,6 @@ def send_report_email(exam_id):
         alternative_part.attach(MIMEText(body_text, 'plain', 'utf-8'))
         alternative_part.attach(MIMEText(body_html, 'html', 'utf-8'))
         msg.attach(alternative_part)
-        
-        # Adjuntar PDF
-        with open(pdf_path, 'rb') as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
-        
-        encoders.encode_base64(part)
-        part.add_header(
-            'Content-Disposition',
-            f'attachment; filename= informe_{accession_number}.pdf'
-        )
-        msg.attach(part)
         
         # Enviar email
         if not smtp_user or not smtp_password:
@@ -611,8 +610,6 @@ def send_report_email(exam_id):
         """
         cursor.execute(update_query, (exam_id,))
 
-        if facility_id and not already_publicated:
-            increment_usage_counter(connection, facility_id, 'distributed', 1)
 
         connection.commit()
         
@@ -723,71 +720,14 @@ def update_examination_email(exam_id):
 @api_blueprint.route('/examinations/<exam_id>/report/view', methods=['GET'])
 @jwt_required()
 def view_examination_report(exam_id):
-    """
-    Visualiza el PDF del informe de un examen en el navegador
-    
-    Path:
-    - exam_id: GUID del examen
-    
-    Returns:
-    - Archivo PDF del reporte para visualizar en el navegador
-    """
-    try:
-        config = get_db_config()
-        if not config:
-            return jsonify({
-                'success': False,
-                'message': 'Error de configuración de base de datos'
-            }), 500
-        
-        connection = psycopg2.connect(**config)
-        cursor = connection.cursor()
-        
-        # Obtener ruta del PDF
-        query = """
-            SELECT r.pdfpath
-            FROM nextris.tbreport r
-            INNER JOIN nextris.tbexamination e ON r.idexamination = e.guid
-            WHERE e.guid = %s
-        """
-        cursor.execute(query, (exam_id,))
-        result = cursor.fetchone()
-        
-        cursor.close()
-        connection.close()
-        
-        if not result or not result[0]:
-            return jsonify({
-                'success': False,
-                'message': 'Informe PDF no disponible para este examen'
-            }), 404
-        
-        pdf_path = result[0]
-        
-        # Normalizar y verificar que el archivo existe
-        absolute_path = os.path.abspath(os.path.normpath(pdf_path))
-        
-        if not os.path.exists(absolute_path):
-            return jsonify({
-                'success': False,
-                'message': 'Archivo PDF no encontrado en el sistema'
-            }), 404
-        
-        # Enviar el PDF para visualizar en el navegador (no como descarga)
-        return send_file(
-            absolute_path,
-            mimetype='application/pdf'
-        )
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        }), 500
+    """Read the report from NextRIS."""
+    from apps.services.report_view_service import report_view_response
+    return report_view_response(exam_id)
 
 
 @api_blueprint.route('/examinations/<exam_id>/dicom-viewer', methods=['GET'])
 @jwt_required()
+@require_permission('images.view')
 def get_dicom_viewer_info(exam_id):
     """
     Obtiene la información necesaria para abrir el visor DICOM
@@ -856,7 +796,10 @@ def get_dicom_viewer_info(exam_id):
             }), 404
 
         # Construir URL del visor
-        viewer_url = f"/viewer?studyUID={study_uid}"
+        viewer_url_cfg = current_app.config.get('DICOM_VIEWER_URL', 'http://localhost:3000/viewer')
+        parsed = urlparse(viewer_url_cfg)
+        viewer_base = f"{parsed.scheme}://{parsed.netloc}"
+        viewer_url = f"{viewer_base}/viewer?StudyInstanceUIDs={study_uid}"
 
         # Verificar si existen imágenes (opcional, basado en la existencia de archivos)
         has_images = True  # Por defecto asumimos que sí hay imágenes si tiene study_uid
@@ -887,7 +830,7 @@ def get_dicom_viewer_info(exam_id):
 # ====================================================================
 
 def send_whatsapp_document(api_url, api_token, phone_number_id, recipient_phone,
-                           pdf_path, caption, document_filename):
+                           pdf_content, caption, document_filename):
     """
     Envía un documento PDF por WhatsApp usando la Meta Cloud API.
 
@@ -903,14 +846,13 @@ def send_whatsapp_document(api_url, api_token, phone_number_id, recipient_phone,
     # Paso 1: Subir el PDF como media
     upload_url = f"{api_url}/{phone_number_id}/media"
 
-    with open(pdf_path, 'rb') as pdf_file:
-        upload_response = requests.post(
-            upload_url,
-            headers=headers_auth,
-            files={'file': (document_filename, pdf_file, 'application/pdf')},
-            data={'messaging_product': 'whatsapp', 'type': 'application/pdf'},
-            timeout=30
-        )
+    upload_response = requests.post(
+        upload_url,
+        headers=headers_auth,
+        files={'file': (document_filename, pdf_content, 'application/pdf')},
+        data={'messaging_product': 'whatsapp', 'type': 'application/pdf'},
+        timeout=30
+    )
 
     if upload_response.status_code != 200:
         return False, f"Error al subir media: {upload_response.status_code} - {upload_response.text}"
@@ -1042,7 +984,7 @@ def send_report_whatsapp(exam_id):
         # Obtener información del reporte, examen y config WhatsApp de la facility
         query = """
             SELECT
-                r.pdfpath,
+                r.guid,
                 CONCAT(dp.name, ' ', dp.surname) as patient_name,
                 st.description as study_type,
                 ex.localacc as accession_number,
@@ -1061,7 +1003,7 @@ def send_report_whatsapp(exam_id):
             LEFT JOIN nextris.tbreport r ON r.idexamination = ex.guid
             LEFT JOIN nextris.isequipment eq ON ex.idequipment = eq.guid
             LEFT JOIN nextris.tblocation l ON eq.location_id = l.guid
-            LEFT JOIN nextris.tbfacility f ON l.facility_id = f.guid
+            LEFT JOIN nextris.app_config f ON f.id = 1
             WHERE ex.guid = %s
         """
 
@@ -1076,7 +1018,6 @@ def send_report_whatsapp(exam_id):
                 'message': 'Examen no encontrado'
             }), 404
 
-        pdf_path = result[0]
         patient_name = result[1]
         study_type = result[2]
         accession_number = result[3]
@@ -1128,30 +1069,32 @@ def send_report_whatsapp(exam_id):
                 }
             }), 500
 
-        if not pdf_path or not os.path.exists(pdf_path):
+        from apps.services.report_view_service import ReportViewUnavailable, resolve_report_view, report_view_text
+        try:
+            external_text = report_view_text(resolve_report_view(exam_id)['report'])
+        except ReportViewUnavailable as error:
             cursor.close()
             connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'PDF del informe no encontrado'
-            }), 404
+            return jsonify({'success': False, 'message': str(error), 'code': error.code}), error.status
 
         # Construir caption del documento
         caption = (
             f"Estimado/a {patient_name},\n\n"
-            f"Adjunto el informe médico correspondiente al estudio: {study_type}\n"
+            f"Informe médico correspondiente al estudio: {study_type}\n"
             f"Número de acceso: {accession_number}\n\n"
             f"Este es un mensaje automático.\n"
             f"- {sender_name}"
         )
 
-        document_filename = f"informe_{accession_number}.pdf"
-
-        # Enviar documento PDF por WhatsApp
-        success, message = send_whatsapp_document(
-            wa_api_url, wa_api_token, wa_phone_number_id,
-            clean_phone, pdf_path, caption, document_filename
-        )
+        # Preserve long reports across text messages instead of truncating them.
+        report_message = f"{caption}\n\n{external_text}"
+        for offset in range(0, len(report_message), 3500):
+            success, message = send_whatsapp_text(
+                wa_api_url, wa_api_token, wa_phone_number_id,
+                clean_phone, report_message[offset:offset + 3500]
+            )
+            if not success:
+                break
 
         if not success:
             cursor.close()
@@ -1163,7 +1106,7 @@ def send_report_whatsapp(exam_id):
 
         # Si hay imágenes DICOM, enviar link del visor en un segundo mensaje
         if has_images and study_uid:
-            viewer_url = f"https://viewer.nextris.cloud/viewer?StudyInstanceUIDs={study_uid}"
+            viewer_url = _build_viewer_url(study_uid)
             viewer_text = (
                 f"Para visualizar las imágenes médicas de su estudio ({study_type}), "
                 f"acceda al siguiente enlace:\n\n{viewer_url}"
@@ -1181,8 +1124,6 @@ def send_report_whatsapp(exam_id):
         """
         cursor.execute(update_query, (exam_id,))
 
-        if facility_id and not already_publicated:
-            increment_usage_counter(connection, facility_id, 'distributed', 1)
 
         connection.commit()
 

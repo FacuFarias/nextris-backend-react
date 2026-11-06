@@ -42,10 +42,10 @@ def unprocessable_error(error):
 
 # Importar rutas DICOM
 from apps.api import dicom_routes
+from apps.api import image_deletions
 
 
 # Importar las rutas después de crear el blueprint para evitar imports circulares
-from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general, execution, admissions, images, transcription, distribution, patient_portal, templates, filter_presets, tags, nexi, analytics
-
-# Importar rutas de integración
+from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general, execution, admissions, images, transcription, distribution, patient_portal, templates, filter_presets, hanging_protocols, tags, nexi, analytics, external
 from apps.api.integration import orders, hl7_oru
+from apps.api import presentation_states
