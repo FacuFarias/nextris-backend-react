@@ -164,6 +164,10 @@ def _get_user_role_name(user_id, connection):
     return row[0] if row and row[0] else None
 
 
+def user_is_admin(user_id, connection):
+    return normalize_role_name(_get_user_role_name(user_id, connection)) in ('sysadmin', 'admin', 'administrador')
+
+
 def get_user_permission_codes(user_id, connection=None, include_role_permissions=False):
     own_connection = connection is None
     if own_connection:

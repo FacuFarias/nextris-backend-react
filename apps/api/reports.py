@@ -8,7 +8,8 @@ from flask import request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 import psycopg2
 from apps.api import api_blueprint
-from apps.api.permissions import get_user_permission_codes, require_permission
+from apps.api.permissions import get_user_permission_codes, require_permission, user_is_admin
+from apps.services.signature_policy import TEST_SIGNATURE_NAME, TEST_SIGNATURE_REGISTRATION, signature_problem
 import uuid
 import os
 import re
@@ -3743,44 +3744,29 @@ def sign_report(exam_id):
         ensure_workflow_schema(connection)
         cursor = connection.cursor()
 
-        # Verificar que el médico tenga firma habilitada antes de permitir firmar
+        # Los datos propios tienen prioridad, también para un médico que además es admin.
         cursor.execute("""
-            SELECT firma_habilitada, aclaracion_firma, matricula_nacional
+            SELECT firma_habilitada, aclaracion_firma
             FROM nextris.tbuser_medical_data
             WHERE user_id = %s
         """, (reporter_physician_id,))
         medical_data = cursor.fetchone()
+        problem = signature_problem(medical_data)
 
-        if not medical_data:
+        # Solo para quien firma por sí mismo: nunca se cargan datos de prueba a otro profesional.
+        if problem and str(reporter_physician_id) == str(get_jwt_identity()) and user_is_admin(reporter_physician_id, connection):
+            cursor.execute("""
+                INSERT INTO nextris.tbuser_medical_data (user_id, aclaracion_firma, matricula_nacional, firma_habilitada)
+                VALUES (%s, %s, %s, TRUE)
+                ON CONFLICT (user_id) DO NOTHING
+            """, (reporter_physician_id, TEST_SIGNATURE_NAME, TEST_SIGNATURE_REGISTRATION))
+            problem = None
+
+        if problem:
             cursor.close()
             connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'No se encontraron datos médicos para el usuario. Complete su perfil con aclaración de firma y matrícula antes de firmar.',
-                'error_code': 'MEDICAL_DATA_MISSING'
-            }), 400
+            return jsonify({'success': False, 'message': problem[1], 'error_code': problem[0]}), 400
 
-        firma_habilitada, aclaracion_firma, matricula_nacional = medical_data
-
-        if not firma_habilitada:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Su firma digital no está habilitada. Habilite su firma en Configuración > Datos Médicos antes de firmar reportes.',
-                'error_code': 'SIGNATURE_NOT_ENABLED'
-            }), 400
-
-        if not aclaracion_firma or not matricula_nacional:
-            cursor.close()
-            connection.close()
-            return jsonify({
-                'success': False,
-                'message': 'Faltan datos de firma (aclaración o matrícula). Complete su perfil médico antes de firmar.',
-                'error_code': 'SIGNATURE_DATA_INCOMPLETE'
-            }), 400
-
-        
         # Obtener datos del examen para el nombre del PDF
         cursor.execute("""
             SELECT e.LocalAcc,

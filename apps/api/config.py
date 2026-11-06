@@ -3786,8 +3786,9 @@ def save_user_medical_data(user_id):
     created_paths = []
     committed = False
     try:
-        aclaracion_firma = request.form.get('aclaracion_firma')
-        matricula_nacional = request.form.get('matricula_nacional')
+        aclaracion_firma = (request.form.get('aclaracion_firma') or '').strip()
+        # Opcional: la columna es NOT NULL, así que sin matrícula se guarda vacía.
+        matricula_nacional = (request.form.get('matricula_nacional') or '').strip()
         enabled = request.form.get('firma_habilitada')
         if enabled is not None:
             if enabled.lower() not in ('true', 'false'):
@@ -3796,8 +3797,8 @@ def save_user_medical_data(user_id):
         integration_id_1 = request.form.get('integration_id_1', '').strip()
         if len(integration_id_1) > 100:
             raise ValueError('El identificador de integración admite hasta 100 caracteres')
-        if not aclaracion_firma or not matricula_nacional:
-            return jsonify(success=False, message='aclaracion_firma y matricula_nacional son requeridos'), 400
+        if not aclaracion_firma:
+            return jsonify(success=False, message='aclaracion_firma es requerida'), 400
 
         # Validate both files before creating any file or changing metadata.
         uploads = {}
