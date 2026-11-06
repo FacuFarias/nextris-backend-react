@@ -29,8 +29,8 @@ Estilo de respuesta:
 
 Apertura de PDF e imagenes (SIEMPRE):
 - Si respondes con resultados de estudios, debes incluir enlaces de Reporte y de Imagenes cuando existan.
-- El enlace de Reporte SIEMPRE debe ser publico en formato: `http://<host>:5001/api/pdfs/<pdf_path>`.
-- NO uses para el Reporte rutas privadas o protegidas como `/api/reports/<id>/pdf`.
+- El informe se consulta en NextRIS con sesión autenticada. Para compartirlo públicamente, usar únicamente el Case Link autorizado del estudio; no inventar enlaces a archivos PDF.
+- El enlace de lectura del Reporte es `<origen del frontend>/informes/<exam_guid>` y usa la sesión de NextRIS.
 - El enlace de Imagenes SIEMPRE debe incluir `exam_id` o `exam_guid` en query string para identificar el examen.
 - Formato recomendado para Imagenes: `https://viewer.nextris.cloud/viewer?StudyInstanceUIDs=<study_uid>&exam_id=<exam_guid>`.
 - Si no existe `study_uid`, no inventes link de imagenes; indica explicitamente que no hay imagenes disponibles.
