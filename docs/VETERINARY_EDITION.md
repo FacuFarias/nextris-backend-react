@@ -242,6 +242,7 @@ DICOM by content, accepts one `StudyInstanceUID` per upload and sends nothing to
 an animal and either an existing order or report generation. Order, draft report and link are committed together
 after every instance and one frame are confirmed readable in PACS. A failed transfer stays `retryable` and only
 resends missing instances; the selection cannot change once a transfer began. Originals are kept (`*.original`).
+There is no size limit per upload: it is bounded by `NEXTRIS_UPLOAD_MAX_FILES` and by free disk space (HTTP 507).
 
 Migration: `python deployment/migrate_veterinary_uploads.py --apply` (requires the veterinary base migration).
 Tests: `NEXTRIS_VETERINARY_TESTS=1 python tests/test_veterinary_uploads.py`, on a `*_test` database with the API

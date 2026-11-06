@@ -58,8 +58,8 @@ def detail(key):
 def add_file(key):
     data=request.get_json(silent=True) or {}
     name=uploads.safe_name(data.get('name',''));size=data.get('size')
-    if isinstance(size,bool) or not isinstance(size,int) or not 0<size<=uploads.MAX_BYTES:
-        raise vet.VeterinaryError('Tamaño de archivo inválido o superior al límite')
+    if isinstance(size,bool) or not isinstance(size,int) or size<=0:
+        raise vet.VeterinaryError('Tamaño de archivo inválido')
     with vet.database() as connection,connection.cursor(cursor_factory=RealDictCursor) as q:
         upload=accessible(q,key)
         if upload['state']!='receiving':raise vet.VeterinaryError('La carga ya no acepta archivos',409)
@@ -68,10 +68,12 @@ def add_file(key):
         if existing:
             if existing['expected_bytes']!=size:raise vet.VeterinaryError('El archivo cambió; inicie una carga nueva',409)
             return reply({'id':existing['id'],'received_bytes':existing['received_bytes'],'size':size})
-        q.execute('SELECT count(*) AS n FROM nextris.veterinary_upload_file WHERE session_id=%s',(key,))
-        if q.fetchone()['n']>=uploads.MAX_FILES or upload['total_bytes']+size>uploads.MAX_BYTES:
-            raise vet.VeterinaryError('La carga supera el límite de archivos o tamaño',413)
-        if shutil.disk_usage(uploads.root()).free<(upload['total_bytes']+size)*3+1024**3:
+        q.execute('SELECT count(*) AS n,COALESCE(sum(received_bytes),0) AS stored FROM nextris.veterinary_upload_file WHERE session_id=%s',(key,))
+        current=q.fetchone()
+        if current['n']>=uploads.MAX_FILES:
+            raise vet.VeterinaryError('La carga supera el límite de archivos',413)
+        # Original, prepared copy and PACS copy; what was already received is no longer part of the free space.
+        if shutil.disk_usage(uploads.root()).free+current['stored']<(upload['total_bytes']+size)*3+1024**3:
             raise vet.VeterinaryError('No hay espacio suficiente para conservar los archivos de esta carga',507)
         file_id=str(uuid.uuid4())
         q.execute('INSERT INTO nextris.veterinary_upload_file(id,session_id,name,expected_bytes) VALUES(%s,%s,%s,%s)',(file_id,key,name,size))

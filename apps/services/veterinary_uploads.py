@@ -17,7 +17,6 @@ from psycopg2.extras import Json, RealDictCursor
 from apps.services import veterinary as vet
 from apps.services.veterinary_integration import reconcile_dataset
 
-MAX_BYTES = int(os.getenv('NEXTRIS_UPLOAD_MAX_BYTES', str(2*1024**3)))
 MAX_FILES = int(os.getenv('NEXTRIS_UPLOAD_MAX_FILES', '10000'))
 CHUNK_BYTES = 8*1024**2
 BUSY = ('queued_analysis','analyzing','queued_transfer','transferring','verifying')
@@ -96,7 +95,7 @@ def dto(cursor, row):
     result={key:row[key] for key in ['id','state','total_bytes','summary','result','error','created_at','updated_at','transfer_started']}
     result.update(progress)
     result['selection']={key:row['selection'].get(key) for key in ['mode','patient_id','exam_id','study_type_id']}
-    result['limits']={'max_bytes':MAX_BYTES,'max_files':MAX_FILES,'chunk_bytes':CHUNK_BYTES}
+    result['limits']={'max_files':MAX_FILES,'chunk_bytes':CHUNK_BYTES}
     return vet.plain(result)
 
 
@@ -179,10 +178,9 @@ def analyse_archive(upload, row):
     with zipfile.ZipFile(path) as archive:
         members=[member for member in archive.infolist() if not member.is_dir()]
         with vet.database() as connection,connection.cursor(cursor_factory=RealDictCursor) as q:
-            q.execute('SELECT count(*) AS n,COALESCE(sum(expected_bytes),0) AS size FROM nextris.veterinary_upload_file WHERE session_id=%s AND id<>%s AND kind<>\'zip\'',(upload['id'],row['id']))
+            q.execute('SELECT count(*) AS n FROM nextris.veterinary_upload_file WHERE session_id=%s AND id<>%s AND kind<>\'zip\'',(upload['id'],row['id']))
             current=q.fetchone()
             if len(members)+current['n']>MAX_FILES:raise vet.VeterinaryError('La carga supera el límite de archivos')
-            if sum(member.file_size for member in members)+current['size']>MAX_BYTES:raise vet.VeterinaryError('El ZIP supera el límite descomprimido')
             if shutil.disk_usage(root()).free<sum(member.file_size for member in members)*2+1024**3:
                 raise vet.VeterinaryError('No hay espacio suficiente para procesar y conservar los originales',507)
             for index,member in enumerate(members):

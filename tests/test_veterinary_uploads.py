@@ -310,6 +310,15 @@ class VeterinaryUploadTests(unittest.TestCase):
         directory=self.uploads.root()/key;self.assertTrue(directory.exists())
         self.uploads.expire_abandoned();self.assertFalse(directory.exists());self.assertEqual(self.detail(key)['state'],'expired')
 
+    def test_09_upload_size_only_bounded_by_disk(self):
+        session=self.call('POST','/veterinary/uploads',{}).json()['data'];key=session['id']
+        self.assertNotIn('max_bytes',session['limits'])
+        add=lambda name,size:self.call('POST',f'/veterinary/uploads/{key}/files',{'name':name,'size':size})
+        self.assertEqual(add('over-old-limit',3*1024**3).status_code,201)
+        self.assertEqual(add('beyond-disk',10**15).status_code,507)
+        self.assertEqual(add('zero',0).status_code,400)
+        self.assertEqual(self.detail(key)['total_bytes'],3*1024**3)
+
     def test_10_guarded_downgrade(self):
         sys.path.insert(0,str(ROOT/'deployment'))
         import migrate_veterinary_uploads as migration
