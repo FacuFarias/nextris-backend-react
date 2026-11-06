@@ -23,6 +23,15 @@ def normalize_email(value):
 
 
 def lock_patient(cursor, user_id):
+    if os.getenv('NEXTRIS_PATIENT_MODE', 'human') == 'veterinary':
+        cursor.execute('''SELECT rp.email FROM nextris.responsible_party rp
+            JOIN nextris.tbuser_patient up ON up.responsible_party_id=rp.id
+            WHERE up.guid=%s FOR UPDATE OF rp''', (user_id,))
+        responsible = cursor.fetchone()
+        if responsible:
+            cursor.execute('''SELECT verified_email,email_code_hash,email_code_address,email_code_expires,
+                email_code_sent_at,email_code_attempts FROM nextris.tbuser_patient WHERE guid=%s FOR UPDATE''',(user_id,))
+            return responsible[0], cursor.fetchone()
     # Same lock order as profile updates: patient first, then portal account.
     cursor.execute('''SELECT dp.email FROM nextris.datapatient dp
         JOIN nextris.tbuser_patient up ON up.datapatient_id = dp.guid

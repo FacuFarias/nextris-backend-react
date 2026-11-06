@@ -115,6 +115,13 @@ def resolve_report_view(exam_id, *, connection=None):
                 date=row['createdon'].isoformat() if row['createdon'] else None),
             institution=dict(name=row['institution_name'], address=row['address'], phone=row['phone'],
                 email=row['mail'], logo=inline_image(row['logo_path'])), signatures=signatures)
+        from apps.services.veterinary import mode as patient_mode, report_context
+        if patient_mode() == 'veterinary':
+            context = report_context(connection, exam_id)
+            if context:
+                document['veterinary'] = context
+                document['patient']['name'] = context['name']
+                document['patient']['identifier'] = context['patientid']
         return dict(source='nextris', report=report, document=document)
     finally:
         if owned:

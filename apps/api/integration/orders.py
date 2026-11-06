@@ -24,6 +24,14 @@ def find_or_create_patient(cursor, patient_data):
     Busca un paciente por DNI o lo crea si no existe.
     Retorna el guid UUID (no el patientid) porque tbexamination.idpatient referencia datapatient.guid.
     """
+    from apps.services.veterinary import mode as patient_mode, VeterinaryError
+    if patient_mode() == 'veterinary':
+        external_id = str(patient_data.get('id') or '')
+        cursor.execute("SELECT guid FROM nextris.datapatient WHERE patient_kind='animal' AND (patientid=%s OR guid=%s)",(external_id,external_id))
+        row=cursor.fetchone()
+        if not row:
+            raise VeterinaryError('Registre primero el animal y utilice su PatientID, no el documento del responsable',409)
+        return row[0]
     dni = patient_data.get('dni')
     name = patient_data.get('name', '')
     

@@ -43,10 +43,12 @@ def register_context_processors(app):
 def register_blueprints(app, enable_legacy_ui=False):
     # La API debe estar siempre disponible para frontend React y clientes externos.
     from apps.api import api_blueprint
-    from apps.home.controllers.structured_reports_controller import structured_reports_bp
+    from apps.permission_policy import DISABLED_MODULES
 
     app.register_blueprint(api_blueprint)
-    app.register_blueprint(structured_reports_bp)
+    if 'structured_reports' not in DISABLED_MODULES:
+        from apps.home.controllers.structured_reports_controller import structured_reports_bp
+        app.register_blueprint(structured_reports_bp)
 
     if enable_legacy_ui:
         for module_name in ('authentication', 'home'):
@@ -224,6 +226,8 @@ def create_app(config):
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    from apps.services.veterinary_hooks import register_veterinary
+    register_veterinary(app)
     setup_analytics_middleware(app)
 
     return app

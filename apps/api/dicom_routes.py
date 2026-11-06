@@ -76,6 +76,8 @@ def validate_dicom(filepath):
             'sop_instance_uid': str(getattr(ds, 'SOPInstanceUID', 'Unknown')),
             'accession_number': str(getattr(ds, 'AccessionNumber', 'Unknown')),
         }
+        from apps.services.veterinary_integration import read_veterinary_metadata
+        info['veterinary'] = read_veterinary_metadata(ds)
         return True, info
     except Exception as e:
         print(f"[ERROR] Error validando DICOM: {str(e)}")
@@ -166,6 +168,15 @@ def manual_upload():
                 'error': f'Tipo de archivo no permitido. Extensiones válidas: {", ".join(ALLOWED_EXTENSIONS)}'
             }), 400
         
+        from apps.services.veterinary import mode as patient_mode, VeterinaryError
+        if patient_mode() == 'veterinary':
+            from apps.services.veterinary_integration import prepare_manual_upload
+            try:
+                prepare_manual_upload(file, request.form.get('patient_id'), request.form.get('exam_id'),
+                    request.form.get('confirm_identity') == 'true', get_jwt_identity())
+            except VeterinaryError as error:
+                return jsonify(success=False,message=str(error)), error.status
+
         location_id = request.form.get('location_id', '').strip() or None
 
         # Validar límite mensual de recepción por facility antes de guardar/transferir.
@@ -234,6 +245,9 @@ def manual_upload():
             # Sin autenticación - usuario por defecto
             user_guid = None
             username = 'Manual Upload'
+            if patient_mode() == 'veterinary':
+                user_guid = str(get_jwt_identity())
+                username = 'Veterinary authenticated upload'
             facility_id = None
             
             conn = psycopg2.connect(**config)

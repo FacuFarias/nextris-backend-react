@@ -319,6 +319,9 @@ def _load_share_scope(raw_token):
         row = cursor.fetchone()
         if not row or row[3] or not row[2] or datetime.utcnow() >= row[2]:
             return None
+        from apps.services.veterinary import mode as patient_mode, share_access_valid
+        if patient_mode() == 'veterinary' and not share_access_valid(connection, row[0]):
+            return None
         if (row[4] or 'image_share') == 'image_share':
             from apps.services.image_deletions import study_has_images
             if not study_has_images(row[1]):

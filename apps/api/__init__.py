@@ -46,6 +46,10 @@ from apps.api import image_deletions
 
 
 # Importar las rutas después de crear el blueprint para evitar imports circulares
-from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general, execution, admissions, images, transcription, distribution, patient_portal, templates, filter_presets, hanging_protocols, tags, nexi, analytics, external
+from apps.api import auth, patients, studies, admin, appointments, institutional, medical, reports, config, general, execution, admissions, images, transcription, distribution, patient_portal, templates, filter_presets, hanging_protocols, tags, analytics, external
+from apps.permission_policy import DISABLED_MODULES
+
+if 'nexi' not in DISABLED_MODULES:
+    from apps.api import nexi
 from apps.api.integration import orders, hl7_oru
 from apps.api import presentation_states

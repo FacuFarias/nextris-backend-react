@@ -333,6 +333,17 @@ def _select_predefined_template_for_exam(
     user_id=None,
 ):
     """Selecciona plantilla siguiendo la regla inteligente/simple por facility."""
+    from apps.services.veterinary import mode as patient_mode
+    if patient_mode() == 'veterinary':
+        exam_id = (request.view_args or {}).get('exam_id')
+        cursor.execute("""SELECT ip.guid,ip.study_reason,ip.content,ip.conclusion,ip.technique,ip.findings,ip.impression
+            FROM nextris.tbinfpredef ip
+            WHERE ip.patient_kind IN ('animal','any') AND ip.studytype_id=%s AND ip.report_type='simple'
+            AND (ip.species_id IS NULL OR ip.species_id=(SELECT p.species_id FROM nextris.tbexamination e
+                JOIN nextris.datapatient p ON p.guid=e.idpatient WHERE e.guid=%s))
+            ORDER BY (ip.species_id IS NOT NULL) DESC,ip.isdefault DESC,ip.tittle LIMIT 1""",(study_type_id,exam_id))
+        row=cursor.fetchone()
+        return _serialize_template_candidate(row,'simple') if row else None
     if not study_type_id:
         return None
 
@@ -2351,18 +2362,23 @@ def get_examination_report(exam_id):
             'conclusion': _collect_placeholder_candidates(conclusion),
         } if debug_requested else None
 
-        sr_variable_values = _get_sr_variable_values(cursor, study_instance_uid)
-        sr_variables_list = _build_sr_variables_list(sr_variable_values)
-        sr_parser_context = _get_sr_parser_context(cursor, study_instance_uid)
-        sr_variable_tree = _build_sr_variable_tree(
-            cursor,
-            (sr_parser_context or {}).get('parser_family'),
-            sr_variable_values,
-            study_instance_uid,
-        )
-        study_reason = _replace_sr_placeholders(study_reason, sr_variable_values)
-        content = _replace_sr_placeholders(content, sr_variable_values)
-        conclusion = _replace_sr_placeholders(conclusion, sr_variable_values)
+        sr_variable_values = {}
+        sr_variables_list = []
+        sr_parser_context = None
+        sr_variable_tree = []
+        if structured_enabled:
+            sr_variable_values = _get_sr_variable_values(cursor, study_instance_uid)
+            sr_variables_list = _build_sr_variables_list(sr_variable_values)
+            sr_parser_context = _get_sr_parser_context(cursor, study_instance_uid)
+            sr_variable_tree = _build_sr_variable_tree(
+                cursor,
+                (sr_parser_context or {}).get('parser_family'),
+                sr_variable_values,
+                study_instance_uid,
+            )
+            study_reason = _replace_sr_placeholders(study_reason, sr_variable_values)
+            content = _replace_sr_placeholders(content, sr_variable_values)
+            conclusion = _replace_sr_placeholders(conclusion, sr_variable_values)
 
         debug_after = {
             'study_reason': _collect_placeholder_candidates(study_reason),
@@ -2373,6 +2389,11 @@ def get_examination_report(exam_id):
         cursor.close()
         connection.close()
 
+        from apps.services.veterinary import mode as patient_mode, database as veterinary_database, report_context
+        veterinary_context = None
+        if patient_mode() == 'veterinary':
+            with veterinary_database() as veterinary_connection:
+                veterinary_context=report_context(veterinary_connection,exam_id)
         response_payload = {
             'success': True,
             'data': {
@@ -2387,6 +2408,7 @@ def get_examination_report(exam_id):
                 'location_id': str(location_id) if location_id else None,
                 'facility_id': str(facility_id) if facility_id else None,
                 'structured_reports_enabled': bool(structured_enabled),
+                'veterinary_context': veterinary_context,
                 'applied_template_id': selected_template_id,
                 'applied_template_name': selected_template_name,
                 'applied_template_report_type': selected_template_report_type,
@@ -3074,6 +3096,9 @@ def get_predefined_reports():
             LEFT JOIN nextris.isstudytype ist ON ip.studytype_id = ist.guid
             ORDER BY ip.tittle ASC
         """
+        from apps.services.veterinary import mode as patient_mode
+        if patient_mode() == 'veterinary':
+            query=query.replace('ORDER BY ip.tittle ASC',"WHERE ip.patient_kind IN ('animal','any') ORDER BY ip.tittle ASC")
         cursor.execute(query)
         results = cursor.fetchall()
         
@@ -3842,6 +3867,9 @@ def sign_report(exam_id):
                 'message': f'Examen no encontrado: {exam_id}'
             }), 404
 
+        from apps.services.veterinary import mode as patient_mode, report_context
+        if patient_mode() == 'veterinary':
+            report_context(connection, exam_id, freeze=True)
         connection.commit()
 
         # HL7 ORU: enviar reporte firmado si la facility lo tiene habilitado

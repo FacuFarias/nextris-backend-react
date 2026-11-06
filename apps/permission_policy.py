@@ -122,6 +122,13 @@ PERMISSION_CATALOG = [{'code': 'tabs.appointments.view',
 
 PERMISSION_CATALOG += [{'code': 'tabs.structured_reports.view', 'module': 'structured_reports', 'action': 'view', 'description': 'Ver pestaña Reportes estructurados'}, {'code': 'tabs.nexi.view', 'module': 'nexi', 'action': 'view', 'description': 'Ver pestaña Nexi'}]
 
+PERMISSION_CATALOG += [dict(code='veterinary.'+name,module='veterinary',action=name,description=description) for name,description in (
+    ('responsibles.manage','Gestionar responsables y titularidad animal'),
+    ('portal.manage','Autorizar portal y crear cuentas de responsables'),
+    ('history.manage','Registrar antecedentes y peso del animal'),
+    ('protocols.manage','Administrar protocolos veterinarios'),
+    ('catalogs.manage','Administrar especies y razas'),
+)] if os.getenv('NEXTRIS_PATIENT_MODE','human') == 'veterinary' else []
 PERMISSION_CATALOG = [p for p in PERMISSION_CATALOG if p["module"] not in DISABLED_MODULES]
 VALID_PERMISSION_CODES = frozenset(p["code"] for p in PERMISSION_CATALOG)
 

@@ -23,6 +23,9 @@ def send_report_hl7(exam_id):
     3. Envía el ORU via HL7Service.send_report_oru()
     4. Nunca lanza excepción al caller — solo loguea errores
     """
+    from apps.services.veterinary import mode
+    if mode() == 'veterinary':
+        return  # Veterinary edition is manual-only; human HL7 remains unchanged.
     try:
         db_config = get_db_config()
         if not db_config:

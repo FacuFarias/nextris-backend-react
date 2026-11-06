@@ -41,9 +41,17 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     story += [paragraph(document['institution'].get('name') or 'NextRIS', 'Title'),
               paragraph(report.get('procedimientos') or 'Informe médico', 'Heading2'),
               paragraph('Paciente: ' + document['patient']['name']),
-              paragraph('Documento: ' + str(document['patient'].get('national_code') or document['patient'].get('identifier') or '')),
+              paragraph(('Identificador del animal: ' if document.get('veterinary') else 'Documento: ') + str(document['patient'].get('national_code') or document['patient'].get('identifier') or '')),
               paragraph('Número de acceso: ' + str(report.get('accession_number') or '')),
               paragraph('Fecha del informe: ' + str(report.get('fecha') or '')), Spacer(1, 5*mm)]
+    context = document.get('veterinary')
+    if context:
+        reproductive = {'unknown':'Desconocido','intact':'No esterilizado','neutered':'Esterilizado'}.get(context.get('reproductive_status'),'')
+        responsible = ', '.join(r['name'] for r in context.get('responsibles',[])) or 'Pendiente'
+        for label, value in [('Especie',context.get('species_name')),('Raza',context.get('breed_name')),
+            ('Nacimiento' + (' estimado' if context.get('birthdate_estimated') else ''),context.get('birthdate')),
+            ('Sexo',context.get('gender')),('Estado reproductivo',reproductive),('Peso (kg)',context.get('weight_kg')),('Responsable registrado al firmar',responsible)]:
+            story.append(paragraph(label + ': ' + str(value if value is not None else 'No informado')))
     for key, section in report.get('textos', {}).items():
         story += [paragraph(section.get('as') or key, 'Heading3'),
                   paragraph(plain_report_text(section.get('contenido'))), Spacer(1, 4*mm)]
