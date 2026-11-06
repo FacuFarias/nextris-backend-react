@@ -228,3 +228,8 @@ accepts search (name/document/email/phone), `kind`, `is_active`, supported colum
 sorting. Without `paginated=true`, the original list contract used by relationship selectors remains
 unchanged. SQL filter values are parameterized and sortable/filterable identifiers are allowlisted.
 No schema migration or permission changes are required for this directory update.
+
+Veterinary `GET /api/examinations/for-reporting` includes `responsible_name`, aggregating current
+animal relationships (primary first). Global search matches responsible names; column filters
+`responsible_name` and `responsible_query` and sorting by `responsible_name` operate in SQL
+before pagination. Human mode does not query veterinary relationships or expose this field.

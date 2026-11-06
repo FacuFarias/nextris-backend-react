@@ -164,6 +164,27 @@ class VeterinaryApiTests(unittest.TestCase):
         self.assertEqual(str(updated.PatientID),a['patientid']);self.assertEqual(str(updated.PatientName),a['name']);self.assertEqual(len(updated.OriginalAttributesSequence),1)
         self.assertEqual(float(updated.PatientWeight),7.75);self.assertEqual(str(updated.PatientSexNeutered),'UNALTERED')
 
+    def test_08_worklist_responsible_search_filter_and_revocation(self):
+        prefix='Worklist-'+uuid.uuid4().hex[:10]
+        a=self.new_animal(name=prefix+' Animal A');b=self.new_animal(name=prefix+' Animal B')
+        owners=[]
+        for patient,suffix in [(a,'Alpha'),(b,'Beta')]:
+            party=self.call('POST','/veterinary/responsibles',{'name':prefix+' '+suffix,'kind':'person'}).json()['data']
+            rel=self.call('POST','/veterinary/patients/'+patient['guid']+'/responsibles',{'responsible_id':party['id'],'role':'owner','is_primary':True}).json()['data']
+            order=self.call('POST','/veterinary/patients/'+patient['guid']+'/orders',{'study_type_id':self.study_type})
+            self.assertEqual(order.status_code,201,order.text);owners.append((party,rel,order.json()['data']['guid']))
+        path='/examinations/for-reporting?show_ready=true&show_no_image=true&show_without_order=true&search='+prefix
+        r=self.call('GET',path+'&per_page=1&sort_column=responsible_name&sort_direction=asc');self.assertEqual(r.status_code,200,r.text)
+        data=r.json()['data'];self.assertEqual(data['total'],2);self.assertEqual(data['data'][0]['responsible_name'],owners[0][0]['name'])
+        import json
+        r=self.call('GET',path+'&column_filters='+requests.utils.quote(json.dumps({'responsible_query':'Beta'})))
+        self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['data']['total'],1);self.assertEqual(r.json()['data']['data'][0]['guid'],owners[1][2])
+        r=self.call('GET','/examinations/for-reporting?show_ready=true&show_no_image=true&show_without_order=true&search='+requests.utils.quote(owners[0][0]['name']))
+        self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['data']['total'],1)
+        self.assertEqual(self.call('POST','/veterinary/relationships/'+owners[0][1]['id']+'/end',{}).status_code,200)
+        r=self.call('GET',path+'&column_filters='+requests.utils.quote(json.dumps({'responsible_name':'Alpha'})))
+        self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['data']['total'],0)
+
     def test_07_patient_and_responsible_directory_filters(self):
         prefix='Directory-'+uuid.uuid4().hex[:10]
         dog=self.new_animal(name=prefix+' Alpha',veterinary={'species_id':self.dog})

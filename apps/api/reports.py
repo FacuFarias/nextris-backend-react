@@ -1443,6 +1443,12 @@ def get_examinations_for_reporting():
             reported_filter += f" OR {cancelled_condition}"
         reported_filter += ")"
 
+        from apps.services.veterinary import mode as patient_mode
+        veterinary_mode = patient_mode() == 'veterinary'
+        responsible_expression = """COALESCE((SELECT string_agg(r.name, ', ' ORDER BY pr.is_primary DESC, r.name)
+            FROM nextris.patient_responsibility pr JOIN nextris.responsible_party r ON r.id=pr.responsible_id
+            WHERE pr.patient_id=dp.guid AND pr.valid_from<=now()
+            AND (pr.valid_to IS NULL OR pr.valid_to>now())), '')""" if veterinary_mode else "''::text"
         base_query = f"""
             SELECT e.Guid, 
                    CONCAT_WS(', ', NULLIF(TRIM(dp.Surname), ''), NULLIF(TRIM(dp.Name), '')) as patient_name,
@@ -1531,6 +1537,7 @@ def get_examinations_for_reporting():
                    ,ps.study_date AS study_date
                    ,ps.study_time AS study_time
                    ,ps.created_time AS arrival_time
+                   ,{responsible_expression} AS responsible_name
              FROM nextris.tbexamination e
             LEFT JOIN nextris.datapatient dp ON e.IdPatient = dp.Guid
             LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.Guid
@@ -1597,7 +1604,8 @@ def get_examinations_for_reporting():
         # Búsqueda libre por paciente, Patient ID, DNI, admisión, accession o estudio.
         if search:
             search_pattern = f"%{search.lower()}%"
-            base_query += """
+            responsible_search = f"OR LOWER({responsible_expression}) LIKE %s" if veterinary_mode else ""
+            base_query += f"""
                 AND (
                     LOWER(COALESCE(CONCAT(dp.Name, ' ', dp.Surname), '')) LIKE %s
                     OR LOWER(COALESCE(dp.patientid, '')) LIKE %s
@@ -1605,9 +1613,10 @@ def get_examinations_for_reporting():
                     OR LOWER(COALESCE(e.LocalAcc, '')) LIKE %s
                     OR LOWER(COALESCE(e.AdmisionNumber, '')) LIKE %s
                     OR LOWER(COALESCE(st.Description, '')) LIKE %s
+                    {responsible_search}
                 )
             """
-            params.extend([search_pattern] * 6)
+            params.extend([search_pattern] * (7 if veterinary_mode else 6))
 
         if patient_id_exact:
             base_query += " AND LOWER(BTRIM(COALESCE(dp.patientid, ''))) = LOWER(%s)"
@@ -1697,6 +1706,8 @@ def get_examinations_for_reporting():
             'report_date': 'e.reportdate',
             'num_instances': 'nextris.available_image_count_for_exam(e.guid)',
         }
+        if veterinary_mode:
+            filter_columns.update(responsible_name=responsible_expression, responsible_query=responsible_expression)
         for key, value in column_filters.items():
             expression = filter_columns.get(key)
             if expression and value.strip():
@@ -1727,6 +1738,8 @@ def get_examinations_for_reporting():
             'arrival_time': 'ps.created_time',
             'workflow_state': "COALESCE(e.workflow_state, 'pending')",
         }
+        if veterinary_mode:
+            sort_columns['responsible_name'] = responsible_expression
         sort_expression = sort_columns.get(sort_column, 'e.CreatedOn')
         direction = 'ASC' if sort_direction == 'asc' else 'DESC'
         query = base_query + f"""
@@ -1796,6 +1809,7 @@ def get_examinations_for_reporting():
                 'study_date': row[50] or None,
                 'study_time': row[51] or None,
                 'arrival_time': row[52].isoformat() if row[52] else None,
+                **({'responsible_name': row[53] or ''} if veterinary_mode else {}),
              })
         
         cursor.close()
