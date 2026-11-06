@@ -16,6 +16,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Flowable, Frame, Image, PageTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.platypus.flowables import TopPadder
 
+from apps.services.report_image_qr import qr_block
 from apps.services.report_view_service import ReportTextParser
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -155,7 +156,7 @@ def _signature(signature, name_style, small_style):
     return block
 
 
-def render(view, background, plain_report_text, *, title=None):
+def render(view, background, plain_report_text, *, title=None, image_link=None):
     _fonts()
     report, document = view['report'], view['document']
     context = document.get('veterinary') or {}
@@ -186,8 +187,15 @@ def render(view, background, plain_report_text, *, title=None):
             continue
         story += [SectionHeading((section.get('as') or key).upper()), Spacer(1, 8),
                   Paragraph(_report_markup(section.get('contenido')), text), Spacer(1, 17)]
-    for signature in document.get('signatures', []):
-        story.append(TopPadder(_signature(signature, name, small)))
+    closing = [_signature(signature, name, small) for signature in document.get('signatures', [])]
+    if image_link:
+        # Junto a la última firma: TopPadder ocupa el resto de la página y un bloque aparte saltaría a otra hoja.
+        last = Table([[qr_block(image_link, name, small), closing.pop() if closing else '']], colWidths=[WIDTH - 230, 230])
+        last.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM'), ('ALIGN', (0, 0), (0, 0), 'LEFT'), ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                                  ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                                  ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
+        closing.append(last)
+    story += [TopPadder(block) for block in closing]
 
     image = ImageReader(str(background))
 

@@ -160,6 +160,57 @@ def create_for_exam(examination_id, created_by=None, connection=None, share_type
             connection.close()
 
 
+def report_image_link(examination_id):
+    """Image link to print on a report PDF, or None when the study must not offer one.
+
+    Reuses the active link, so regenerating a PDF keeps earlier copies working.
+    A study whose latest link was revoked gets no new one: replaced links always
+    have a newer sibling, so that state means someone cut off access on purpose.
+    Portal links are short viewer sessions tied to an account, so they are ignored.
+    """
+    connection = psycopg2.connect(**db_config())
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT ex.studyinstanceuid
+                FROM nextris.tbexamination ex
+                JOIN nextris.available_pacs_study ps ON ps.study_iuid = ex.studyinstanceuid
+                WHERE ex.guid = %s
+                LIMIT 1
+                """,
+                (str(examination_id),),
+            )
+            study = cursor.fetchone()
+            if not study:
+                return None
+            # PDF viewers can request a file several times at once. Without this
+            # lock, each request would create a link and revoke the other's QR.
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(study[0]),))
+            cursor.execute(
+                """
+                SELECT short_code, expires_at, revoked
+                FROM nextris.tbviewer_share_link
+                WHERE study_iuid = %s
+                  AND share_type = 'image_share'
+                  AND portal_account_id IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (str(study[0]),),
+            )
+            latest = cursor.fetchone()
+        if latest and latest[2]:
+            return None
+        if latest and latest[0] and latest[1] > datetime.utcnow():
+            return {"share_url": short_share_url(str(latest[0])), "expires_at": latest[1]}
+        link = create_for_exam(examination_id, connection=connection)
+        connection.commit()
+        return link
+    finally:
+        connection.close()
+
+
 def get_or_create_active_for_exam(examination_id, created_by=None, connection=None, share_type="image_share"):
     """Return an active reusable share link, creating it only when needed."""
     if share_type not in ("case_link", "image_share"):

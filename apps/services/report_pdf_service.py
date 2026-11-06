@@ -44,11 +44,13 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     view = view or resolve_report_view(exam_id)
     safe_id = ''.join(c for c in str(exam_id) if c.isalnum() or c in '-_')
     from apps.services.report_letterhead_pdf import letterhead_path, render as render_letterhead
+    from apps.services.report_image_qr import image_link_for, qr_block
+    image_link = image_link_for(view)
     background = letterhead_path()
     if background:
         accession = ''.join(c for c in str(view['report'].get('accession_number') or '') if c.isalnum() or c in '-_')
         name = filename or report_filename(view) or f'informe_{accession or safe_id}.pdf'
-        return RenderedReportPdf(render_letterhead(view, background, plain_report_text, title=name.removesuffix('.pdf')), name)
+        return RenderedReportPdf(render_letterhead(view, background, plain_report_text, title=name.removesuffix('.pdf'), image_link=image_link), name)
     report, document = view['report'], view['document']
     styles = getSampleStyleSheet()
     output = BytesIO()
@@ -93,5 +95,8 @@ def render_report_pdf(exam_id, *, filename=None, view=None):
     footer = ' · '.join(str(document['institution'].get(key)) for key in ('address','phone','email') if document['institution'].get(key))
     if footer:
         story += [Spacer(1, 8*mm), paragraph(footer)]
+    if image_link:
+        centered = styles['Normal'].clone('centered', alignment=1)
+        story += [Spacer(1, 8*mm), qr_block(image_link, centered, centered)]
     pdf.build(story)
     return RenderedReportPdf(output.getvalue(), filename or report_filename(view) or f'informe_{safe_id}.pdf')
