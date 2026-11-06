@@ -77,7 +77,6 @@ DB_PORT=5432
 DB_NAME=pacsdb
 
 IPSERVER=148.230.72.8
-BASE_FOLDER=/app/output_pdfs
 
 SECRET_KEY=nextris_dev_secret_key_12345
 DICOM_VIEWER_URL=https://viewer.nextris.cloud/

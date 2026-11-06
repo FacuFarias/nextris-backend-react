@@ -1,0 +1,18 @@
+[Unit]
+Description=NextRIS image deletion and availability worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nextris
+WorkingDirectory=/opt/nextris/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/nextris/backend/venv/bin/flask --app apps.image_worker image-deletion-worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

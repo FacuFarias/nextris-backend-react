@@ -64,30 +64,16 @@ sudo -u nextris venv/bin/pip install -r requirements.txt
 sudo -u nextris venv/bin/pip install gunicorn
 
 echo -e "${YELLOW}6. Configurando variables de entorno...${NC}"
-cat > /var/www/nextris-dev/.env << 'EOF'
-DEBUG=True
-FLASK_APP=run.py
-FLASK_DEBUG=1
-
-DB_USER=pacs
-DB_PASS=pacs
-DB_HOST=148.230.72.8
-DB_PORT=5432
-DB_NAME=pacsdb
-
-IPSERVER=148.230.72.8
-BASE_FOLDER=/var/www/nextris-dev/output_pdfs
-
-SECRET_KEY=nextris_dev_secret_key_12345
-DICOM_VIEWER_URL=https://viewer.nextris.cloud/
-EOF
+if [ ! -f /var/www/nextris-dev/.env ]; then
+    cp /var/www/nextris-dev/.env.example /var/www/nextris-dev/.env
+    echo "Configure DB_PASS, SECRET_KEY y JWT_SECRET_KEY en /var/www/nextris-dev/.env; luego ejecute nuevamente el instalador."
+    exit 1
+fi
 
 chown nextris:nextris /var/www/nextris-dev/.env
 
 echo -e "${YELLOW}7. Creando directorios necesarios...${NC}"
-mkdir -p /var/www/nextris-dev/output_pdfs
 mkdir -p /var/www/nextris-dev/media/firmas
-chown -R nextris:nextris /var/www/nextris-dev/output_pdfs
 chown -R nextris:nextris /var/www/nextris-dev/media
 
 echo -e "${YELLOW}8. Sincronizando frontend...${NC}"
