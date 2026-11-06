@@ -1628,10 +1628,26 @@ def get_public_case(short_code):
         if not row:
             return jsonify({'success': False, 'message': 'Estudio no encontrado'}), 404
 
+        responsibles = []
+        from apps.services.veterinary import mode as patient_mode
+        if patient_mode() == 'veterinary':
+            # Enlace público: solo datos de contacto de los responsables vigentes.
+            cursor.execute("""
+                SELECT r.name, pr.role, r.phone, r.email
+                FROM nextris.tbexamination e
+                JOIN nextris.patient_responsibility pr ON pr.patient_id = e.idpatient
+                JOIN nextris.responsible_party r ON r.id = pr.responsible_id
+                WHERE e.guid = %s AND pr.valid_from <= NOW() AND (pr.valid_to IS NULL OR pr.valid_to > NOW())
+                ORDER BY pr.is_primary DESC, pr.valid_from
+            """, (row[0],))
+            responsibles = [{'name': name, 'role': role, 'phone': phone or None, 'email': email or None}
+                            for name, role, phone, email in cursor.fetchall()]
+
         public_base = _get_public_api_url()
         return jsonify({
             'success': True,
             'data': {
+                'responsibles': responsibles,
                 'expires_at': scope['expires_at'].isoformat() + 'Z',
                 'patient': {
                     'name': row[2],

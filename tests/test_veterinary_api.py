@@ -92,6 +92,8 @@ class VeterinaryApiTests(unittest.TestCase):
             q.execute("INSERT INTO nextris.tbviewer_share_link(guid,token_hash,short_code,study_iuid,created_by_user_id,expires_at,share_type,portal_account_id,patient_id) VALUES(%s,%s,%s,%s,%s,now()+interval '15 minutes','case_link',%s,%s)",(share,hashlib.sha256(uuid.uuid4().bytes).hexdigest(),code,uid,session['user']['id'],session['user']['id'],a['guid']))
         self.db.commit()
         self.assertEqual(self.call('GET','/s/'+code+'/report',headers={}).status_code,200)
+        card=self.call('GET','/s/'+code+'/case',headers={});self.assertEqual(card.status_code,200,card.text)
+        self.assertEqual(card.json()['data']['responsibles'],[{'name':'Synthetic Responsible','role':'owner','phone':None,'email':'synthetic@example.invalid'}])
         pdf=self.call('GET','/veterinary/portal/reports/'+exam+'/pdf',headers=owner);self.assertEqual(pdf.status_code,200,pdf.text[:200]);self.assertTrue(pdf.content.startswith(b'%PDF-'))
         r=self.call('PUT','/patients/'+a['guid'],{'name':'Changed synthetic name'});self.assertEqual(r.status_code,200,r.text)
         r=self.call('GET','/veterinary/portal/reports/'+exam,headers=owner);self.assertEqual(r.json()['data']['document']['patient']['name'],'Synthetic animal')
