@@ -38,32 +38,10 @@ def prepare_manual_upload(file, patient_id, exam_id, confirmed, actor):
             raise ValueError()
     except Exception:
         raise VeterinaryError('El archivo no contiene un estudio DICOM válido')
-    mismatch=str(getattr(dataset,'PatientID','')).strip()!=context['patientid'] or str(getattr(dataset,'AccessionNumber','')).strip()!=order['localacc']
-    for attribute,key in [('PatientName','name'),('PatientSpeciesDescription','species_name'),('PatientBreedDescription','breed_name')]:
-        supplied=str(getattr(dataset,attribute,'')).strip()
-        if supplied and context.get(key) and supplied.casefold()!=str(context[key]).casefold():mismatch=True
     with vet.database() as connection,connection.cursor() as cursor:
         cursor.execute('''SELECT 1 FROM nextris.tbexamination WHERE studyinstanceuid=%s AND idpatient<>%s LIMIT 1''',(str(dataset.StudyInstanceUID),str(patient_id)))
         if cursor.fetchone():raise VeterinaryError('El estudio ya está vinculado a otro animal; no se puede reasignar mediante una carga',409)
-    if mismatch and not confirmed:
-        raise VeterinaryError('La identidad o el acceso DICOM no coinciden. Confirme explícitamente la conciliación con el animal y la orden seleccionados.',409)
-    if mismatch:
-        original=Dataset()
-        for key in ('PatientID','PatientName','AccessionNumber','IssuerOfPatientID','PatientSpeciesDescription','PatientBreedDescription'):
-            if key in dataset:original.add(dataset.data_element(key))
-        audit=Dataset();audit.SourceOfPreviousValues='Original uploaded file'
-        audit.AttributeModificationDateTime=datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S.%f%z')
-        audit.ModifyingSystem='CDIVET RIS';audit.ReasonForTheAttributeModification='COERCE'
-        audit.ModifiedAttributesSequence=Sequence([original])
-        previous=list(getattr(dataset,'OriginalAttributesSequence',[]));dataset.OriginalAttributesSequence=Sequence(previous+[audit])
-    metadata=veterinary_dataset(context,accession=order['localacc'],study_uid=str(dataset.StudyInstanceUID))
-    identity={'PatientID','PatientName','AccessionNumber','IssuerOfPatientID'}
-    for element in metadata:
-        if element.keyword in ('ScheduledProcedureStepSequence','StudyInstanceUID'):
-            continue
-        existing=dataset.get(element.tag)
-        if element.keyword in identity or not existing or existing.is_empty or (mismatch and element.keyword in ('PatientSpeciesDescription','PatientBreedDescription')):
-            dataset[element.tag]=element
+    mismatch=reconcile_dataset(dataset,context,order['localacc'],confirmed)
     originals=Path(__file__).resolve().parents[2]/'uploads_dicom'/'originals'
     originals.mkdir(parents=True,exist_ok=True)
     original_path=originals/(uuid.uuid4().hex+'.dcm')
@@ -75,6 +53,35 @@ def prepare_manual_upload(file, patient_id, exam_id, confirmed, actor):
         'sha256':hashlib.sha256(raw).hexdigest(),'identity_reconciled':mismatch,'received_at':datetime.now(timezone.utc).isoformat()},indent=2)+'\n')
     provenance.chmod(0o600)
     result=io.BytesIO();dataset.save_as(result,write_like_original=False);result.seek(0);file.stream=result
+
+
+def reconcile_dataset(dataset, context, accession, confirmed):
+    """Apply the same explicit veterinary identity reconciliation to an existing or reserved order."""
+    from datetime import datetime, timezone
+    mismatch=str(getattr(dataset,'PatientID','')).strip()!=context['patientid'] or str(getattr(dataset,'AccessionNumber','')).strip()!=accession
+    for attribute,key in [('PatientName','name'),('PatientSpeciesDescription','species_name'),('PatientBreedDescription','breed_name')]:
+        supplied=str(getattr(dataset,attribute,'')).strip()
+        if supplied and context.get(key) and supplied.casefold()!=str(context[key]).casefold():mismatch=True
+    if mismatch and not confirmed:
+        raise VeterinaryError('La identidad o el acceso DICOM no coinciden. Confirme explícitamente la conciliación con el animal y la orden seleccionados.',409)
+    if mismatch:
+        original=Dataset()
+        for key in ('PatientID','PatientName','AccessionNumber','IssuerOfPatientID','PatientSpeciesDescription','PatientBreedDescription'):
+            if key in dataset:original.add(dataset.data_element(key))
+        audit=Dataset();audit.SourceOfPreviousValues='Original uploaded file'
+        audit.AttributeModificationDateTime=datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S.%f%z')
+        audit.ModifyingSystem='CDIVET RIS';audit.ReasonForTheAttributeModification='COERCE'
+        audit.ModifiedAttributesSequence=Sequence([original])
+        previous=list(getattr(dataset,'OriginalAttributesSequence',[]));dataset.OriginalAttributesSequence=Sequence(previous+[audit])
+    metadata=veterinary_dataset(context,accession=accession,study_uid=str(dataset.StudyInstanceUID))
+    identity={'PatientID','PatientName','AccessionNumber','IssuerOfPatientID'}
+    for element in metadata:
+        if element.keyword in ('ScheduledProcedureStepSequence','StudyInstanceUID'):
+            continue
+        existing=dataset.get(element.tag)
+        if element.keyword in identity or not existing or existing.is_empty or (mismatch and element.keyword in ('PatientSpeciesDescription','PatientBreedDescription')):
+            dataset[element.tag]=element
+    return mismatch
 
 
 def veterinary_dataset(context, *, accession, study_uid, modality='', scheduled_step_id=''):

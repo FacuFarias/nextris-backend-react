@@ -85,19 +85,8 @@ def validate_dicom(filepath):
 
 
 def get_pacs_token():
-    """Obtiene token de acceso para PACS via Keycloak service account"""
-    resp = http_requests.post(
-        KEYCLOAK_TOKEN_URL,
-        data={
-            'grant_type': 'client_credentials',
-            'client_id': KEYCLOAK_CLIENT_ID,
-            'client_secret': KEYCLOAK_CLIENT_SECRET,
-        },
-        timeout=10,
-        verify=False
-    )
-    resp.raise_for_status()
-    return resp.json()['access_token']
+    from apps.services.pacs_client import get_pacs_token as shared_token
+    return shared_token()
 
 
 def send_to_pacs(filepath):

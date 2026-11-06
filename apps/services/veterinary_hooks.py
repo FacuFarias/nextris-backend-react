@@ -17,6 +17,8 @@ def register_veterinary(app):
             if not q.fetchone():raise RuntimeError('Veterinary migration has not been applied')
     from apps.api import veterinary as api
     app.register_blueprint(api.blueprint)
+    from apps.api.veterinary_uploads import blueprint as upload_blueprint
+    app.register_blueprint(upload_blueprint)
 
     @app.errorhandler(vet.VeterinaryError)
     def domain_error(error):

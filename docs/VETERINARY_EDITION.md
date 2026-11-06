@@ -233,3 +233,16 @@ Veterinary `GET /api/examinations/for-reporting` includes `responsible_name`, ag
 animal relationships (primary first). Global search matches responsible names; column filters
 `responsible_name` and `responsible_query` and sorting by `responsible_name` operate in SQL
 before pagination. Human mode does not query veterinary relationships or expose this field.
+
+## Cargar Estudio (carpeta o ZIP)
+
+`/api/veterinary/uploads` receives files by blocks into private storage (`NEXTRIS_UPLOAD_ROOT`, which must
+live outside release directories). `cdivet-upload-worker.service` runs a single persistent worker: it detects
+DICOM by content, accepts one `StudyInstanceUID` per upload and sends nothing to PACS until the operator picks
+an animal and either an existing order or report generation. Order, draft report and link are committed together
+after every instance and one frame are confirmed readable in PACS. A failed transfer stays `retryable` and only
+resends missing instances; the selection cannot change once a transfer began. Originals are kept (`*.original`).
+
+Migration: `python deployment/migrate_veterinary_uploads.py --apply` (requires the veterinary base migration).
+Tests: `NEXTRIS_VETERINARY_TESTS=1 python tests/test_veterinary_uploads.py`, on a `*_test` database with the API
+on `VETERINARY_TEST_URL`. They use an in-memory PACS, so behaviour against a real archive needs a separate check.

@@ -272,33 +272,15 @@ def orders(patient_id,payload=None):
     with vet.database() as c,c.cursor(cursor_factory=RealDictCursor) as q:
         vet.animal(q,patient_id)
         if request.method=='GET':
-            q.execute('''SELECT e.guid,e.localacc,e.createdon,e.studyinstanceuid,e.isreported,e.workflow_state,e.veterinary_context,
+            q.execute('''SELECT e.guid,e.localacc,e.createdon,e.studyinstanceuid,e.isreported,e.isimage,e.workflow_state,e.veterinary_context,
                 st.description AS study_type FROM nextris.tbexamination e LEFT JOIN nextris.isstudytype st ON st.guid=e.studytype_id WHERE e.idpatient=%s ORDER BY createdon DESC''',(patient_id,))
             return reply(q.fetchall())
         from apps.api.permissions import user_has_permission_code
         if not user_has_permission_code(get_jwt_identity(),'admissions.create_spontaneous'):
             raise vet.VeterinaryError('No tiene permiso para crear órdenes',403)
-        d=payload or request.get_json(silent=True) or {};study=d.get('study_type_id') or None;protocol=d.get('protocol_id') or None
-        context=vet.protocol_context(q,patient_id,protocol,study)
-        if not study:raise vet.VeterinaryError('Seleccione el tipo de estudio')
-        key=str(uuid.uuid4());accession='VT'+uuid.uuid4().hex[:12].upper()
-        from pydicom.uid import generate_uid
-        study_uid=generate_uid()
-        q.execute('''INSERT INTO nextris.tbexamination(guid,idpatient,studytype_id,localacc,admisionnumber,studyinstanceuid,
-            history,clinicalquestion,requestingphysician_name,"w-order",veterinary_protocol_id,veterinary_context)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)''',
-                (key,patient_id,study,accession,accession,study_uid,d.get('history',''),d.get('clinical_question',''),d.get('requesting_veterinarian',''),protocol,Json(context)))
-        q.execute('INSERT INTO nextris.tbreport(guid,idexamination,idpatient) VALUES(%s,%s,%s)',(str(uuid.uuid4()),key,patient_id))
-        if d.get('scheduled_start'):
-            if not d.get('scheduled_end'):raise vet.VeterinaryError('Indique el fin del turno')
-            from datetime import datetime
-            try:
-                start=datetime.fromisoformat(d['scheduled_start']);end=datetime.fromisoformat(d['scheduled_end'])
-                if end<=start:raise ValueError()
-            except (ValueError,TypeError):raise vet.VeterinaryError('Horario de turno inválido')
-            q.execute('''INSERT INTO nextris.tbagendaevents(guid,comienzo,fin,idpatient,idexam,title,medico_solicitante,veterinary_protocol_id,veterinary_context)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)''',(str(uuid.uuid4()),start,end,patient_id,key,context['name'],d.get('requesting_veterinarian',''),protocol,Json(context)))
-        return reply({'guid':key,'accession_number':accession,'study_instance_uid':study_uid,'veterinary_context':context},status=201)
+        from apps.services.veterinary_orders import create_order
+        return reply(create_order(q,patient_id,payload or request.get_json(silent=True) or {}),status=201)
+
 
 
 @blueprint.route('/portal/profile',methods=['GET','PUT'])
