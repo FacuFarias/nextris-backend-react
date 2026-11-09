@@ -20,3 +20,10 @@ def image_deletion_worker(once):
         work_once()
     else:
         run_worker()
+
+
+@app.cli.command('storage-snapshot')
+def storage_snapshot():
+    """Record disk free space and PACS cache/B2 totals (Gestión → Almacenamiento)."""
+    from apps.services.storage_monitor import take_snapshot
+    click.echo('Snapshot: ' + take_snapshot().isoformat())

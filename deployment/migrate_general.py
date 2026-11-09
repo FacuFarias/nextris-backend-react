@@ -35,6 +35,7 @@ MIGRATIONS = [
     '20261026_medical_stamp.sql',
     '20261027_permanent_image_deletions.sql',
     '20261105_local_study_workflow.sql',
+    '20261109_storage_snapshot.sql',
 ]
 
 
