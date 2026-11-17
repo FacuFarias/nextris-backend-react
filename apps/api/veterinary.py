@@ -50,6 +50,16 @@ def staff(permission):
     return decorate
 
 
+@blueprint.route('/image-studies/<int:study_pk>/animal-reference', methods=['GET'])
+@staff('images.view')
+def image_animal_reference(study_pk):
+    from apps.services.veterinary_image_reference import animal_reference
+    try:
+        return reply(animal_reference(study_pk))
+    except vet.VeterinaryError as error:
+        return jsonify(success=False, data=None, message=str(error)), error.status
+
+
 def portal(fn):
     @wraps(fn)
     def wrapped(*args,**kwargs):
@@ -415,7 +425,10 @@ def patient_dispatch():
     patient_id=(request.view_args or {}).get('guid')
     with vet.database() as c,c.cursor(cursor_factory=RealDictCursor) as q:
         if request.method in ('POST','PUT'):
-            result=vet.save_animal(q,request.get_json(silent=True),get_jwt_identity(),patient_id)
+            payload=request.get_json(silent=True)
+            if isinstance(payload,dict) and payload.get('responsible_id') and not user_has_permission_code(get_jwt_identity(),'veterinary.responsibles.manage'):
+                raise vet.VeterinaryError('No tiene permiso para vincular responsables',403)
+            result=vet.save_animal(q,payload,get_jwt_identity(),patient_id)
             return reply(result,'Animal actualizado' if patient_id else 'Animal creado',200 if patient_id else 201)
         if patient_id:return reply(vet.animal_dict(q,patient_id))
         from apps.services.veterinary_directory import animal_directory

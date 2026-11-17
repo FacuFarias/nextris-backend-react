@@ -20,6 +20,31 @@ explicit migration below. Public `GET /api/app-config` includes `patient_mode` a
 no secret is exposed. Both repositories use branch `version/veterinaria`, based on backend `main`
 and frontend `ui2`. Existing deployment fixes disabling Nexi and structured reports are retained.
 
+## Animal registration and image assignment
+
+Veterinary `POST /api/patients` accepts an optional `responsible_id` for a new
+animal. It requires `veterinary.responsibles.manage` in addition to
+`patients.manage`, validates an active responsible, and creates the animal and
+its primary owner relationship in one transaction. Portal authorization stays
+false. An invalid responsible rolls back the animal; omitted responsibility is
+allowed. Existing animals use the relationship endpoints to preserve ownership
+history. Animal IDs remain sequence-generated `VT…` identifiers.
+
+In veterinary mode `POST /api/dicom/studies/reassign` accepts `study_pk`,
+`animal_guid` (or the existing `patient_guid`) and `confirm_identity: true`.
+It resolves direct, active-link and manual-upload associations, updates or creates
+the empty draft order/report and captures the selected animal's veterinary
+context. Signed or saved reports, ambiguous multiple orders and orders with
+other available PACS studies block reassignment. Existing relationships and PACS
+identity, metadata and stored images are preserved. Superseded link records
+remain as history; old share links and pending handoffs for that study expire.
+Legacy `new_patient` and `modify_dicom: true` payloads are rejected in this mode.
+Human installations keep the original handler.
+
+`tests/test_veterinary_images_integration.py` exercises the live HTTP API against
+a restored disposable `cdivet_vetimages_*_test` database and checks that all PACS
+metadata/index/storage rows remain unchanged.
+
 ## Data model
 
 ```mermaid

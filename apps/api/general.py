@@ -141,7 +141,7 @@ def _create_viewer_handoff(user_id, study_iuid, user_type='staff'):
                 INSERT INTO nextris.tb_viewer_handoff
                     (code_hash, user_id, study_iuid, user_type, expires_at)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (code_hash, user_id, study_iuid, user_type or 'staff', datetime.now() + timedelta(seconds=60)))
+            """, (code_hash, user_id, study_iuid, user_type or 'staff', datetime.now(timezone.utc) + timedelta(seconds=60)))
             connection.commit()
     finally:
         connection.close()

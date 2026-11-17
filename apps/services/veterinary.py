@@ -128,6 +128,9 @@ def save_animal(cursor, payload, actor, patient_id=None):
     existing = animal(cursor, patient_id, lock=True) if patient_id else {}
     if payload.get('patient_kind', 'animal') != 'animal':
         raise VeterinaryError('Esta instalación admite altas veterinarias')
+    responsible_id = payload.get('responsible_id')
+    if responsible_id and patient_id:
+        raise VeterinaryError('Vincule los responsables desde la ficha del animal')
     name = str(payload.get('name', payload.get('nombre', existing.get('name', ''))) or '').strip()
     if not name or len(name) > 100:
         raise VeterinaryError('El nombre del animal es obligatorio (máximo 100 caracteres)')
@@ -178,6 +181,15 @@ def save_animal(cursor, payload, actor, patient_id=None):
         cursor.execute('''INSERT INTO nextris.datapatient(guid,patientid,name,surname,birthdate,sexcode,patient_kind,species_id,
             breed_id,birthdate_estimated,reproductive_status) VALUES(%s,%s,%s,'',%s,%s,'animal',%s,%s,%s,%s)''',
             (patient_id,patientid,name,birth,sex,species,breed,estimated,reproductive))
+        if responsible_id:
+            responsible_id = identifier(responsible_id)
+            cursor.execute('SELECT id FROM nextris.responsible_party WHERE id=%s AND is_active FOR SHARE', (responsible_id,))
+            if not cursor.fetchone():
+                raise VeterinaryError('Responsable no encontrado o inactivo',404)
+            cursor.execute('''INSERT INTO nextris.patient_responsibility
+                (id,patient_id,responsible_id,role,is_primary,portal_authorized,created_by)
+                VALUES(%s,%s,%s,'owner',true,false,%s)''',
+                (str(uuid.uuid4()),patient_id,responsible_id,str(actor)))
     if measured_weight is not None:
         add_clinical_entry(cursor,patient_id,{'category':'weight','weight_kg':str(measured_weight)},actor)
     return animal_dict(cursor,patient_id)

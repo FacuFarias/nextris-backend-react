@@ -1,0 +1,13 @@
+[Unit]
+Description=CDIVET PACS storage snapshot (fs1 free space, B2 catalog totals)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=nextris
+Group=nextris
+WorkingDirectory=/opt/cdivet/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cdivet/backend/venv/bin/flask --app apps.image_worker storage-snapshot
+UMask=0077
+TimeoutStartSec=120

@@ -1,0 +1,20 @@
+[Unit]
+Description=CDIVET permanent image deletion and availability worker
+After=network-online.target docker.service cdivet-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nextris
+Group=nextris
+WorkingDirectory=/opt/cdivet/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cdivet/backend/venv/bin/flask --app apps.image_worker image-deletion-worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

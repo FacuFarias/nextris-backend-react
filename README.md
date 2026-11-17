@@ -1,19 +1,12 @@
-# NextRIS Backend
+# CDIVET — NextRIS Backend
 
-API Flask/PostgreSQL para imágenes médicas, configurada para **una institución**.
-La rama `main` funciona junto con la rama `ui2` del frontend.
+Snapshot de la instalación de `https://cdivet.cloud`, rama `cdivet`, derivada de `version/veterinaria`.
+Usar con [frontend `cdivet`](https://github.com/FacuFarias/nextris-front-react/tree/cdivet).
 
-[Instalación, actualización, migraciones y contratos](docs/GENERAL_EDITION.md).
+Incluye los cambios activos de órdenes veterinarias automáticas, referencias DICOM, reasignación de animales, informes y almacenamiento/caché.
 
-```bash
-python3.12 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Completar la configuración y aplicar las migraciones según la guía.
-python run.py
-```
+- [Instalación general](docs/GENERAL_EDITION.md)
+- [Edición veterinaria](docs/VETERINARY_EDITION.md)
+- [Configuración y migración CDIVET](docs/CDIVET_MIGRATION.md)
 
-La API escucha en `5001`, con rutas bajo `/api` y autenticación JWT. No hay cuentas
-ni credenciales iniciales incluidas. El PACS y el visor se configuran por entorno.
-Los servicios de imágenes se activan separadamente; iniciar la API no los arranca.
+La configuración pública está en `deployment/cdivet/`. Las credenciales, la base de datos y los archivos privados se transfieren con el paquete privado de migración. No se generan cuentas ni se cargan datos reales al clonar GitHub.

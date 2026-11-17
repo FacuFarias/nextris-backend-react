@@ -1,0 +1,12 @@
+{
+  "timezone": "America/Argentina/Buenos_Aires",
+  "initial_storage": "fs1",
+  "retrieval_storage": "fs1-retrieve",
+  "remote_storage": "b2",
+  "same_day_initial_seconds": 432000,
+  "other_initial_seconds": 432000,
+  "retrieval_seconds": 86400,
+  "timer_seconds": 30,
+  "quiet_write_seconds": 120,
+  "enabled": true
+}

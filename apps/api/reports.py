@@ -30,6 +30,8 @@ from apps.services.study_workflow import (
     apply_cancel,
     ensure_workflow_schema,
 )
+from apps.services.simple_veterinary import enabled as simple_veterinary, report_sql
+
 VALID_REPORT_TYPES = {'simple', 'inteligente'}
 
 # Flags para ejecutar migraciones de esquema solo una vez por ciclo de vida del proceso
@@ -1572,7 +1574,7 @@ def get_examinations_for_reporting():
                         ELSE 'Por defecto'
                     END AS template_source
                 FROM nextris.tbinfpredef ip
-                WHERE (ip.studytype_id = e.studytype_id OR (ip.applies_to_all AND e.studytype_id IS NOT NULL))
+                WHERE (ip.studytype_id = e.studytype_id OR (ip.applies_to_all AND (e.studytype_id IS NOT NULL OR {str(simple_veterinary()).upper()})))
                   AND (
                       ip.guid = rep.applied_template_id
                       OR COALESCE(NULLIF(TRIM(LOWER(ip.report_type)), ''), 'simple') = 'simple'
@@ -1643,7 +1645,7 @@ def get_examinations_for_reporting():
 
         # Por defecto se muestran estudios con orden CP. Al activar
         # "Incluir sin orden CP" se incluyen ambos grupos.
-        if not show_without_order:
+        if not show_without_order and not simple_veterinary():
             base_query += ' AND COALESCE(e."w-order", 0) = 1'
 
         if show_only_with_notes:
@@ -1730,7 +1732,7 @@ def get_examinations_for_reporting():
 
         # Contar total
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS count_table"
-        cursor.execute(count_query, params)
+        cursor.execute(report_sql(count_query), params)
         total = cursor.fetchone()[0]
         
         # Query con paginación
@@ -1762,7 +1764,7 @@ def get_examinations_for_reporting():
         """
         
         params.extend([per_page, offset])
-        cursor.execute(query, params)
+        cursor.execute(report_sql(query), params)
         
         results = []
         for row in cursor.fetchall():
@@ -2209,7 +2211,7 @@ def get_examination_report(exam_id):
         cursor = connection.cursor()
 
         cursor.execute(
-            """
+            report_sql("""
             SELECT e.Guid, e.IdPatient, e.AdmisionNumber,
                    CONCAT(dp.Name, ' ', dp.Surname) as patient_name,
                    e.studytype_id, e.history, e.clinicalquestion,
@@ -2240,7 +2242,7 @@ def get_examination_report(exam_id):
            LEFT JOIN nextris.isstudytype st ON e.studytype_id = st.guid
            LEFT JOIN nextris.ismodality mod ON st.modality_id = mod.guid
             WHERE e.Guid = %s
-            """,
+            """),
             (exam_id,),
         )
 
@@ -2277,6 +2279,16 @@ def get_examination_report(exam_id):
         modality_description = exam[20]
         is_reported = bool(exam[21])
         exam_date = exam[22]
+        if simple_veterinary():
+            cursor.execute('SELECT study_date,study_time FROM nextris.available_pacs_study WHERE study_iuid=%s', (study_instance_uid,))
+            acquired = cursor.fetchone()
+            if acquired and acquired[0]:
+                from datetime import datetime
+                try:
+                    digits = re.sub(r'\D', '', str(acquired[1] or ''))[:6].ljust(6, '0')
+                    exam_date = datetime.strptime(str(acquired[0]) + digits, '%Y%m%d%H%M%S')
+                except ValueError:
+                    pass
         patient_identifier = exam[23]
         national_code = exam[24]
         modality_id = exam[25]
@@ -3423,7 +3435,7 @@ def update_predefined_report(predef_id):
         params.append(predef_id)
         query = f"UPDATE nextris.tbinfpredef SET {', '.join(updates)} WHERE guid = %s"
         
-        cursor.execute(query, params)
+        cursor.execute(report_sql(query), params)
         connection.commit()
         
         cursor.close()
@@ -3661,7 +3673,7 @@ def get_next_exam():
         if not show_no_image:
             query += ' AND COALESCE(e.isimage, 0) = 1'
 
-        if not show_without_order:
+        if not show_without_order and not simple_veterinary():
             query += ' AND COALESCE(e."w-order", 0) = 1'
         
         # Aplicar filtro de asignación
@@ -3695,7 +3707,7 @@ def get_next_exam():
         
         query += f" ORDER BY e.CreatedOn {sort_direction.upper()}, e.Guid {sort_direction.upper()} LIMIT 1"
         
-        cursor.execute(query, params)
+        cursor.execute(report_sql(query), params)
         next_exam = cursor.fetchone()
         
         cursor.close()
@@ -4011,7 +4023,7 @@ def sign_report(exam_id):
 
                 query += " ORDER BY e.CreatedOn DESC LIMIT 1"
 
-                cursor.execute(query, params)
+                cursor.execute(report_sql(query), params)
                 next_exam_row = cursor.fetchone()
 
                 if next_exam_row:

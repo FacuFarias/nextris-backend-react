@@ -2,6 +2,7 @@
 
 Read-only by default. Does not change retention or purge behavior of any
 standard rejection reason, or delete previously rejected clinical objects.
+Enables explicit whole-study deletion only on the AE selected by PACS_STOW_URL.
 """
 import argparse
 import copy
@@ -27,6 +28,15 @@ def configure(apply=False):
     response = pacs.request('GET', url)
     response.raise_for_status()
     config = response.json()
+    aet = pacs.base.split('/aets/', 1)[1].split('/', 1)[0]
+    target_ae = next((ae for ae in config.get('dicomNetworkAE', [])
+                      if ae.get('dicomAETitle') == aet), None)
+    if target_ae is None:
+        raise RuntimeError('Configured PACS AE was not found on the archive device')
+    archive_ae = target_ae['dcmNetworkAE']['dcmArchiveNetworkAE']
+    permission_key = 'dcmAllowDeleteStudyPermanently'
+    previous_permission = {'aet': aet, 'present': permission_key in archive_ae,
+                           'value': archive_ae.get(permission_key)}
     archive = config['dcmDevice']['dcmArchiveDevice']
     before = copy.deepcopy(archive)
     notes = archive.setdefault('dcmRejectionNote', [])
@@ -55,13 +65,19 @@ def configure(apply=False):
             hidden = view.setdefault('dcmHideRejectionNoteWithCode', [])
             if CODE not in hidden:
                 hidden.append(CODE)
-    changed = archive != before
-    print('Private deletion policy requires update:', changed)
+    # The PACS defaults to REJECTED, which rejects DELETE of an ordinary study.
+    # Scope the override to this integration's AE, preserving the device default
+    # and other AEs. This only permits an explicit API request; it schedules none.
+    archive_ae[permission_key] = 'ALWAYS'
+    changed = archive != before or previous_permission['value'] != 'ALWAYS'
+    print('Permanent deletion configuration requires update:', changed)
     if apply and changed:
         # Save only changed policy areas, without device credentials.
         with tempfile.NamedTemporaryFile(mode='w', prefix='nextris-permanent-delete-', suffix='.json',
                                          delete=False) as f:
-            json.dump({k: before.get(k) for k in ('dcmRejectionNote', 'dcmQueryRetrieveView')}, f, indent=2)
+            backup = {k: before.get(k) for k in ('dcmRejectionNote', 'dcmQueryRetrieveView')}
+            backup['studyDeletionPermission'] = previous_permission
+            json.dump(backup, f, indent=2)
             print('Policy backup:', f.name)
         response = pacs.request('PUT', url, json=config)
         response.raise_for_status()
@@ -70,7 +86,12 @@ def configure(apply=False):
     if apply:
         if not pacs.permanent_deletion_available():
             raise RuntimeError('PACS did not expose the private deletion policy after reload')
-        print('Private permanent deletion policy verified')
+        response = pacs.request('GET', url)
+        response.raise_for_status()
+        verified_ae = next(ae for ae in response.json()['dicomNetworkAE'] if ae['dicomAETitle'] == aet)
+        if verified_ae['dcmNetworkAE']['dcmArchiveNetworkAE'].get(permission_key) != 'ALWAYS':
+            raise RuntimeError('PACS did not preserve whole-study deletion permission on the selected AE')
+        print('Private permanent deletion policy and selected AE permission verified')
 
 
 if __name__ == '__main__':

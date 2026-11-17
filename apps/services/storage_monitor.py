@@ -49,6 +49,18 @@ def catalog_totals(cursor):
     return {storage: found.get(storage, dict(empty)) for storage in LOCAL_STORAGES + (REMOTE_STORAGE,)}
 
 
+def study_counts(cursor):
+    """Distinct studies per tier; a study in both local stores counts only once."""
+    cursor.execute("""SELECT count(DISTINCT se.study_fk) FILTER (WHERE l.storage_id=ANY(%s)),
+            count(DISTINCT se.study_fk) FILTER (WHERE l.storage_id=%s)
+        FROM public.location l
+        JOIN public.instance i ON i.pk=l.instance_fk
+        JOIN public.series se ON se.pk=i.series_fk
+        WHERE l.status=0 AND l.object_type=0 AND l.storage_id=ANY(%s)""",
+                   (list(LOCAL_STORAGES), REMOTE_STORAGE, list(LOCAL_STORAGES) + [REMOTE_STORAGE]))
+    return tuple(int(value) for value in cursor.fetchone())
+
+
 def pending_exports(cursor):
     """Local objects that have no valid B2 copy yet: they keep fs1 from being purged."""
     cursor.execute("""SELECT count(*), coalesce(sum(l.object_size),0),
@@ -165,6 +177,7 @@ def overview(days=30):
     disk = disk_status()
     with DatabaseService.get_db_cursor() as (cursor, connection):
         totals = catalog_totals(cursor)
+        local_studies, b2_studies = study_counts(cursor)
         pending = pending_exports(cursor)
         series = daily_series(cursor, days)
         sizes = study_size_stats(cursor)
@@ -174,8 +187,8 @@ def overview(days=30):
         generated_at=dt.datetime.now(dt.timezone.utc).isoformat(),
         disk=disk,
         local_cache=dict(fs1=totals['fs1'], retrieve=totals['fs1-retrieve'],
-                         bytes=totals['fs1']['bytes'] + totals['fs1-retrieve']['bytes']),
-        b2=dict(totals[REMOTE_STORAGE], source='catalog'),
+                         bytes=totals['fs1']['bytes'] + totals['fs1-retrieve']['bytes'], studies=local_studies),
+        b2=dict(totals[REMOTE_STORAGE], source='catalog', studies=b2_studies),
         pending_b2=pending,
         today=dict(date=today['date'], studies=today['studies'], bytes=today['bytes']),
         study_size=sizes,

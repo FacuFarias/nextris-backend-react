@@ -177,3 +177,10 @@ uploads_dicom/
 media/
 output_pdfs/
 deployment/reports/
+
+# Private migration archives and runtime symlinks
+/venv
+/uploads_dicom
+/private-migration/
+*.dump
+*.tar.gz

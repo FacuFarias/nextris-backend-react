@@ -130,6 +130,7 @@ PERMISSION_CATALOG += [dict(code='veterinary.'+name,module='veterinary',action=n
     ('catalogs.manage','Administrar especies y razas'),
 )] if os.getenv('NEXTRIS_PATIENT_MODE','human') == 'veterinary' else []
 PERMISSION_CATALOG += [{'code': 'storage.view', 'module': 'storage', 'action': 'view', 'description': 'Ver gestión de almacenamiento del PACS (fs1 y Backblaze B2)'}]
+PERMISSION_CATALOG += [{'code': 'storage.manage', 'module': 'storage', 'action': 'manage', 'description': 'Eliminar copias locales de caché con respaldo en Backblaze B2'}]
 PERMISSION_CATALOG = [p for p in PERMISSION_CATALOG if p["module"] not in DISABLED_MODULES]
 VALID_PERMISSION_CODES = frozenset(p["code"] for p in PERMISSION_CATALOG)
 
@@ -157,6 +158,7 @@ ROLE_BASED_PERMISSIONS = {'sysadmin': {'*'},
                    'patients.view',
                    'reports.assign',
                    'storage.view',
+                   'storage.manage',
                    'tabs.config.view',
                    'tabs.gestion.view',
                    'tabs.worklist.view',

@@ -1,0 +1,19 @@
+[Unit]
+Description=CDIVET automatic veterinary orders from available PACS images
+After=network-online.target docker.service cdivet-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nextris
+Group=nextris
+WorkingDirectory=/opt/cdivet/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cdivet/backend/venv/bin/python deployment/veterinary_ingest_worker.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

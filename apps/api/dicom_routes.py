@@ -1772,6 +1772,7 @@ def get_studies_by_location(location_id):
         filter_study_desc = request.args.get('filter_study_desc', '').strip()
         filter_accession_no = request.args.get('filter_accession_no', '').strip()
         filter_patient_id = request.args.get('filter_patient_id', '').strip()
+        unlinked_only = request.args.get('unlinked_only', 'false').strip().lower() in ('true', '1', 'yes', 'on')
         filter_modality = request.args.get('filter_modality', '').strip()
         date_range = request.args.get('date_range', 'all').strip()
         date_field = request.args.get('date_field', 'arrival').strip()
@@ -1802,8 +1803,19 @@ def get_studies_by_location(location_id):
         
         offset = (page - 1) * per_page
         
-        # Query base
-        base_select = """
+        # Use the same definition for the badge and the filter, before pagination.
+        linked_condition = """
+            EXISTS (
+                SELECT 1 FROM nextris.tbpacs_study_link lnk
+                WHERE lnk.link_status = 'linked'
+                  AND (lnk.pacs_study_pk = s.pk OR lnk.pacs_study_iuid = s.study_iuid)
+            ) OR EXISTS (
+                SELECT 1 FROM nextris.tbexamination exam
+                WHERE exam.studyinstanceuid = s.study_iuid
+                  AND COALESCE(exam.isimage, 0) = 1
+            )
+        """
+        base_select = f"""
             SELECT 
                 s.pk,
                 s.study_iuid,
@@ -1816,20 +1828,7 @@ def get_studies_by_location(location_id):
                 COALESCE(pn.alphabetic_name, 'Unknown') as patient_name,
                 _parse_dicom_patient_id(da.attrs) as patient_id,
                 s.accession_no,
-                                (
-                                        EXISTS (
-                                                SELECT 1
-                                                FROM nextris.tbpacs_study_link lnk
-                                                WHERE lnk.link_status = 'linked'
-                                                    AND (lnk.pacs_study_pk = s.pk OR lnk.pacs_study_iuid = s.study_iuid)
-                                        )
-                                        OR EXISTS (
-                                                SELECT 1
-                                                FROM nextris.tbexamination exam
-                                                WHERE exam.studyinstanceuid = s.study_iuid
-                                                    AND COALESCE(exam.isimage, 0) = 1
-                                        )
-                                ) as is_linked,
+                ({linked_condition}) as is_linked,
                 (
                     EXISTS (
                         SELECT 1 FROM nextris.tbexamination exam
@@ -1870,6 +1869,9 @@ def get_studies_by_location(location_id):
         if location_id and location_id != 'all':
             base_query += " AND s.location_id = %s"
             params.append(location_id)
+
+        if unlinked_only:
+            base_query += f" AND NOT ({linked_condition})"
 
         date_interval_map = {
             '1d': '1 day',
@@ -2066,6 +2068,16 @@ def reassign_dicom_study():
         }
     }
     """
+    from apps.services import veterinary as vet
+    if vet.mode() == 'veterinary':
+        from apps.services.veterinary_images import reassign_study
+        try:
+            result = reassign_study(request.get_json(silent=True), get_jwt_identity())
+            return jsonify(success=True,data=vet.plain(result),message='Imágenes reasignadas al animal correctamente'),200
+        except psycopg2.Error:
+            from flask import current_app
+            current_app.logger.exception('Error en la reasignación veterinaria de imágenes')
+            return jsonify(success=False,data=None,message='No se pudo completar la reasignación; consulte el estado del estudio'),503
     try:
         data = request.get_json()
         study_pk = data.get('study_pk')

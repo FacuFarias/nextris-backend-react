@@ -8,6 +8,8 @@ from apps.services import veterinary as vet
 
 def register_veterinary(app):
     vet.mode()  # Refuse an invalid mode at startup.
+    from apps.services.simple_veterinary import workflow_profile
+    workflow_profile()
     if vet.mode()=='veterinary':
         with vet.database() as c,c.cursor() as q:
             q.execute("SELECT to_regclass('nextris.veterinary_schema_migration')")
@@ -15,6 +17,10 @@ def register_veterinary(app):
                 raise RuntimeError('Apply deployment/migrate_veterinary.py before enabling veterinary mode')
             q.execute("SELECT 1 FROM nextris.veterinary_schema_migration WHERE version='20261106_veterinary'")
             if not q.fetchone():raise RuntimeError('Veterinary migration has not been applied')
+            if workflow_profile() == 'simple_veterinary':
+                q.execute("SELECT to_regclass('nextris.pacs_auto_order'),to_regclass('nextris.pacs_animal_identity')")
+                if not all(q.fetchone()):
+                    raise RuntimeError('Apply deployment/sql/20261110_simple_veterinary.sql before enabling the simple workflow')
     from apps.api import veterinary as api
     app.register_blueprint(api.blueprint)
     from apps.api.veterinary_uploads import blueprint as upload_blueprint
@@ -94,6 +100,7 @@ def register_veterinary(app):
             data=response.get_json()
             if isinstance(data.get('data'),dict):
                 data['data']['patient_mode']=vet.mode()
+                data['data']['workflow_profile']=workflow_profile()
                 import os
                 data['data']['mwl_enabled']=os.getenv('NEXTRIS_MWL_ENABLED','false').lower()=='true' if vet.mode()=='veterinary' else None
                 response.set_data(app.json.dumps(data))

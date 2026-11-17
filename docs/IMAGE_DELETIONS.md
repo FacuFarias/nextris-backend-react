@@ -75,7 +75,11 @@ Reintentar una operación permanente parcial/fallida conserva sus UIDs, motivo y
 4. Aplicar `deployment/migrations/20261027_permanent_image_deletions.sql` y ejecutar
    `venv/bin/python deployment/configure_permanent_image_deletions.py --apply`.
    El script configura únicamente el código privado, oculta sus notas técnicas y
-   guarda un respaldo sin credenciales. Sin `--apply` informa las diferencias.
+   habilita `dcmAllowDeleteStudyPermanently=ALWAYS` solo en el AE indicado por
+   `PACS_STOW_URL`. La política heredada `REJECTED` impide borrar estudios normales
+   completos y devuelve HTTP 403 aunque el código privado ya esté configurado.
+   El script guarda un respaldo sin credenciales, incluido el valor anterior del
+   permiso del AE. Sin `--apply` informa las diferencias.
    Conserva las políticas y plazos de los rechazos clínicos estándar.
 5. Reiniciar `nextris-image-deletions.service`, recargar `nextris-backend.service`
    y ejecutar `npm run build` en el frontend. Vite sirve también el código actualizado.
